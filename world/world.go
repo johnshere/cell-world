@@ -2,104 +2,145 @@ package world
 
 import (
 	"cellworld/config"
+	"cellworld/creature"
 	"fmt"
 	"image/color"
+	"sort"
+	"strconv"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/text"
 	"github.com/hajimehoshi/ebiten/v2/vector"
+	"golang.org/x/image/font/basicfont"
 )
 
-type Window struct {
-	width  int
-	height int
-	title  string
+type Game struct{}
+
+var Ocean []*creature.Creature = make([]*creature.Creature, 0)
+
+func Born() {
+	conf := config.GetConfig()
+	max := conf.JsonConfig.CellMaxCount
+	count := 0
+	for _, c := range Ocean {
+		if c != nil {
+			count += len(c.Cells)
+		}
+	}
+	if count >= max {
+		return
+	} else if count > max/2 {
+		creature.Generate(&Ocean)
+	} else {
+		creature.Generate(&Ocean)
+		creature.Generate(&Ocean)
+		creature.Generate(&Ocean)
+	}
 }
 
-type Game struct {
-	window *Window
-	config *config.Config
-}
+func Run() error {
 
-func Run() *Window {
-	config := config.LoadConfig()
-	if config == nil {
-		return nil
-	}
-	// 获取屏幕分辨率宽高
-	screenWidth, screenHeight := ebiten.ScreenSizeInFullscreen()
-	// 窗口宽度和高度默认值
-	width := 0
-	height := 0
-	// 窗口宽度和高度从配置文件中获取
-	if config.JsonConfig.Width > 0 {
-		width = config.JsonConfig.Width
-	} else {
-		width = screenWidth - 200
-	}
-	// 取整百
-	width = (width / 100) * 100
-	if config.JsonConfig.Height > 0 {
-		height = config.JsonConfig.Height
-	} else {
-		height = screenHeight - 200
-	}
-	// 取整百
-	height = (height / 100) * 100
-	fmt.Println("Screen width:", screenWidth, "Screen height:", screenHeight)
-	fmt.Println("Window width:", width, "Window height:", height)
+	game := &Game{}
+	conf := config.GetConfig()
 
-	var window = &Window{
-		width:  width,
-		height: height,
-		title:  config.JsonConfig.Title,
-	}
-
-	game := &Game{
-		window: window,
-		config: config,
-	}
-
-	ebiten.SetWindowSize(window.width, window.height)
-	ebiten.SetWindowTitle(window.title)
+	ebiten.SetWindowSize(conf.Width, conf.Height)
+	ebiten.SetWindowTitle(conf.JsonConfig.Title)
 	if err := ebiten.RunGame(game); err != nil {
 		fmt.Println("Error running game:", err)
 	}
 
-	return window
-}
-
-func (w *Window) DrawGrid(dst *ebiten.Image, config *config.Config) {
-	if config.JsonConfig.Grid {
-		var unit = config.JsonConfig.Unit
-
-		// 从配置中获取网格颜色
-		clr := color.RGBA{
-			R: config.GridColor[0],
-			G: config.GridColor[1],
-			B: config.GridColor[2],
-			A: config.GridColor[3],
-		}
-
-		// 绘制网格
-		for x := unit; x < w.width; x += unit {
-			vector.StrokeLine(dst, float32(x), 0, float32(x), float32(w.height), 1, clr, false)
-		}
-		for y := unit; y < w.height; y += unit {
-			vector.StrokeLine(dst, 0, float32(y), float32(w.width), float32(y), 1, clr, false)
-		}
-	} else {
-		fmt.Println("Grid is disabled in config")
-	}
-}
-
-func (g *Game) Update() error {
 	return nil
 }
 
+func DrawGrid(dst *ebiten.Image) {
+	conf := config.GetConfig()
+	if conf.JsonConfig.Grid {
+		clr := conf.GridColor
+		unit := int(conf.JsonConfig.Unit)
+
+		// 绘制网格
+		for x := unit; x < conf.Width; x += unit {
+			vector.StrokeLine(dst, float32(x), 0, float32(x), float32(conf.Height), 1, clr, false)
+		}
+		for y := unit; y < conf.Height; y += unit {
+			vector.StrokeLine(dst, 0, float32(y), float32(conf.Width), float32(y), 1, clr, false)
+		}
+	}
+}
+
+var frameCount = 0
+
+func (g *Game) Update() error {
+	frameCount++
+	conf := config.GetConfig()
+	if frameCount < conf.JsonConfig.RefreshRate {
+		return nil
+	}
+	frameCount = 0
+
+	Born()
+
+	// 过滤掉nil的生物
+	var validCreatures []*creature.Creature
+	for _, c := range Ocean {
+		if c != nil {
+			validCreatures = append(validCreatures, c)
+		}
+	}
+
+	// 只对有效的生物进行排序
+	sort.Slice(validCreatures, func(i, j int) bool {
+		return len(validCreatures[i].Cells) > len(validCreatures[j].Cells)
+	})
+
+	// 更新Ocean切片，只包含有效的生物
+	Ocean = validCreatures
+
+	// 更新所有生物
+	for _, c := range Ocean {
+		c.Update(&Ocean)
+	}
+
+	return nil
+}
+
+func showCount(screen *ebiten.Image) {
+	conf := config.GetConfig()
+	// 在右上角，绘制生物数量、细胞数量
+
+	// 计算生物数量和细胞数量
+	creatureCount := 0
+	cellCount := 0
+	for _, c := range Ocean {
+		if c != nil {
+			creatureCount++
+			cellCount += len(c.Cells)
+		}
+	}
+
+	// 设置文本样式
+	face := basicfont.Face7x13
+	textColor := color.RGBA{255, 255, 255, 255} // 白色文字
+
+	// 绘制生物数量
+	creatureText := "Creatures: " + strconv.Itoa(creatureCount)
+	text.Draw(screen, creatureText, face, conf.Width-150, 30, textColor)
+
+	// 绘制细胞数量
+	cellText := "Cells: " + strconv.Itoa(cellCount)
+	text.Draw(screen, cellText, face, conf.Width-150, 50, textColor)
+}
 func (g *Game) Draw(screen *ebiten.Image) {
-	g.window.DrawGrid(screen, g.config)
+	DrawGrid(screen)
+	for _, creature := range Ocean {
+		creature.Draw(screen)
+	}
+
+	// 绘制生物数量
+	showCount(screen)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
-	return g.window.width, g.window.height
+	conf := config.GetConfig()
+	return conf.Width, conf.Height
 }
