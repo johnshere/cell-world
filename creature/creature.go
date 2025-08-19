@@ -342,7 +342,6 @@ func (c *Creature) fix() {
 	}
 
 	if len(c.Cells) == 0 {
-		c.ToDeath()
 		return
 	}
 	conf := config.GetConfig()
