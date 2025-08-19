@@ -80,15 +80,6 @@ func (g *Game) Update() error {
 
 	Born()
 
-	// 统计Ocean中空的细胞数量
-	emptyCellCount := 0
-	for _, c := range Ocean {
-		if c == nil || len(c.Cells) == 0 {
-			emptyCellCount++
-		}
-	}
-	fmt.Println("空的细胞数量:", emptyCellCount)
-
 	// 过滤掉nil的生物
 	var validCreatures []*creature.Creature
 	for _, c := range Ocean {
@@ -103,12 +94,14 @@ func (g *Game) Update() error {
 	})
 
 	// 更新Ocean切片，只包含有效的生物
-	Ocean = validCreatures
+	Ocean = append(Ocean[:0], validCreatures...)
 
 	// 更新所有生物
 	for _, c := range Ocean {
 		c.Update()
 	}
+
+	fmt.Println("生物数量:", len(Ocean))
 
 	return nil
 }
