@@ -29,23 +29,22 @@ type Creature struct {
 	Width  int
 	Height int
 	Cells  []*Cell
+	Ocean  *[]*Creature
 }
 
-func (c *Creature) Update(ocean *[]*Creature) error {
+func (c *Creature) Update() error {
 	// 防御性编程：检查nil指针
 	if c == nil {
 		return nil
 	}
 
-	// conf := config.GetConfig()
-
-	c.Hunt(ocean)
+	c.Hunt()
 
 	c.Grow()
 
-	c.divide(ocean)
+	c.divide()
 
-	c.ToDeath(ocean)
+	c.ToDeath()
 
 	return nil
 }
@@ -73,9 +72,9 @@ func (c *Creature) Draw(screen *ebiten.Image) {
 	text.Draw(screen, strconv.Itoa(c.Id), face, c.X, c.Y-10, color.White)
 }
 
-func (c *Creature) ToDeath(ocean *[]*Creature) {
+func (c *Creature) ToDeath() {
 	// 防御性编程：检查nil指针
-	if c == nil || ocean == nil {
+	if c == nil || c.Ocean == nil {
 		return
 	}
 
@@ -83,85 +82,59 @@ func (c *Creature) ToDeath(ocean *[]*Creature) {
 		return
 	}
 
-	index := slices.Index(*ocean, c)
+	index := slices.Index(*c.Ocean, c)
 	if index != -1 {
-		*ocean = slices.Delete(*ocean, index, index+1)
+		*c.Ocean = slices.Delete(*c.Ocean, index, index+1)
 	}
 }
 
-func (c *Creature) divide(ocean *[]*Creature) {
+func (c *Creature) divide() {
 	// 防御性编程：检查nil指针
-	if c == nil || ocean == nil {
+	if c == nil || c.Ocean == nil {
 		return
 	}
 
 	conf := config.GetConfig()
 
 	// 当内部连续两行或两列全部为空时，分裂
-	emptyCols := []int{}
-	emptyRows := []int{}
-	for col := range c.Cols {
-		empty := true
-		for _, cell := range c.Cells {
-			if cell.Col == col {
-				empty = false
-				break
-			}
-		}
-		if empty {
-			emptyCols = append(emptyCols, col)
-		}
-	}
-	for row := range c.Rows {
-		empty := true
-		for _, cell := range c.Cells {
-			if cell.Row == row {
-				empty = false
-				break
-			}
-		}
-		if empty {
-			emptyRows = append(emptyRows, row)
-		}
+
+	existingCols := []int{}
+	for _, cell := range c.Cells {
+		existingCols = append(existingCols, cell.Col)
 	}
 
-	// 检查连续的空列
-	continuousCols := []int{}
-	if len(emptyCols) >= 2 {
-		for i := 0; i < len(emptyCols)-1; i++ {
-			if emptyCols[i+1] == emptyCols[i]+1 {
-				// 找到连续的空列，可以在此处分裂
-				continuousCols = append(continuousCols, emptyCols[i])
-				break
-			}
-		}
+	existingRows := []int{}
+	for _, cell := range c.Cells {
+		existingRows = append(existingRows, cell.Row)
 	}
 
-	// 检查连续的空行
-	continuousRows := []int{}
-	if len(emptyRows) >= 2 {
-		for i := 0; i < len(emptyRows)-1; i++ {
-			if emptyRows[i+1] == emptyRows[i]+1 {
-				// 找到连续的空行，可以在此处分裂
-				continuousRows = append(continuousRows, emptyRows[i])
-				break
-			}
+	emptyCol := -1
+	emptyRow := -1
+	for i := range c.Cols - 1 {
+		if !slices.Contains(existingCols, i) && !slices.Contains(existingCols, i+1) {
+			emptyCol = i
+			break
+		}
+	}
+	for i := range c.Rows - 1 {
+		if !slices.Contains(existingRows, i) && !slices.Contains(existingRows, i+1) {
+			emptyRow = i
+			break
 		}
 	}
 
 	// 优先按列分裂
-	if len(continuousCols) > 0 {
-		splitCol := continuousCols[0]
-
+	if emptyCol > 0 {
 		// 创建左半部分新creature
-		leftCreature := New()
+		leftCreature := New(c.Ocean)
+
 		leftCreature.X = c.X
 		leftCreature.Y = c.Y
 		leftCreature.Color = c.Color
 
 		// 创建右半部分新creature
-		rightCreature := New()
-		rightCreature.X = c.X + (splitCol+1)*conf.JsonConfig.Unit
+		rightCreature := New(c.Ocean)
+		rightCreature.X = c.X + (emptyCol+1)*conf.JsonConfig.Unit
 		rightCreature.Y = c.Y
 		rightCreature.Color = c.Color
 
@@ -170,42 +143,43 @@ func (c *Creature) divide(ocean *[]*Creature) {
 		rightCells := make([]*Cell, 0)
 
 		for _, cell := range c.Cells {
-			if cell.Col <= splitCol {
+			if cell.Col <= emptyCol {
 				leftCells = append(leftCells, cell)
 			} else {
 				rightCells = append(rightCells, cell)
 			}
 		}
 
-		leftCreature.Cells = leftCells
-		rightCreature.Cells = rightCells
-
-		// 修正新creature的属性
-		leftCreature.fix()
-		rightCreature.fix()
+		if len(leftCells) > 0 {
+			leftCreature.Cells = leftCells
+			leftCreature.fix()
+			*c.Ocean = append(*c.Ocean, leftCreature)
+		}
+		if len(rightCells) > 0 {
+			rightCreature.Cells = rightCells
+			rightCreature.fix()
+			*c.Ocean = append(*c.Ocean, rightCreature)
+		}
 
 		// 从ocean中移除原creature，添加两个新creature
-		index := slices.Index(*ocean, c)
+		index := slices.Index(*c.Ocean, c)
 		if index != -1 {
-			*ocean = slices.Delete(*ocean, index, index+1)
+			*c.Ocean = slices.Delete(*c.Ocean, index, index+1)
 		}
-		*ocean = append(*ocean, leftCreature, rightCreature)
-
 	}
-	if len(continuousRows) > 0 {
-		// 按行分裂
-		splitRow := continuousRows[0]
-
+	if emptyRow > 0 {
 		// 创建上半部分新creature
-		topCreature := New()
+		topCreature := New(c.Ocean)
+
 		topCreature.X = c.X
 		topCreature.Y = c.Y
 		topCreature.Color = c.Color
 
 		// 创建下半部分新creature
-		bottomCreature := New()
+		bottomCreature := New(c.Ocean)
+
 		bottomCreature.X = c.X
-		bottomCreature.Y = c.Y + (splitRow+1)*conf.JsonConfig.Unit
+		bottomCreature.Y = c.Y + (emptyRow+1)*conf.JsonConfig.Unit
 		bottomCreature.Color = c.Color
 
 		// 分配细胞到两个新creature
@@ -213,26 +187,28 @@ func (c *Creature) divide(ocean *[]*Creature) {
 		bottomCells := make([]*Cell, 0)
 
 		for _, cell := range c.Cells {
-			if cell.Row <= splitRow {
+			if cell.Row <= emptyRow {
 				topCells = append(topCells, cell)
 			} else {
 				bottomCells = append(bottomCells, cell)
 			}
 		}
-
-		topCreature.Cells = topCells
-		bottomCreature.Cells = bottomCells
-
-		// 修正新creature的属性
-		topCreature.fix()
-		bottomCreature.fix()
+		if len(topCells) > 0 {
+			topCreature.Cells = topCells
+			topCreature.fix()
+			*c.Ocean = append(*c.Ocean, topCreature)
+		}
+		if len(bottomCells) > 0 {
+			bottomCreature.Cells = bottomCells
+			bottomCreature.fix()
+			*c.Ocean = append(*c.Ocean, bottomCreature)
+		}
 
 		// 从ocean中移除原creature，添加两个新creature
-		index := slices.Index(*ocean, c)
+		index := slices.Index(*c.Ocean, c)
 		if index != -1 {
-			*ocean = slices.Delete(*ocean, index, index+1)
+			*c.Ocean = slices.Delete(*c.Ocean, index, index+1)
 		}
-		*ocean = append(*ocean, topCreature, bottomCreature)
 	}
 }
 
@@ -280,9 +256,9 @@ func (c *Creature) Grow() {
 	c.fix()
 }
 
-func (c *Creature) Eat(target *Creature, ocean *[]*Creature) {
+func (c *Creature) Eat(target *Creature) {
 	// 防御性编程：检查nil指针
-	if c == nil || target == nil || ocean == nil {
+	if c == nil || target == nil || c.Ocean == nil {
 		return
 	}
 
@@ -303,19 +279,19 @@ func (c *Creature) Eat(target *Creature, ocean *[]*Creature) {
 	}
 
 	// 从ocean中移除被吃的target
-	i := slices.Index(*ocean, target)
+	i := slices.Index(*c.Ocean, target)
 	if i != -1 {
-		*ocean = slices.Delete(*ocean, i, i+1)
+		*c.Ocean = slices.Delete(*c.Ocean, i, i+1)
 	}
 }
 
-func (c *Creature) Hunt(ocean *[]*Creature) {
+func (c *Creature) Hunt() {
 	// 防御性编程：检查nil指针
 	if c == nil {
 		return
 	}
 
-	overlays := c.isOverlay(ocean)
+	overlays := c.isOverlay()
 	if len(overlays) == 0 {
 		return
 	}
@@ -327,12 +303,12 @@ func (c *Creature) Hunt(ocean *[]*Creature) {
 		}
 	}
 	for _, overlay := range overlays {
-		c.Eat(overlay, ocean)
+		c.Eat(overlay)
 	}
 	c.fix()
 }
 
-func (c *Creature) isOverlay(ocean *[]*Creature) []*Creature {
+func (c *Creature) isOverlay() []*Creature {
 	// 防御性编程：检查nil指针
 	if c == nil {
 		return make([]*Creature, 0)
@@ -345,7 +321,7 @@ func (c *Creature) isOverlay(ocean *[]*Creature) []*Creature {
 
 	overlays := make([]*Creature, 0)
 
-	for _, target := range *ocean {
+	for _, target := range *c.Ocean {
 		if c == target {
 			continue
 		}
@@ -366,6 +342,7 @@ func (c *Creature) fix() {
 	}
 
 	if len(c.Cells) == 0 {
+		c.ToDeath()
 		return
 	}
 	conf := config.GetConfig()
@@ -393,10 +370,11 @@ func (c *Creature) fix() {
 	}
 }
 
-func New() *Creature {
+func New(ocean *[]*Creature) *Creature {
 	return &Creature{
 		Id:    rand.Intn(1000000),
 		Cells: make([]*Cell, 0),
+		Ocean: ocean,
 	}
 }
 
@@ -414,7 +392,7 @@ func Generate(ocean *[]*Creature) *Creature {
 		y := rand.Intn(conf.Height - rows*conf.JsonConfig.Unit)
 		color := conf.CellColors[rand.Intn(len(conf.CellColors))]
 
-		creature = New()
+		creature = New(ocean)
 		creature.X = x
 		creature.Y = y
 		creature.Cols = cols
@@ -423,21 +401,25 @@ func Generate(ocean *[]*Creature) *Creature {
 		creature.Height = height
 		creature.Color = color
 
-		if len(creature.isOverlay(ocean)) == 0 {
-			break
-		}
-	}
-	creature.Cells = make([]*Cell, 0)
-	for col := range creature.Cols {
-		for row := range creature.Rows {
-			isBool := rand.Intn(2) == 1
-			if isBool {
-				creature.Cells = append(creature.Cells, &Cell{
-					Col:   col,
-					Row:   row,
-					Color: creature.Color,
-				})
+		creature.Cells = make([]*Cell, 0)
+		for col := range creature.Cols {
+			for row := range creature.Rows {
+				isBool := rand.Intn(2) == 1
+				if isBool {
+					creature.Cells = append(creature.Cells, &Cell{
+						Col:   col,
+						Row:   row,
+						Color: creature.Color,
+					})
+				}
 			}
+		}
+		if len(creature.Cells) == 0 {
+			continue
+		}
+
+		if len(creature.isOverlay()) == 0 {
+			break
 		}
 	}
 	creature.fix()

@@ -1,7 +1,7 @@
 {
   "title": "Cell World",
   "unit": 8,
-  "refreshRate": 40,
+  "refreshRate": 60,
   "grid": false,
   "gridColor": "64,64,64,64",
   "strokeWidth": 1,

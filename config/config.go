@@ -126,7 +126,7 @@ func loadConfig() *Config {
 	if config.JsonConfig.Width > 0 {
 		width = config.JsonConfig.Width
 	} else {
-		width = screenWidth - 200
+		width = screenWidth - 300
 	}
 	// 取整百
 	width = (width / 100) * 100
