@@ -3,6 +3,7 @@ package creature
 import (
 	"cellworld/config"
 	"image/color"
+	"math"
 	"math/rand"
 	"slices"
 	"strconv"
@@ -20,33 +21,34 @@ type Cell struct {
 }
 
 type Creature struct {
-	Id     int
-	X      int
-	Y      int
-	Color  color.RGBA
-	Rows   int
-	Cols   int
-	Width  int
-	Height int
-	Cells  []*Cell
-	Ocean  *[]*Creature
+	Id         int
+	X          int
+	Y          int
+	Color      color.RGBA
+	Rows       int
+	Cols       int
+	Width      int
+	Height     int
+	Age        int
+	AgingAge   int
+	AgingCells int
+	Cells      []*Cell
+	Ocean      *[]*Creature
 }
 
-func (c *Creature) Update() error {
+func (c *Creature) Update() {
 	// 防御性编程：检查nil指针
 	if c == nil {
-		return nil
+		return
 	}
 
 	c.Hunt()
 
 	c.Grow()
 
-	c.divide()
+	c.Divide()
 
-	c.ToDeath()
-
-	return nil
+	c.Die()
 }
 
 func (c *Creature) Draw(screen *ebiten.Image) {
@@ -67,28 +69,33 @@ func (c *Creature) Draw(screen *ebiten.Image) {
 	// 绘制creature 的边界
 	clr := conf.GridColor
 	vector.StrokeRect(screen, float32(c.X), float32(c.Y), float32(c.Width), float32(c.Height), 1, clr, false)
-	// 绘制creature 的id
+	// 绘制creature cell 数量
 	face := basicfont.Face7x13
-	text.Draw(screen, strconv.Itoa(c.Id), face, c.X, c.Y-10, color.White)
+	text.Draw(screen, "len:"+strconv.Itoa(len(c.Cells)), face, c.X, c.Y-8, color.White)
+	// 绘制creature 年龄
+	text.Draw(screen, "age:"+strconv.Itoa(c.Age), face, c.X, c.Y-20, color.White)
 }
 
-func (c *Creature) ToDeath() {
+func (c *Creature) Die() {
 	// 防御性编程：检查nil指针
 	if c == nil || c.Ocean == nil {
 		return
 	}
 
-	if len(c.Cells) > 0 {
-		return
-	}
+	conf := config.GetConfig()
 
-	index := slices.Index(*c.Ocean, c)
-	if index != -1 {
-		*c.Ocean = slices.Delete(*c.Ocean, index, index+1)
+	// 判断是否越界
+	isOut := c.X < 0 || c.Y < 0 || c.X+c.Width > conf.Width || c.Y+c.Height > conf.Height
+
+	if len(c.Cells) == 0 || isOut {
+		index := slices.Index(*c.Ocean, c)
+		if index != -1 {
+			*c.Ocean = slices.Delete(*c.Ocean, index, index+1)
+		}
 	}
 }
 
-func (c *Creature) divide() {
+func (c *Creature) Divide() {
 	// 防御性编程：检查nil指针
 	if c == nil || c.Ocean == nil {
 		return
@@ -218,6 +225,15 @@ func (c *Creature) Grow() {
 		return
 	}
 
+	conf := config.GetConfig()
+
+	neighbors2Born := 3
+	neighbors2Stay := 2
+	// if c.AgingAge < c.Age {
+	// 	neighbors2Born = 4
+	// 	neighbors2Stay = 3
+	// }
+
 	newCells := make([]*Cell, 0)
 
 	// 元胞自动机 规则处理
@@ -236,7 +252,7 @@ func (c *Creature) Grow() {
 				}
 			}
 			// 规则1：如果一个细胞周围有3个细胞，它就会变成一个细胞
-			if neighbors == 3 {
+			if neighbors == neighbors2Born {
 				newCells = append(newCells, &Cell{
 					Col:   col,
 					Row:   row,
@@ -244,14 +260,36 @@ func (c *Creature) Grow() {
 				})
 			}
 			// 规则2：如果一个细胞周围有2个细胞，它就会保持不变
-			if neighbors == 2 && self != nil {
+			if neighbors == neighbors2Stay && self != nil {
 				newCells = append(newCells, self)
 			}
 			// 规则3：其他，即周围细胞数量小于2个或大于3个，它就会死亡
 		}
 	}
 
+	size := len(newCells)
+	if size > conf.JsonConfig.CellMaxCount {
+		c.Cells = []*Cell{}
+		c.Die()
+		return
+	}
+	if size > 0 && (c.Age > c.AgingAge || c.AgingCells < len(newCells)) {
+		// 衰老时，随机移除十分之一的细胞，至少移除一个
+		removeSize := int(math.Ceil(float64(size) / 10))
+		if removeSize < 1 {
+			removeSize = 1
+		}
+		for i := 0; i < removeSize; i++ {
+			index := rand.Intn(size)
+			newCells = slices.Delete(newCells, index, index+1)
+			size--
+		}
+	}
+
 	c.Cells = newCells
+
+	// 年龄增加
+	c.Age++
 
 	c.fix()
 }
@@ -370,10 +408,14 @@ func (c *Creature) fix() {
 }
 
 func New(ocean *[]*Creature) *Creature {
+	conf := config.GetConfig()
 	return &Creature{
-		Id:    rand.Intn(1000000),
-		Cells: make([]*Cell, 0),
-		Ocean: ocean,
+		Id:         rand.Intn(1000000),
+		Cells:      make([]*Cell, 0),
+		Age:        0,
+		AgingAge:   conf.JsonConfig.CreatureAgingAge,
+		AgingCells: conf.JsonConfig.CreatureAgingCells,
+		Ocean:      ocean,
 	}
 }
 

@@ -14,17 +14,19 @@ import (
 const ConfigFilename = "config.json"
 
 type JsonConfig struct {
-	Width            int      `json:"width"`
-	Height           int      `json:"height"`
-	Title            string   `json:"title"`
-	Unit             int      `json:"unit"`
-	RefreshRate      int      `json:"refreshRate"`
-	Grid             bool     `json:"grid"`
-	GridColor        string   `json:"gridColor"`
-	StrokeWidth      int      `json:"strokeWidth"`
-	CreatureMaxLines int      `json:"creatureMaxLines"`
-	CellMaxCount     int      `json:"cellMaxCount"`
-	CellColors       []string `json:"cellColors"`
+	Width              int      `json:"width"`
+	Height             int      `json:"height"`
+	Title              string   `json:"title"`
+	Unit               int      `json:"unit"`
+	RefreshRate        int      `json:"refreshRate"`
+	Grid               bool     `json:"grid"`
+	GridColor          string   `json:"gridColor"`
+	StrokeWidth        int      `json:"strokeWidth"`
+	CreatureMaxLines   int      `json:"creatureMaxLines"`
+	CreatureAgingAge   int      `json:"creatureAgingAge"`
+	CreatureAgingCells int      `json:"creatureAgingCells"`
+	CellMaxCount       int      `json:"cellMaxCount"`
+	CellColors         []string `json:"cellColors"`
 }
 
 type Config struct {

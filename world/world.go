@@ -101,8 +101,6 @@ func (g *Game) Update() error {
 		c.Update()
 	}
 
-	fmt.Println("生物数量:", len(Ocean))
-
 	return nil
 }
 

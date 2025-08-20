@@ -1,11 +1,13 @@
 {
   "title": "Cell World",
-  "unit": 8,
+  "unit": 6,
   "refreshRate": 60,
   "grid": false,
   "gridColor": "64,64,64,64",
   "strokeWidth": 1,
   "creatureMaxLines": 6,
+  "creatureAgingAge": 25,
+  "creatureAgingCells": 100,
   "cellMaxCount": 300,
   "cellColors": [
     "255,0,0,220",
