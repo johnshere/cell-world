@@ -1,6 +1,5 @@
 // 加载配置
-import * as fs from 'fs';
-import * as path from 'path';
+import configData from '../config.json' with { type: 'json' };
 
 interface Config {
     window: { width: number; height: number; title: string };
@@ -10,21 +9,13 @@ interface Config {
     interaction: { dragSensitivity: number; scrollSensitivity: number };
 }
 
-let config: Config;
-try {
-    const configPath = path.join(__dirname, '../config.json');
-    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-} catch (error) {
-    console.error('无法加载配置文件:', error);
-    // 使用默认配置
-    config = {
+const config: Config = configData || {
         window: { width: 1200, height: 800, title: 'Cell World' },
         panel: { width: 400, defaultExpanded: true, animationDuration: 300 },
         grid: { cellSize: 10, lineColor: '#ddd', backgroundColor: '#fff', axisColor: '#333', axisWidth: 2 },
         viewport: { initialX: 0, initialY: 0, zoomMin: 0.1, zoomMax: 5.0, zoomStep: 0.1 },
         interaction: { dragSensitivity: 1.0, scrollSensitivity: 0.1 }
     };
-}
 
 interface Viewport {
     x: number;
@@ -254,23 +245,18 @@ class CellWorld {
         this.ctx.lineWidth = config.grid.axisWidth;
         this.ctx.beginPath();
         
-        // X轴 (y = 0)
-        const axisY = this.viewport.y;
-        if (axisY >= 0 && axisY <= this.canvas.height) {
-            this.ctx.moveTo(0, axisY);
-            this.ctx.lineTo(this.canvas.width, axisY);
-        }
+        // 在视口边缘绘制坐标轴
+        // 底部X轴
+        this.ctx.moveTo(0, this.canvas.height);
+        this.ctx.lineTo(this.canvas.width, this.canvas.height);
         
-        // Y轴 (x = 0)
-        const axisX = this.viewport.x;
-        if (axisX >= 0 && axisX <= this.canvas.width) {
-            this.ctx.moveTo(axisX, 0);
-            this.ctx.lineTo(axisX, this.canvas.height);
-        }
+        // 左侧Y轴
+        this.ctx.moveTo(0, 0);
+        this.ctx.lineTo(0, this.canvas.height);
         
         this.ctx.stroke();
         
-        // 绘制坐标标签
+        // 绘制坐标标签和刻度
         this.drawAxisLabels();
     }
     
@@ -282,27 +268,41 @@ class CellWorld {
         
         this.ctx.fillStyle = config.grid.axisColor;
         this.ctx.font = '12px Arial';
+        this.ctx.strokeStyle = config.grid.axisColor;
+        this.ctx.lineWidth = 1;
+        
+        // X轴标签和刻度（底部）
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'top';
         
-        // X轴标签
-        const axisY = Math.max(0, Math.min(this.canvas.height - 20, this.viewport.y + 5));
         for (let x = this.viewport.x % scaledGridSize; x < this.canvas.width; x += scaledGridSize) {
             const worldX = Math.round((x - this.viewport.x) / this.viewport.zoom / this.gridSize) * this.gridSize;
-            if (worldX !== 0) {
-                this.ctx.fillText(worldX.toString(), x, axisY);
-            }
+            
+            // 绘制刻度线
+            this.ctx.beginPath();
+            this.ctx.moveTo(x, this.canvas.height - 5);
+            this.ctx.lineTo(x, this.canvas.height);
+            this.ctx.stroke();
+            
+            // 绘制标签
+            this.ctx.fillText(worldX.toString(), x, this.canvas.height - 18);
         }
         
-        // Y轴标签
+        // Y轴标签和刻度（左侧）
         this.ctx.textAlign = 'left';
         this.ctx.textBaseline = 'middle';
-        const axisX = Math.max(5, Math.min(this.canvas.width - 30, this.viewport.x + 5));
+        
         for (let y = this.viewport.y % scaledGridSize; y < this.canvas.height; y += scaledGridSize) {
             const worldY = -Math.round((y - this.viewport.y) / this.viewport.zoom / this.gridSize) * this.gridSize;
-            if (worldY !== 0) {
-                this.ctx.fillText(worldY.toString(), axisX, y);
-            }
+            
+            // 绘制刻度线
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, y);
+            this.ctx.lineTo(5, y);
+            this.ctx.stroke();
+            
+            // 绘制标签
+            this.ctx.fillText(worldY.toString(), 8, y);
         }
     }
     
