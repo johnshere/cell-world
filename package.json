@@ -1,0 +1,32 @@
+{
+  "name": "cell-world",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && npx electron .",
+    "dev": "npm run build && cross-env NODE_ENV=development npx electron .",
+    "watch": "tsc --watch",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnshere/cell-world.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/johnshere/cell-world/issues"
+  },
+  "homepage": "https://github.com/johnshere/cell-world#readme",
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "cross-env": "^10.0.0",
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.12",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  }
+}

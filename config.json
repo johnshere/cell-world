@@ -1,0 +1,30 @@
+{
+  "window": {
+    "width": 1200,
+    "height": 800,
+    "title": "Cell World"
+  },
+  "panel": {
+    "width": 400,
+    "defaultExpanded": true,
+    "animationDuration": 300
+  },
+  "grid": {
+    "cellSize": 10,
+    "lineColor": "#ddd",
+    "backgroundColor": "#fff",
+    "axisColor": "#333",
+    "axisWidth": 2
+  },
+  "viewport": {
+    "initialX": 0,
+    "initialY": 0,
+    "zoomMin": 0.1,
+    "zoomMax": 5.0,
+    "zoomStep": 0.1
+  },
+  "interaction": {
+    "dragSensitivity": 1.0,
+    "scrollSensitivity": 0.1
+  }
+}
