@@ -25,7 +25,8 @@ namespace GridGameUI
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"应用程序启动失败: {ex.Message}", "错误", 
+                string errorMessage = $"应用程序启动失败:\n\n错误信息: {ex.Message}\n\n堆栈跟踪:\n{ex.StackTrace}";
+                MessageBox.Show(errorMessage, "错误", 
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }

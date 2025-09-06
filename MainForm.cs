@@ -13,11 +13,19 @@ namespace GridGameUI
         private Point lastMousePos;
         private Button toggleButton;
         private Panel rightPanel;
-        private Timer renderTimer;
+        private System.Windows.Forms.Timer renderTimer;
 
         public MainForm()
         {
             config = ConfigManager.Config;
+            
+            // 确保配置对象及其子属性不为null
+            if (config?.Panel == null || config?.Window == null || config?.Grid == null || config?.Coordinate == null)
+            {
+                MessageBox.Show("配置文件加载失败，使用默认配置", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                config = new GameConfig();
+            }
+            
             panelExpanded = config.Panel.Expanded;
             panelWidth = panelExpanded ? config.Panel.Width : 30;
             gridOffsetX = config.Coordinate.GridOffsetX;
@@ -99,7 +107,7 @@ namespace GridGameUI
 
         private void SetupTimer()
         {
-            renderTimer = new Timer
+            renderTimer = new System.Windows.Forms.Timer
             {
                 Interval = 1000 / config.Window.Fps
             };
@@ -315,6 +323,10 @@ namespace GridGameUI
 
         private void UpdatePanelLayout()
         {
+            // 确保控件已经创建
+            if (rightPanel == null || toggleButton == null)
+                return;
+                
             rightPanel.Width = panelWidth;
             rightPanel.Left = this.ClientSize.Width - panelWidth;
             rightPanel.Height = this.ClientSize.Height;

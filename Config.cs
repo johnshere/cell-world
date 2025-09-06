@@ -1,7 +1,26 @@
 using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
+using System.Drawing;
 
 namespace GridGameUI
 {
+    public class ColorConverter : JsonConverter<Color>
+    {
+        public override void WriteJson(JsonWriter writer, Color value, JsonSerializer serializer)
+        {
+            writer.WriteValue(value.Name);
+        }
+
+        public override Color ReadJson(JsonReader reader, Type objectType, Color existingValue, bool hasExistingValue, JsonSerializer serializer)
+        {
+            string? colorName = reader.Value?.ToString();
+            if (string.IsNullOrEmpty(colorName))
+                return Color.Black;
+            
+            return Color.FromName(colorName);
+        }
+    }
+
     public class GameConfig
     {
         public WindowConfig Window { get; set; } = new WindowConfig();
@@ -23,7 +42,9 @@ namespace GridGameUI
     {
         public int Width { get; set; } = 400;
         public bool Expanded { get; set; } = true;
+        [JsonConverter(typeof(ColorConverter))]
         public Color BackgroundColor { get; set; } = Color.LightGray;
+        [JsonConverter(typeof(ColorConverter))]
         public Color BorderColor { get; set; } = Color.Black;
         public int BorderWidth { get; set; } = 2;
     }
@@ -31,15 +52,19 @@ namespace GridGameUI
     public class GridConfig
     {
         public int CellSize { get; set; } = 10;
+        [JsonConverter(typeof(ColorConverter))]
         public Color LineColor { get; set; } = Color.Gray;
         public int LineWidth { get; set; } = 1;
+        [JsonConverter(typeof(ColorConverter))]
         public Color BackgroundColor { get; set; } = Color.White;
     }
 
     public class CoordinateConfig
     {
+        [JsonConverter(typeof(ColorConverter))]
         public Color AxisColor { get; set; } = Color.Red;
         public int AxisWidth { get; set; } = 2;
+        [JsonConverter(typeof(ColorConverter))]
         public Color LabelColor { get; set; } = Color.Black;
         public int LabelSize { get; set; } = 12;
         public int LabelOffset { get; set; } = 5;
@@ -90,8 +115,11 @@ namespace GridGameUI
         {
             try
             {
-                string json = JsonConvert.SerializeObject(_config, Formatting.Indented);
-                File.WriteAllText(ConfigPath, json);
+                if (_config != null)
+                {
+                    string json = JsonConvert.SerializeObject(_config, Formatting.Indented);
+                    File.WriteAllText(ConfigPath, json);
+                }
             }
             catch (Exception ex)
             {
