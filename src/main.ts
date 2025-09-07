@@ -1,5 +1,5 @@
 import './style.css';
 
-import World from './world/index.ts';
+import createWorld from './world/index.ts';
 
-new World();
+createWorld();
