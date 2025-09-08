@@ -14,9 +14,8 @@ const init = () => {
     const deltaTime = currentTime - lastTime;
     lastTime = currentTime;
 
-    render();
     ocean.update(deltaTime);
-    ocean.render(deltaTime);
+    render();
   }, 1000 / FrameRate);
 
   return intervalId;

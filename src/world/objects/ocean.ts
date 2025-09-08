@@ -17,9 +17,8 @@ export default {
     // 更新所有实体
     this.entities.forEach(entity => entity.update(deltaTime));
   },
-  render(deltaTime: number) {
-    // deltaTime: 自上次渲染以来的毫秒数
+  render() {
     // 渲染所有实体
-    this.entities.forEach(entity => entity.render(deltaTime));
+    this.entities.forEach(entity => entity.render());
   },
 };

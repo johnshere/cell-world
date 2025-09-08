@@ -18,7 +18,7 @@ export default class Entity {
     this.color = randomColor();
   }
   update(deltaTime: number) {}
-  render(deltaTime: number) {
+  render() {
     // 传递逻辑坐标，让drawRect内部处理真实坐标转换
     drawRect(this.col, this.row, this.color.toHex());
   }

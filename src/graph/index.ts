@@ -1,6 +1,7 @@
 import { RootEl, GridSize, GridColor } from '../const/config';
 import { GraphConfig } from '../const/graph-config';
 import { updateMousePosition, updateViewportPosition } from '../panel';
+import ocean from '../world/objects/ocean';
 
 interface Point {
   x: number;
@@ -136,6 +137,8 @@ export const render = () => {
   drawGrid();
 
   ctx.restore();
+  // 绘制物体
+  ocean.render();
 
   // 绘制刻度尺
   drawRulers();
