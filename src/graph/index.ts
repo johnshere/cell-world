@@ -7,17 +7,10 @@ interface Point {
   y: number;
 }
 
-export interface ViewPort {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  scale: number;
-}
-
 let el: HTMLCanvasElement;
 let ctx: CanvasRenderingContext2D;
-export const viewport: ViewPort = { x: 0, y: 0, width: 0, height: 0, scale: 1 };
+const axis = { x: 0, y: 0 };
+export const viewport = { x: 0, y: 0, width: 0, height: 0, scale: 1 };
 let isDragging = false;
 let lastMousePos: Point = { x: 0, y: 0 };
 const rulerSize = GraphConfig.ruler.size;
@@ -65,8 +58,10 @@ export const bindEvents = () => {
       const deltaX = e.clientX - lastMousePos.x;
       const deltaY = e.clientY - lastMousePos.y;
 
-      viewport.x += deltaX;
-      viewport.y += deltaY;
+      axis.x += deltaX;
+      axis.y += deltaY;
+      viewport.x = -axis.x;
+      viewport.y = -axis.y;
 
       lastMousePos = { x: e.clientX, y: e.clientY };
       render();
@@ -107,8 +102,10 @@ export const bindEvents = () => {
     );
 
     // 以鼠标位置为中心进行缩放
-    viewport.x = mouseX - (mouseX - viewport.x) * (newScale / viewport.scale);
-    viewport.y = mouseY - (mouseY - viewport.y) * (newScale / viewport.scale);
+    axis.x = mouseX - (mouseX - axis.x) * (newScale / viewport.scale);
+    axis.y = mouseY - (mouseY - axis.y) * (newScale / viewport.scale);
+    viewport.x = -axis.x;
+    viewport.y = -axis.y;
 
     viewport.scale = newScale;
     // 更新缩放后的视窗在世界坐标系中的宽高
@@ -132,7 +129,7 @@ export const render = () => {
   ctx.clip();
 
   // 应用视口变换
-  ctx.translate(viewport.x + rulerSize, viewport.y + rulerSize);
+  ctx.translate(axis.x + rulerSize, axis.y + rulerSize);
   ctx.scale(viewport.scale, viewport.scale);
 
   // 绘制网格
@@ -150,18 +147,15 @@ export const drawGrid = () => {
 
   // 计算可见区域
   const startX =
-    Math.floor((-viewport.x - rulerSize) / viewport.scale / GridSize) *
-    GridSize;
+    Math.floor((-axis.x - rulerSize) / viewport.scale / GridSize) * GridSize;
   const endX =
-    Math.ceil((el.width - viewport.x - rulerSize) / viewport.scale / GridSize) *
+    Math.ceil((el.width - axis.x - rulerSize) / viewport.scale / GridSize) *
     GridSize;
   const startY =
-    Math.floor((-viewport.y - rulerSize) / viewport.scale / GridSize) *
-    GridSize;
+    Math.floor((-axis.y - rulerSize) / viewport.scale / GridSize) * GridSize;
   const endY =
-    Math.ceil(
-      (el.height - viewport.y - rulerSize) / viewport.scale / GridSize
-    ) * GridSize;
+    Math.ceil((el.height - axis.y - rulerSize) / viewport.scale / GridSize) *
+    GridSize;
 
   ctx.beginPath();
 
@@ -233,13 +227,12 @@ export const drawHorizontalRuler = (step: number) => {
   ctx.textBaseline = 'middle';
 
   const startX =
-    Math.floor((-viewport.x - rulerSize) / viewport.scale / step) * step;
+    Math.floor((-axis.x - rulerSize) / viewport.scale / step) * step;
   const endX =
-    Math.ceil((el.width - viewport.x - rulerSize) / viewport.scale / step) *
-    step;
+    Math.ceil((el.width - axis.x - rulerSize) / viewport.scale / step) * step;
 
   for (let x = startX; x <= endX; x += step) {
-    const screenX = x * viewport.scale + viewport.x + rulerSize;
+    const screenX = x * viewport.scale + axis.x + rulerSize;
 
     if (screenX >= rulerSize && screenX <= el.width) {
       // 绘制刻度线
@@ -261,15 +254,14 @@ export const drawVerticalRuler = (step: number) => {
   ctx.textBaseline = 'middle';
 
   const startY =
-    Math.floor((-viewport.y - rulerSize) / viewport.scale / step) * step;
+    Math.floor((-axis.y - rulerSize) / viewport.scale / step) * step;
   const endY =
-    Math.ceil((el.height - viewport.y - rulerSize) / viewport.scale / step) *
-    step;
+    Math.ceil((el.height - axis.y - rulerSize) / viewport.scale / step) * step;
 
   ctx.save();
 
   for (let y = startY; y <= endY; y += step) {
-    const screenY = y * viewport.scale + viewport.y + rulerSize;
+    const screenY = y * viewport.scale + axis.y + rulerSize;
 
     if (screenY >= rulerSize && screenY <= el.height) {
       // 绘制刻度线
@@ -293,16 +285,16 @@ export const drawVerticalRuler = (step: number) => {
 // 世界坐标转屏幕坐标
 export const worldToScreen = (worldX: number, worldY: number): Point => {
   return {
-    x: worldX * viewport.scale + viewport.x + rulerSize,
-    y: worldY * viewport.scale + viewport.y + rulerSize,
+    x: worldX * viewport.scale + axis.x + rulerSize,
+    y: worldY * viewport.scale + axis.y + rulerSize,
   };
 };
 
 // 屏幕坐标转世界坐标
 export const screenToWorld = (screenX: number, screenY: number): Point => {
   return {
-    x: (screenX - viewport.x - rulerSize) / viewport.scale,
-    y: (screenY - viewport.y - rulerSize) / viewport.scale,
+    x: (screenX - axis.x - rulerSize) / viewport.scale,
+    y: (screenY - axis.y - rulerSize) / viewport.scale,
   };
 };
 
@@ -321,15 +313,18 @@ export function createGraph() {
   bindEvents();
 }
 
-export const drawRect = (
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  color?: string
-) => {
+export const drawRect = (col: number, row: number, color?: string) => {
+  // 将逻辑坐标转换为世界坐标
+  const worldX = col * GridSize;
+  const worldY = row * GridSize;
+
+  // 使用worldToScreen转换坐标以支持拖拽和缩放
+  const screenPos = worldToScreen(worldX, worldY);
+  const scaledWidth = GridSize * viewport.scale;
+  const scaledHeight = GridSize * viewport.scale;
+
   ctx.fillStyle = color || 'white';
-  ctx.fillRect(x, y, width, height);
+  ctx.fillRect(screenPos.x, screenPos.y, scaledWidth, scaledHeight);
 };
 
 // 保持向后兼容
