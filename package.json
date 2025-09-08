@@ -26,5 +26,8 @@
     "prettier": "^3.6.2",
     "typescript": "~5.8.3",
     "vite": "^7.1.2"
+  },
+  "dependencies": {
+    "colord": "^2.9.3"
   }
 }

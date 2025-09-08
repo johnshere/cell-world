@@ -7,15 +7,17 @@ interface Point {
   y: number;
 }
 
-interface ViewPort {
+export interface ViewPort {
   x: number;
   y: number;
+  width: number;
+  height: number;
   scale: number;
 }
 
 let el: HTMLCanvasElement;
 let ctx: CanvasRenderingContext2D;
-const viewport: ViewPort = { x: 0, y: 0, scale: 1 };
+export const viewport: ViewPort = { x: 0, y: 0, width: 0, height: 0, scale: 1 };
 let isDragging = false;
 let lastMousePos: Point = { x: 0, y: 0 };
 const rulerSize = GraphConfig.ruler.size;
@@ -26,6 +28,8 @@ export const resizeCanvas = () => {
   el.height = rect.height;
   el.style.width = rect.width + 'px';
   el.style.height = rect.height + 'px';
+  viewport.width = rect.width / viewport.scale;
+  viewport.height = rect.height / viewport.scale;
   render();
 };
 
@@ -69,7 +73,7 @@ export const bindEvents = () => {
 
       // 报告视窗变化
       if (updateViewportPosition) {
-        updateViewportPosition(viewport.x, viewport.y, viewport.scale);
+        updateViewportPosition();
       }
     }
   });
@@ -107,11 +111,14 @@ export const bindEvents = () => {
     viewport.y = mouseY - (mouseY - viewport.y) * (newScale / viewport.scale);
 
     viewport.scale = newScale;
+    // 更新缩放后的视窗在世界坐标系中的宽高
+    viewport.width = el.width / newScale;
+    viewport.height = el.height / newScale;
     render();
 
     // 报告视窗变化
     if (updateViewportPosition) {
-      updateViewportPosition(viewport.x, viewport.y, viewport.scale);
+      updateViewportPosition();
     }
   });
 };
@@ -313,6 +320,17 @@ export function createGraph() {
   init();
   bindEvents();
 }
+
+export const drawRect = (
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  color?: string
+) => {
+  ctx.fillStyle = color || 'white';
+  ctx.fillRect(x, y, width, height);
+};
 
 // 保持向后兼容
 export default createGraph;

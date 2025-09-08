@@ -1,13 +1,12 @@
 import { RootEl } from '../const/config';
+import { viewport } from '../graph';
 
 interface PanelData {
   mousePosition: { x: number; y: number };
-  viewportPosition: { x: number; y: number; scale: number };
 }
 
 const data: PanelData = {
   mousePosition: { x: 0, y: 0 },
-  viewportPosition: { x: 0, y: 0, scale: 1 },
 };
 
 let el: HTMLDivElement;
@@ -108,7 +107,7 @@ export const toggle = () => {
 };
 
 export const updateContent = () => {
-  const { mousePosition, viewportPosition } = data;
+  const { mousePosition } = data;
 
   content.innerHTML = `
       <div style="margin-bottom: 12px;">
@@ -122,9 +121,11 @@ export const updateContent = () => {
       <div>
         <div style="font-weight: bold; color: #333; margin-bottom: 6px;">🔍 视窗信息</div>
         <div style="color: #666; line-height: 1.4;">
-          X: <span style="color: #28a745; font-weight: bold;">${viewportPosition.x.toFixed(0)}</span><br>
-          Y: <span style="color: #28a745; font-weight: bold;">${viewportPosition.y.toFixed(0)}</span><br>
-          缩放: <span style="color: #dc3545; font-weight: bold;">${viewportPosition.scale.toFixed(2)}</span>
+          X: <span style="color: #28a745; font-weight: bold;">${viewport.x.toFixed(0)}</span><br>
+          Y: <span style="color: #28a745; font-weight: bold;">${viewport.y.toFixed(0)}</span><br>
+          宽度: <span style="color: #28a745; font-weight: bold;">${viewport.width.toFixed(0)}</span><br>
+          高度: <span style="color: #28a745; font-weight: bold;">${viewport.height.toFixed(0)}</span><br>
+          缩放: <span style="color: #dc3545; font-weight: bold;">${viewport.scale.toFixed(2)}</span>
         </div>
       </div>
     `;
@@ -139,8 +140,7 @@ export const updateMousePosition = (x: number, y: number) => {
 };
 
 // 更新视窗位置
-export const updateViewportPosition = (x: number, y: number, scale: number) => {
-  data.viewportPosition = { x, y, scale };
+export const updateViewportPosition = () => {
   if (isExpanded) {
     updateContent();
   }
