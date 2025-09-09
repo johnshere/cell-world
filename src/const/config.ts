@@ -16,10 +16,6 @@ export const CellConfig = {
   breathInterval: 1000, // 呼吸间隔时间（毫秒）
   breathDuration: 5000, // 呼吸颜色持续时间（毫秒）
   breathColor: 'white', // 呼吸颜色
-
-  basedEnergy: 4, // 初始能量
-  energyToSplit: 6, // 分裂所需的能量
-  energyToExist: -0.2, // 存在一秒所需的能量
 };
 
 // 植物细胞配置
@@ -36,4 +32,7 @@ export const HerbivCellConfig = {
   moveMaxInterval: 4000, // 移动间隔时间（毫秒）
   /** 觅食范围 */
   huntRange: 5,
+  basedEnergy: 4, // 初始能量
+  energyToSplit: 6, // 分裂所需的能量
+  energyToMove: -0.1, // 移动所需的能量
 };

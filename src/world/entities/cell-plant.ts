@@ -26,8 +26,6 @@ export default class CellPlant extends Cell {
     // 调用父类的分裂方法
     const child = super.split() as CellPlant;
     if (!child) return;
-    // 继承分裂计数
-    child.splitCount = this.splitCount - 1;
     // 重置分裂时间并增加分裂计数
     child.lastSplitTime = 0;
     this.lastSplitTime = 0;

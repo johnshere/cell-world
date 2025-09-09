@@ -25,13 +25,7 @@ const ocean = {
       this.entities.length < OceanConfig.maxEntities
     ) {
       // 随机生成三种细胞类型之一
-      const cellTypes = [
-        CellPlant,
-        CellPlant,
-        CellPlant,
-        CellHerbiv,
-        CellCarniv,
-      ];
+      const cellTypes = [CellPlant, CellHerbiv, CellCarniv];
       const randomType =
         cellTypes[Math.floor(Math.random() * cellTypes.length)];
       const newOne = new randomType();

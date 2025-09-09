@@ -7,7 +7,6 @@ import Entity from './entity';
 export default class Cell extends Entity {
   splitCount = 0;
   moveDirections = [0, 1]; // 0-上 1-右 2-下 3-左
-  energy = CellConfig.basedEnergy;
   constructor() {
     super();
 
@@ -48,9 +47,7 @@ export default class Cell extends Entity {
   /** 移动 */
   move() {}
   /** 生长 */
-  grow() {
-    this.energy += CellConfig.energyToExist;
-  }
+  grow() {}
   isBreathing = false;
   /** 呼吸 */
   breath() {

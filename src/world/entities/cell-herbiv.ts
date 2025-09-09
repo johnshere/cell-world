@@ -8,6 +8,7 @@ export default class CellHerbiv extends Cell {
   private lastMoveTime = 0;
   private moveInterval = 0;
   private target: CellPlant | null = null; // 处于狩猎状态
+  energy = HerbivCellConfig.basedEnergy;
   constructor() {
     super();
 
@@ -52,6 +53,8 @@ export default class CellHerbiv extends Cell {
     }
     // 移动后检查当前位置是否有植物细胞并吃掉它们
     this.eatPlantsAtCurrentPosition();
+
+    this.energy += HerbivCellConfig.energyToMove;
   }
 
   /** 向目标移动并尝试进食 */
