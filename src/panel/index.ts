@@ -13,7 +13,7 @@ let el: HTMLDivElement;
 let toggleBtn: HTMLButtonElement;
 let content: HTMLDivElement;
 
-let isExpanded = false;
+let isExpanded = true;
 
 export const init = () => {
   // 创建主容器
@@ -72,6 +72,7 @@ export const init = () => {
 
   bindEvents();
   updateContent();
+  toggle(false);
 };
 
 export const bindEvents = () => {
@@ -92,8 +93,12 @@ export const bindEvents = () => {
   });
 };
 
-export const toggle = () => {
-  isExpanded = !isExpanded;
+export const toggle = (toExpanded?: boolean) => {
+  if (toExpanded !== undefined) {
+    isExpanded = toExpanded;
+  } else {
+    isExpanded = !isExpanded;
+  }
 
   if (isExpanded) {
     el.style.transform = 'translateX(0)';
