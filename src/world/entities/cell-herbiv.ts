@@ -134,7 +134,6 @@ export default class CellHerbiv extends Cell {
       // 增加能量
       this.energy += plant.generation;
 
-      console.log('吃掉植物，当前能量:', this.energy);
       // 如果吃掉的是当前目标，清除目标
       if (plant === this.target) {
         this.target = null;

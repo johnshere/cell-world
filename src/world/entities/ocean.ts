@@ -9,18 +9,36 @@ import Entity from './entity';
 const ocean = {
   entities: [] as Entity[],
   deltaTime: 0,
-  creator() {
+  creator(cellTypes?: (typeof Entity)[]) {
     // 随机生成三种细胞类型之一
-    const cellTypes = [CellPlant, CellHerbiv];
+    if (!cellTypes) {
+      cellTypes = [CellPlant, CellHerbiv];
+    }
     const randomType = cellTypes[Math.floor(Math.random() * cellTypes.length)];
     const newOne = new randomType();
     newOne.ocean = this;
     this.entities.push(newOne);
   },
   storm() {
-    while (this.entities.length < OceanConfig.maxEntities) {
+    while (this.entities.length < OceanConfig.initEntities) {
       this.creator();
     }
+    let time = 0;
+    this.storm = function () {
+      time += this.deltaTime;
+      if (time > 1000) {
+        time = 0;
+        this.creator([CellPlant]);
+      }
+      if (this.entities.length > OceanConfig.maxEntities) {
+        this.entities = this.entities.filter(entity => {
+          if (entity instanceof CellPlant) {
+            return Math.random() > 0.3;
+          }
+          return true;
+        });
+      }
+    };
   },
   update(deltaTime: number) {
     this.deltaTime = deltaTime;

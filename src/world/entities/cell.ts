@@ -92,7 +92,12 @@ export default class Cell extends Entity {
     });
   }
   getNextMovePosition(): { row: number; col: number } {
+    let count = 0;
     const getDirection = () => {
+      if (count > 10) {
+        return 0;
+      }
+      count++;
       const direction = Math.floor(Math.random() * 4);
       if (!this.moveDirections.includes(direction)) return getDirection();
       return direction;
