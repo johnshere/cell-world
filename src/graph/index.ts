@@ -1,7 +1,7 @@
 import { RootEl, GridSize, GridColor } from '../const/config';
 import { GraphConfig } from '../const/graph-config';
 import { updateMousePosition, updateViewportPosition } from '../panel';
-import ocean from '../world/objects/ocean';
+import ocean from '../world/entities/ocean';
 
 interface Point {
   x: number;
@@ -11,10 +11,33 @@ interface Point {
 let el: HTMLCanvasElement;
 let ctx: CanvasRenderingContext2D;
 const axis = { x: 0, y: 0 };
-export const viewport = { x: 0, y: 0, width: 0, height: 0, scale: 1 };
 let isDragging = false;
 let lastMousePos: Point = { x: 0, y: 0 };
 const rulerSize = GraphConfig.ruler.size;
+
+export const viewport = {
+  get x(): number {
+    return -axis.x;
+  },
+  get y() {
+    return -axis.y;
+  },
+  get col(): number {
+    return Math.floor(viewport.x / GridSize);
+  },
+  get row(): number {
+    return Math.floor(viewport.y / GridSize);
+  },
+  get cols(): number {
+    return Math.ceil(viewport.width / GridSize);
+  },
+  get rows(): number {
+    return Math.ceil(viewport.height / GridSize);
+  },
+  width: 0,
+  height: 0,
+  scale: 1,
+};
 
 export const resizeCanvas = () => {
   const rect = RootEl.getBoundingClientRect();
@@ -61,8 +84,6 @@ export const bindEvents = () => {
 
       axis.x += deltaX;
       axis.y += deltaY;
-      viewport.x = -axis.x;
-      viewport.y = -axis.y;
 
       lastMousePos = { x: e.clientX, y: e.clientY };
       render();
@@ -105,8 +126,6 @@ export const bindEvents = () => {
     // 以鼠标位置为中心进行缩放
     axis.x = mouseX - (mouseX - axis.x) * (newScale / viewport.scale);
     axis.y = mouseY - (mouseY - axis.y) * (newScale / viewport.scale);
-    viewport.x = -axis.x;
-    viewport.y = -axis.y;
 
     viewport.scale = newScale;
     // 更新缩放后的视窗在世界坐标系中的宽高
@@ -126,8 +145,6 @@ export const render = () => {
 
   // 绘制主画布区域（留出刻度尺空间）
   ctx.save();
-  ctx.rect(rulerSize, rulerSize, el.width - rulerSize, el.height - rulerSize);
-  ctx.clip();
 
   // 应用视口变换
   ctx.translate(axis.x + rulerSize, axis.y + rulerSize);
@@ -191,36 +208,29 @@ export const drawRulers = () => {
   ctx.fillRect(0, 0, rulerSize, el.height);
   ctx.strokeRect(0, 0, rulerSize, el.height);
 
-  // 绘制左上角方块
-  ctx.fillRect(0, 0, rulerSize, rulerSize);
-
   // 设置文字样式
   ctx.font = GraphConfig.ruler.textFont;
   ctx.fillStyle = GraphConfig.ruler.textColor;
 
   // 计算刻度间距
-  const scaleStep = getScaleStep();
+  const rulerStep = getRulerStep();
 
   // 绘制顶部刻度
-  drawHorizontalRuler(scaleStep);
+  drawHorizontalRuler(rulerStep);
 
   // 绘制左侧刻度
-  drawVerticalRuler(scaleStep);
+  drawVerticalRuler(rulerStep);
 };
 
-export const getScaleStep = (): number => {
-  const baseStep = GraphConfig.scale.baseStep;
-  const scaledStep = baseStep * viewport.scale;
-  const thresholds = GraphConfig.scale.thresholds;
+export const getRulerStep = (): number => {
+  let step;
+  if (viewport.scale < 0.7) step = GridSize * 20;
+  else if (viewport.scale < 1) step = GridSize * 10;
+  else if (viewport.scale < 1.5) step = GridSize * 10;
+  else if (viewport.scale < 2.5) step = GridSize * 5;
+  else step = GridSize * 5;
 
-  if (scaledStep < thresholds.step10) return baseStep * 10;
-  if (scaledStep < thresholds.step5) return baseStep * 5;
-  if (scaledStep < thresholds.step2) return baseStep * 2;
-  if (scaledStep > thresholds.stepHalf) return baseStep / 2;
-  if (scaledStep > thresholds.stepFifth) return baseStep / 5;
-  if (scaledStep > thresholds.stepTenth) return baseStep / 10;
-
-  return baseStep;
+  return step;
 };
 
 export const drawHorizontalRuler = (step: number) => {
@@ -244,8 +254,9 @@ export const drawHorizontalRuler = (step: number) => {
       ctx.lineTo(screenX, rulerSize);
       ctx.stroke();
 
-      // 绘制刻度数字
-      ctx.fillText(x.toString(), screenX, rulerSize / 2);
+      // 绘制刻度数字（显示格数）
+      const gridNumber = Math.round(x / GridSize);
+      ctx.fillText(gridNumber.toString(), screenX, rulerSize / 2);
     }
   }
 };
@@ -273,11 +284,12 @@ export const drawVerticalRuler = (step: number) => {
       ctx.lineTo(rulerSize, screenY);
       ctx.stroke();
 
-      // 绘制刻度数字（旋转90度）
+      // 绘制刻度数字（旋转90度，显示格数）
       ctx.save();
       ctx.translate(rulerSize / 2, screenY);
       ctx.rotate(Math.PI / 2);
-      ctx.fillText(y.toString(), 0, 0);
+      const gridNumber = Math.round(y / GridSize);
+      ctx.fillText(gridNumber.toString(), 0, 0);
       ctx.restore();
     }
   }

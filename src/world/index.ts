@@ -2,7 +2,7 @@ import { FrameRate } from '../const/config.ts';
 import { createGraph, render } from '../graph/index.ts';
 import { createPanel } from '../panel/index.ts';
 
-import ocean from './objects/ocean.ts';
+import ocean from './entities/ocean.ts';
 
 const init = () => {
   console.log('init world');

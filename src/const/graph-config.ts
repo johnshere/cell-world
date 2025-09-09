@@ -9,6 +9,18 @@ export const GraphConfig = {
     textFont: '12px Arial',
     textColor: '#333',
     scaleLineColor: '#999',
+
+    // 刻度配置
+    scale: {
+      thresholds: {
+        step10: 20,
+        step5: 50,
+        step2: 100,
+        stepHalf: 200,
+        stepFifth: 400,
+        stepTenth: 800,
+      },
+    },
   },
 
   // 缩放配置
@@ -18,19 +30,6 @@ export const GraphConfig = {
     scaleFactor: {
       zoomIn: 1.1,
       zoomOut: 0.9,
-    },
-  },
-
-  // 刻度配置
-  scale: {
-    baseStep: 100,
-    thresholds: {
-      step10: 20,
-      step5: 50,
-      step2: 100,
-      stepHalf: 200,
-      stepFifth: 400,
-      stepTenth: 800,
     },
   },
 

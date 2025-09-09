@@ -13,7 +13,7 @@ let el: HTMLDivElement;
 let toggleBtn: HTMLButtonElement;
 let content: HTMLDivElement;
 
-let isExpanded = true;
+let isExpanded = false;
 
 export const init = () => {
   // 创建主容器
