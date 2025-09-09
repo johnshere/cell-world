@@ -27,10 +27,11 @@ export default class CellPlant extends Cell {
     const child = super.split() as CellPlant;
     if (!child) return;
     // 重置分裂时间并增加分裂计数
+    child.generation = this.generation - 1;
     child.lastSplitTime = 0;
     this.lastSplitTime = 0;
 
-    if (this.splitCount <= 0) {
+    if (this.generation >= PlantCellConfig.maxGeneration) {
       this.die();
     }
   }

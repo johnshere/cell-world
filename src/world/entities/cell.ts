@@ -5,7 +5,7 @@ import { CellConfig } from '../../const/config';
 import Entity from './entity';
 
 export default class Cell extends Entity {
-  splitCount = 0;
+  generation = 0;
   moveDirections = [0, 1]; // 0-上 1-右 2-下 3-左
   constructor() {
     super();
@@ -13,9 +13,6 @@ export default class Cell extends Entity {
     // 取当前视窗范围，随机生成逻辑位置
     this.col = Math.floor(Math.random() * viewport.cols) + viewport.col;
     this.row = Math.floor(Math.random() * viewport.rows) + viewport.row;
-
-    const max = Math.ceil(Math.random() * CellConfig.maxSplitCount);
-    this.splitCount = max + CellConfig.maxSplitCount;
 
     const dir = Math.floor(Math.random() * 4);
     const dir2 = (dir + 1) % 4;
@@ -156,7 +153,7 @@ export default class Cell extends Entity {
       // 添加到海洋中
       this.ocean.entities.push(child);
 
-      this.splitCount--;
+      this.generation++;
       return child;
     }
   }

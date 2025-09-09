@@ -18,7 +18,6 @@ export default class CellHerbiv extends Cell {
         (HerbivCellConfig.moveMaxInterval - HerbivCellConfig.moveMinInterval) +
       HerbivCellConfig.moveMinInterval;
 
-    this.splitCount = HerbivCellConfig.maxSplitCount;
     this.color = 'brown';
   }
 
@@ -32,7 +31,7 @@ export default class CellHerbiv extends Cell {
       }
       this.energy = energy; // 分裂后重置能量
     }
-    if (this.splitCount <= 0 || this.energy <= 0) {
+    if (this.generation >= HerbivCellConfig.maxGeneration || this.energy <= 0) {
       this.die();
     }
   }
@@ -133,7 +132,7 @@ export default class CellHerbiv extends Cell {
       plant.die();
 
       // 增加能量
-      this.energy++;
+      this.energy += plant.generation;
 
       console.log('吃掉植物，当前能量:', this.energy);
       // 如果吃掉的是当前目标，清除目标

@@ -1,4 +1,4 @@
-import { FrameRate } from '../const/config.ts';
+import { Accelerate, FrameRate } from '../const/config.ts';
 import { createGraph, render } from '../graph/index.ts';
 import { createPanel } from '../panel/index.ts';
 
@@ -14,7 +14,7 @@ const init = () => {
     const deltaTime = currentTime - lastTime;
     lastTime = currentTime;
 
-    ocean.update(deltaTime);
+    ocean.update(deltaTime * Accelerate);
     render();
   }, 1000 / FrameRate);
 

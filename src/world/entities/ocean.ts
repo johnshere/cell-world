@@ -9,7 +9,6 @@ import Entity from './entity';
 const ocean = {
   entities: [] as Entity[],
   deltaTime: 0,
-  lastSpawnTime: 0,
   creator() {
     // 随机生成三种细胞类型之一
     const cellTypes = [CellPlant, CellHerbiv];
@@ -19,32 +18,13 @@ const ocean = {
     this.entities.push(newOne);
   },
   storm() {
-    this.lastSpawnTime += this.deltaTime;
-
-    // 根据当前细胞数量动态计算生成间隔
-    // 细胞越多，生成间隔越长（生成越慢）
-    const ratio = this.entities.length / OceanConfig.maxEntities;
-    const currentSpawnInterval =
-      OceanConfig.baseSpawnInterval +
-      (OceanConfig.maxSpawnInterval - OceanConfig.baseSpawnInterval) * ratio;
-
-    if (
-      this.lastSpawnTime >= currentSpawnInterval &&
-      this.entities.length < OceanConfig.maxEntities
-    ) {
+    while (this.entities.length < OceanConfig.maxEntities) {
       this.creator();
-      this.creator();
-      this.lastSpawnTime = 0;
-    } else {
-      if (Math.random() * 1000 < 1) {
-        this.creator();
-      }
     }
   },
   update(deltaTime: number) {
     this.deltaTime = deltaTime;
     this.storm();
-
     // 更新所有实体
     this.entities.forEach(entity => entity.update(deltaTime));
   },
