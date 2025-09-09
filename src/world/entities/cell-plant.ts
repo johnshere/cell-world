@@ -1,10 +1,39 @@
-import { colord } from 'colord';
+import { PlantCellConfig } from '../../const/config';
 
 import Cell from './cell';
 
+/** 植物细胞 */
 export default class CellPlant extends Cell {
+  private lastSplitTime = 0;
+  private splitInterval = 0;
   constructor() {
     super();
     this.color = 'green';
+    this.splitInterval =
+      PlantCellConfig.splitMinInterval +
+      Math.random() *
+        (PlantCellConfig.splitMaxInterval - PlantCellConfig.splitMinInterval);
+  }
+
+  grow() {
+    this.lastSplitTime += this.deltaTime;
+
+    // 检查是否可以分裂
+    if (this.lastSplitTime < this.splitInterval) {
+      return;
+    }
+
+    // 调用父类的分裂方法
+    const child = super.split() as CellPlant;
+    if (!child) return;
+    // 继承分裂计数
+    child.splitCount = this.splitCount - 1;
+    // 重置分裂时间并增加分裂计数
+    child.lastSplitTime = 0;
+    this.lastSplitTime = 0;
+
+    if (this.splitCount <= 0) {
+      this.die();
+    }
   }
 }

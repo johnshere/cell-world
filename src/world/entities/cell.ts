@@ -1,30 +1,170 @@
-import { colord } from 'colord';
-
-import { GridSize } from '../../const/config';
+import { GraphConfig } from '../../const/graph-config';
 import { viewport } from '../../graph';
+import { CellConfig } from '../../const/config';
 
 import Entity from './entity';
 
 export default class Cell extends Entity {
+  splitCount = 0;
+  moveDirections = [0, 1]; // 0-上 1-右 2-下 3-左
+  energy = CellConfig.basedEnergy;
   constructor() {
     super();
 
     // 取当前视窗范围，随机生成逻辑位置
-    const x = (Math.random() * viewport.width + viewport.x) / GridSize;
+    const x =
+      (Math.random() * viewport.width + viewport.x) / GraphConfig.grid.size;
     this.col = Math.floor(x);
-    const y = (Math.random() * viewport.height + viewport.y) / GridSize;
+    const y =
+      (Math.random() * viewport.height + viewport.y) / GraphConfig.grid.size;
     this.row = Math.floor(y);
+
+    const max = Math.ceil(Math.random() * CellConfig.maxSplitCount);
+    this.splitCount = max + CellConfig.maxSplitCount;
+
+    const dir = Math.floor(Math.random() * 4);
+    const dir2 = (dir + 1) % 4;
+    this.moveDirections = [dir, dir2];
 
     this.color = 'pink';
   }
-  /** 分裂 */
-  split() {}
-  /** 移动 */
-  move() {}
+  update(deltaTime: number) {
+    super.update(deltaTime);
+    this.separate();
+    this.align();
+    this.cohesion();
+    this.hunt();
+    this.move();
+    this.grow();
+  }
   /** 分离 */
   separate() {}
   /** 对齐 */
   align() {}
   /** 聚集 */
   cohesion() {}
+  /** 觅食 */
+  hunt() {}
+  /** 移动 */
+  move() {}
+  /** 生长 */
+  grow() {
+    this.energy += CellConfig.energyToExist;
+  }
+  isBreathing = false;
+  /** 呼吸 */
+  breath() {
+    if (this.isBreathing) return;
+    this.isBreathing = true;
+    const startTime = Date.now();
+    const prevColor = this.color;
+
+    const flash = () => {
+      if (this.color === prevColor) {
+        this.color = CellConfig.breathColor;
+      } else {
+        this.color = prevColor;
+      }
+      if (Date.now() - startTime >= CellConfig.breathDuration) {
+        this.color = prevColor;
+        this.isBreathing = false;
+        return;
+      }
+      setTimeout(flash, CellConfig.breathInterval);
+    };
+    flash();
+  }
+  /** 死亡 */
+  die() {
+    this.ocean.entities = this.ocean.entities.filter(entity => entity !== this);
+  }
+  getAdjacentPositions() {
+    // 获取相邻位置（周围8个方向）
+    return [
+      { row: this.row - 1, col: this.col - 1 }, // 左上
+      { row: this.row - 1, col: this.col }, // 上
+      { row: this.row - 1, col: this.col + 1 }, // 右上
+      { row: this.row, col: this.col + 1 }, // 右
+      { row: this.row + 1, col: this.col + 1 }, // 右下
+      { row: this.row + 1, col: this.col }, // 下
+      { row: this.row + 1, col: this.col - 1 }, // 左下
+      { row: this.row, col: this.col - 1 }, // 左
+    ];
+  }
+  findFreePosition(adjacentPositions?: { row: number; col: number }[]) {
+    if (!adjacentPositions) {
+      adjacentPositions = this.getAdjacentPositions();
+    }
+    return adjacentPositions.filter(pos => {
+      return !this.ocean.entities.some(
+        entity => entity.row === pos.row && entity.col === pos.col
+      );
+    });
+  }
+  getNextMovePosition(): { row: number; col: number } {
+    const getDirection = () => {
+      const direction = Math.floor(Math.random() * 4);
+      if (!this.moveDirections.includes(direction)) return getDirection();
+      return direction;
+    };
+    const direction = getDirection();
+    let adjacentPositions = this.getAdjacentPositions();
+    if (direction === 0) {
+      adjacentPositions = adjacentPositions.splice(0, 3);
+    } else if (direction === 1) {
+      adjacentPositions = adjacentPositions.splice(2, 3);
+    } else if (direction === 2) {
+      adjacentPositions = adjacentPositions.splice(4, 3);
+    } else if (direction === 3) {
+      adjacentPositions = adjacentPositions
+        .splice(6, 2)
+        .concat(...adjacentPositions.splice(0, 1));
+    }
+    // 过滤出空闲位置
+    const freePositions = this.findFreePosition(adjacentPositions);
+
+    // 随机移动到一个空闲位置
+    if (freePositions.length > 0) {
+      const randomPos =
+        freePositions[Math.floor(Math.random() * freePositions.length)];
+      return randomPos;
+    } else {
+      return this.getNextMovePosition();
+    }
+  }
+  /** 分裂 */
+  split() {
+    if (!this.ocean) return;
+
+    // 获取相邻位置（周围8个方向）
+    const adjacentPositions = this.getAdjacentPositions();
+
+    // 过滤出空闲位置（没有其他细胞占据的位置）
+    const freePositions = this.findFreePosition(adjacentPositions);
+
+    const nearingCellsCount = adjacentPositions.length - freePositions.length;
+    // 如果周围细胞超过配置的最大值，不进行分裂
+    if (nearingCellsCount > CellConfig.maxNearingCells) {
+      return;
+    }
+
+    // 如果有空闲位置，随机选择一个进行分裂
+    if (freePositions.length > 0) {
+      const randomPos =
+        freePositions[Math.floor(Math.random() * freePositions.length)];
+
+      // 创建与当前细胞相同类型的新细胞
+      const NewCellClass = this.constructor as new () => Cell;
+      const child = new NewCellClass();
+      child.row = randomPos.row;
+      child.col = randomPos.col;
+      child.ocean = this.ocean;
+
+      // 添加到海洋中
+      this.ocean.entities.push(child);
+
+      this.splitCount--;
+      return child;
+    }
+  }
 }

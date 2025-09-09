@@ -1,5 +1,7 @@
 import { RootEl } from '../const/config';
+import { GraphConfig } from '../const/graph-config';
 import { viewport } from '../graph';
+import ocean from '../world/entities/ocean';
 
 interface PanelData {
   mousePosition: { x: number; y: number };
@@ -20,9 +22,8 @@ export const init = () => {
   el.className = 'debug-panel';
   el.style.cssText = `
       position: fixed;
-      top: 0;
+      top: 20px;
       right: 0;
-      height: 100vh;
       background: rgba(255, 255, 255, 0.95);
       border-left: 1px solid #ddd;
       box-shadow: -4px 0 12px rgba(0, 0, 0, 0.15);
@@ -40,7 +41,7 @@ export const init = () => {
   toggleBtn.innerHTML = 'x';
   toggleBtn.style.cssText = `
       position: fixed;
-      top: 20px;
+      top: 40px;
       right: 20px;
       width: 40px;
       height: 40px;
@@ -72,7 +73,7 @@ export const init = () => {
 
   bindEvents();
   updateContent();
-  toggle(false);
+  toggle(GraphConfig.panel.defaultExpanded);
 };
 
 export const bindEvents = () => {
@@ -115,11 +116,18 @@ export const updateContent = () => {
   const { mousePosition } = data;
 
   content.innerHTML = `
-      <div style="margin-bottom: 12px;">
+      <div style="margin-top: 12px;">
         <div style="font-weight: bold; color: #333; margin-bottom: 6px;">🖱️ 鼠标位置</div>
         <div style="color: #666; line-height: 1.4;">
           X: <span style="color: #007acc; font-weight: bold;">${mousePosition.x.toFixed(0)}</span><br>
           Y: <span style="color: #007acc; font-weight: bold;">${mousePosition.y.toFixed(0)}</span>
+        </div>
+      </div>
+
+      <div style="margin-bottom: 12px;">
+        <div style="font-weight: bold; color: #333; margin-bottom: 6px;">🧬 实体信息</div>
+        <div style="color: #666; line-height: 1.4;">
+          数量: <span style="color: #ff6b35; font-weight: bold;">${ocean.entities.length}</span>
         </div>
       </div>
 
@@ -135,6 +143,7 @@ export const updateContent = () => {
       </div>
     `;
 };
+setInterval(() => updateContent && updateContent(), 500);
 
 // 更新鼠标位置
 export const updateMousePosition = (x: number, y: number) => {

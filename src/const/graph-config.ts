@@ -1,5 +1,15 @@
 // 图形组件配置
 export const GraphConfig = {
+  panel: {
+    defaultExpanded: true,
+  },
+  // 网格配置
+  grid: {
+    size: 10,
+    color: '#ccc',
+    backgroundColor: '#dcdcdc',
+  },
+
   // 刻度尺配置
   ruler: {
     size: 20, // 刻度尺的宽度/高度

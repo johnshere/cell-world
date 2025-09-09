@@ -1,4 +1,4 @@
-import { RootEl, GridSize, GridColor } from '../const/config';
+import { RootEl } from '../const/config';
 import { GraphConfig } from '../const/graph-config';
 import { updateMousePosition, updateViewportPosition } from '../panel';
 import ocean from '../world/entities/ocean';
@@ -23,16 +23,16 @@ export const viewport = {
     return -axis.y;
   },
   get col(): number {
-    return Math.floor(viewport.x / GridSize);
+    return Math.floor(viewport.x / GraphConfig.grid.size);
   },
   get row(): number {
-    return Math.floor(viewport.y / GridSize);
+    return Math.floor(viewport.y / GraphConfig.grid.size);
   },
   get cols(): number {
-    return Math.ceil(viewport.width / GridSize);
+    return Math.ceil(viewport.width / GraphConfig.grid.size);
   },
   get rows(): number {
-    return Math.ceil(viewport.height / GridSize);
+    return Math.ceil(viewport.height / GraphConfig.grid.size);
   },
   width: 0,
   height: 0,
@@ -162,31 +162,37 @@ export const render = () => {
 };
 
 export const drawGrid = () => {
-  ctx.strokeStyle = GridColor;
-  ctx.lineWidth = 1 / viewport.scale;
-
   // 计算可见区域
   const startX =
-    Math.floor((-axis.x - rulerSize) / viewport.scale / GridSize) * GridSize;
+    Math.floor((-axis.x - rulerSize) / viewport.scale / GraphConfig.grid.size) *
+    GraphConfig.grid.size;
   const endX =
-    Math.ceil((el.width - axis.x - rulerSize) / viewport.scale / GridSize) *
-    GridSize;
+    Math.ceil(
+      (el.width - axis.x - rulerSize) / viewport.scale / GraphConfig.grid.size
+    ) * GraphConfig.grid.size;
   const startY =
-    Math.floor((-axis.y - rulerSize) / viewport.scale / GridSize) * GridSize;
+    Math.floor((-axis.y - rulerSize) / viewport.scale / GraphConfig.grid.size) *
+    GraphConfig.grid.size;
   const endY =
-    Math.ceil((el.height - axis.y - rulerSize) / viewport.scale / GridSize) *
-    GridSize;
+    Math.ceil(
+      (el.height - axis.y - rulerSize) / viewport.scale / GraphConfig.grid.size
+    ) * GraphConfig.grid.size;
+
+  ctx.fillStyle = GraphConfig.grid.backgroundColor;
+  ctx.fillRect(startX, startY, endX - startX, endY - startY);
+  ctx.strokeStyle = GraphConfig.grid.color;
+  ctx.lineWidth = 1 / viewport.scale;
 
   ctx.beginPath();
 
   // 绘制垂直线
-  for (let x = startX; x <= endX; x += GridSize) {
+  for (let x = startX; x <= endX; x += GraphConfig.grid.size) {
     ctx.moveTo(x, startY);
     ctx.lineTo(x, endY);
   }
 
   // 绘制水平线
-  for (let y = startY; y <= endY; y += GridSize) {
+  for (let y = startY; y <= endY; y += GraphConfig.grid.size) {
     ctx.moveTo(startX, y);
     ctx.lineTo(endX, y);
   }
@@ -224,11 +230,11 @@ export const drawRulers = () => {
 
 export const getRulerStep = (): number => {
   let step;
-  if (viewport.scale < 0.7) step = GridSize * 20;
-  else if (viewport.scale < 1) step = GridSize * 10;
-  else if (viewport.scale < 1.5) step = GridSize * 10;
-  else if (viewport.scale < 2.5) step = GridSize * 5;
-  else step = GridSize * 5;
+  if (viewport.scale < 0.7) step = GraphConfig.grid.size * 20;
+  else if (viewport.scale < 1) step = GraphConfig.grid.size * 10;
+  else if (viewport.scale < 1.5) step = GraphConfig.grid.size * 10;
+  else if (viewport.scale < 2.5) step = GraphConfig.grid.size * 5;
+  else step = GraphConfig.grid.size * 5;
 
   return step;
 };
@@ -255,7 +261,7 @@ export const drawHorizontalRuler = (step: number) => {
       ctx.stroke();
 
       // 绘制刻度数字（显示格数）
-      const gridNumber = Math.round(x / GridSize);
+      const gridNumber = Math.round(x / GraphConfig.grid.size);
       ctx.fillText(gridNumber.toString(), screenX, rulerSize / 2);
     }
   }
@@ -288,7 +294,7 @@ export const drawVerticalRuler = (step: number) => {
       ctx.save();
       ctx.translate(rulerSize / 2, screenY);
       ctx.rotate(Math.PI / 2);
-      const gridNumber = Math.round(y / GridSize);
+      const gridNumber = Math.round(y / GraphConfig.grid.size);
       ctx.fillText(gridNumber.toString(), 0, 0);
       ctx.restore();
     }
@@ -330,13 +336,13 @@ export function createGraph() {
 
 export const drawRect = (col: number, row: number, color?: string) => {
   // 将逻辑坐标转换为世界坐标
-  const worldX = col * GridSize;
-  const worldY = row * GridSize;
+  const worldX = col * GraphConfig.grid.size;
+  const worldY = row * GraphConfig.grid.size;
 
   // 使用worldToScreen转换坐标以支持拖拽和缩放
   const screenPos = worldToScreen(worldX, worldY);
-  const scaledWidth = GridSize * viewport.scale;
-  const scaledHeight = GridSize * viewport.scale;
+  const scaledWidth = GraphConfig.grid.size * viewport.scale;
+  const scaledHeight = GraphConfig.grid.size * viewport.scale;
 
   ctx.fillStyle = color || 'white';
   ctx.fillRect(screenPos.x, screenPos.y, scaledWidth, scaledHeight);
