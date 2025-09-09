@@ -11,12 +11,8 @@ export default class Cell extends Entity {
     super();
 
     // 取当前视窗范围，随机生成逻辑位置
-    const x =
-      (Math.random() * viewport.width + viewport.x) / GraphConfig.grid.size;
-    this.col = Math.floor(x);
-    const y =
-      (Math.random() * viewport.height + viewport.y) / GraphConfig.grid.size;
-    this.row = Math.floor(y);
+    this.col = Math.floor(Math.random() * viewport.cols) + viewport.col;
+    this.row = Math.floor(Math.random() * viewport.rows) + viewport.row;
 
     const max = Math.ceil(Math.random() * CellConfig.maxSplitCount);
     this.splitCount = max + CellConfig.maxSplitCount;

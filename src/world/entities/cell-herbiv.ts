@@ -18,14 +18,19 @@ export default class CellHerbiv extends Cell {
         (HerbivCellConfig.moveMaxInterval - HerbivCellConfig.moveMinInterval) +
       HerbivCellConfig.moveMinInterval;
 
+    this.splitCount = HerbivCellConfig.maxSplitCount;
     this.color = 'brown';
   }
 
   grow() {
     // 检查是否可以分裂
     if (this.energy >= HerbivCellConfig.energyToSplit) {
-      this.split();
-      this.energy = HerbivCellConfig.basedEnergy; // 分裂后重置能量
+      const child = this.split() as CellHerbiv;
+      const energy = this.energy / 2;
+      if (child) {
+        child.energy = energy;
+      }
+      this.energy = energy; // 分裂后重置能量
     }
     if (this.splitCount <= 0 || this.energy <= 0) {
       this.die();
@@ -37,7 +42,7 @@ export default class CellHerbiv extends Cell {
     if (!this.ocean) return;
     this.lastMoveTime += this.deltaTime;
     // 检查是否可以移动
-    if (this.lastMoveTime < this.moveInterval) {
+    if (this.lastMoveTime < this.moveInterval - this.energy * 40) {
       return;
     }
     this.lastMoveTime = 0;

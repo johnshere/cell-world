@@ -125,7 +125,7 @@ export const updateContent = () => {
       </div>
 
       <div style="margin-bottom: 12px;">
-        <div style="font-weight: bold; color: #333; margin-bottom: 6px;">🧬 实体信息</div>
+        <div style="font-weight: bold; color: #333; margin-bottom: 6px;">🧬 物体信息</div>
         <div style="color: #666; line-height: 1.4;">
           数量: <span style="color: #ff6b35; font-weight: bold;">${ocean.entities.length}</span>
         </div>

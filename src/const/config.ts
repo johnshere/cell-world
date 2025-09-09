@@ -5,9 +5,9 @@ export const FrameRate = 10;
 
 // 海洋配置
 export const OceanConfig = {
-  maxEntities: 200, // 最大细胞数量
-  baseSpawnInterval: 300, // 基础生成间隔（毫秒）
-  maxSpawnInterval: 2000, // 最大生成间隔（毫秒）
+  maxEntities: 500, // 最大细胞数量
+  baseSpawnInterval: 100, // 基础生成间隔（毫秒）
+  maxSpawnInterval: 1000, // 最大生成间隔（毫秒）
 };
 
 export const CellConfig = {
@@ -28,6 +28,7 @@ export const PlantCellConfig = {
 // 植食细胞配置
 export const HerbivCellConfig = {
   ...CellConfig,
+  maxSplitCount: 5, // 最大分裂次数
   moveMinInterval: 400, // 移动间隔时间（毫秒）
   moveMaxInterval: 4000, // 移动间隔时间（毫秒）
   /** 觅食范围 */
