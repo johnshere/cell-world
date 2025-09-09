@@ -1,10 +1,11 @@
+import { colord } from 'colord';
+
 import { GridSize } from '../../const/config';
 import { viewport } from '../../graph';
-import { randomColor } from '../../utils';
 
 import Entity from './entity';
 
-export default class Creature extends Entity {
+export default class Cell extends Entity {
   constructor() {
     super();
 
@@ -14,6 +15,16 @@ export default class Creature extends Entity {
     const y = (Math.random() * viewport.height + viewport.y) / GridSize;
     this.row = Math.floor(y);
 
-    this.color = randomColor();
+    this.color = 'pink';
   }
+  /** 分裂 */
+  split() {}
+  /** 移动 */
+  move() {}
+  /** 分离 */
+  separate() {}
+  /** 对齐 */
+  align() {}
+  /** 聚集 */
+  cohesion() {}
 }
