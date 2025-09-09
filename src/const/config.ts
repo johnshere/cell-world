@@ -19,7 +19,7 @@ export const CellConfig = {
 
   basedEnergy: 4, // 初始能量
   energyToSplit: 6, // 分裂所需的能量
-  energyToExist: -0.1, // 存在一秒所需的能量
+  energyToExist: -0.2, // 存在一秒所需的能量
 };
 
 // 植物细胞配置
