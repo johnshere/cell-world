@@ -21,7 +21,9 @@ const init = () => {
 
     ocean.update(deltaTime * WorldConfig.Accelerate);
 
-    render();
+    if (!document.hidden) {
+      render();
+    }
 
     if (frameCount < 1001) {
       const renderEndTime = performance.now();

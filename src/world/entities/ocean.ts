@@ -114,22 +114,11 @@ const ocean = {
       this.creator();
     }
     let time = 0;
-    // 灾难
-    let disasterTime = 0;
     this.storm = function () {
       time += this.deltaTime;
       if (time > 1000) {
         time = 0;
         this.creator([CellPlant]);
-      }
-      if (this.entities.length > OceanConfig.maxEntities) {
-        disasterTime = 3000;
-      }
-      if (disasterTime > 0) {
-        disasterTime -= this.deltaTime;
-        // 先过滤数组，再重建索引，确保一致性与性能
-        this.entities = this.entities.filter((entity, i) => i % 9 !== 0);
-        this.rebuildGrid();
       }
     };
   },
