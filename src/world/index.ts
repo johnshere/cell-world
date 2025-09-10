@@ -1,4 +1,4 @@
-import { Accelerate, FrameRate } from '../const/config.ts';
+import { WorldConfig } from '../const/config.ts';
 import { createGraph, render } from '../graph/index.ts';
 import { createPanel } from '../panel/index.ts';
 
@@ -19,7 +19,7 @@ const init = () => {
 
     const renderStartTime = performance.now();
 
-    ocean.update(deltaTime * Accelerate);
+    ocean.update(deltaTime * WorldConfig.Accelerate);
 
     render();
 
@@ -57,7 +57,7 @@ const init = () => {
         totalEntityTime = 0;
       }
     }
-  }, 1000 / FrameRate);
+  }, 1000 / WorldConfig.FrameRate);
 
   return intervalId;
 };

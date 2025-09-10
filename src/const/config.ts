@@ -1,8 +1,10 @@
 export const RootEl = document.getElementById('app')!;
 
-// 帧率控制
-export const FrameRate = 10;
-export const Accelerate = 1; // 加速倍数
+export const WorldConfig = {
+  // 帧率控制
+  FrameRate: 10,
+  Accelerate: 1,
+};
 
 // 海洋配置
 export const OceanConfig = {
@@ -50,3 +52,25 @@ export const CarnivCellConfig = {
   energyToSplit: 8, // 分裂所需的能量
   energyToMove: -0.2, // 移动所需的能量
 };
+
+declare global {
+  interface Window {
+    CellWorldConfig: {
+      WorldConfig: typeof WorldConfig;
+      OceanConfig: typeof OceanConfig;
+      CellConfig: typeof CellConfig;
+      PlantCellConfig: typeof PlantCellConfig;
+      HerbivCellConfig: typeof HerbivCellConfig;
+      CarnivCellConfig: typeof CarnivCellConfig;
+    };
+  }
+}
+window.CellWorldConfig = {
+  WorldConfig,
+  OceanConfig,
+  CellConfig,
+  PlantCellConfig,
+  HerbivCellConfig,
+  CarnivCellConfig,
+};
+console.log('CellWorldConfig', window.CellWorldConfig);

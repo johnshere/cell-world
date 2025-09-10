@@ -23,6 +23,10 @@ export default class CellPlant extends Cell {
       return;
     }
 
+    if (this.generation >= PlantCellConfig.maxGeneration) {
+      this.die();
+    }
+
     // 调用父类的分裂方法
     const child = super.split() as CellPlant;
     if (!child) return;
@@ -30,9 +34,5 @@ export default class CellPlant extends Cell {
     child.generation = this.generation - 1;
     child.lastSplitTime = 0;
     this.lastSplitTime = 0;
-
-    if (this.generation >= PlantCellConfig.maxGeneration) {
-      this.die();
-    }
   }
 }
