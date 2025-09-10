@@ -41,28 +41,32 @@ export default class Cell extends Entity {
   move() {}
   /** 生长 */
   grow() {}
-  isBreathing = false;
   /** 呼吸 */
   breath() {
-    if (this.isBreathing) return;
-    this.isBreathing = true;
-    const startTime = Date.now();
-    const prevColor = this.color;
-
-    const flash = () => {
-      if (this.color === prevColor) {
-        this.color = CellConfig.breathColor;
-      } else {
-        this.color = prevColor;
-      }
-      if (Date.now() - startTime >= CellConfig.breathDuration) {
-        this.color = prevColor;
-        this.isBreathing = false;
+    let isBreathing = false;
+    const color = this.color;
+    this.breath = function () {
+      if (isBreathing) {
         return;
       }
-      setTimeout(flash, CellConfig.breathInterval);
+      isBreathing = true;
+      const startTime = Date.now();
+
+      const flash = () => {
+        if (this.color === color) {
+          this.color = CellConfig.breathColor;
+        } else {
+          this.color = color;
+        }
+        if (Date.now() - startTime >= CellConfig.breathDuration) {
+          this.color = color;
+          isBreathing = false;
+          return;
+        }
+        setTimeout(flash, CellConfig.breathInterval);
+      };
+      flash();
     };
-    flash();
   }
   /** 死亡 */
   die() {

@@ -22,17 +22,17 @@ export default class CellHerbiv extends Cell {
   }
 
   grow() {
+    if (this.generation >= HerbivCellConfig.maxGeneration || this.energy <= 0) {
+      this.die();
+    }
     // 检查是否可以分裂
     if (this.energy >= HerbivCellConfig.energyToSplit) {
       const child = this.split() as CellHerbiv;
       const energy = this.energy / 2;
       if (child) {
         child.energy = energy;
+        this.energy = energy; // 分裂后重置能量
       }
-      this.energy = energy; // 分裂后重置能量
-    }
-    if (this.generation >= HerbivCellConfig.maxGeneration || this.energy <= 0) {
-      this.die();
     }
   }
 

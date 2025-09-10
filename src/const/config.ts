@@ -3,7 +3,7 @@ export const RootEl = document.getElementById('app')!;
 export const WorldConfig = {
   // 帧率控制
   FrameRate: 10,
-  Accelerate: 1,
+  Accelerate: 10,
 };
 
 // 海洋配置
@@ -15,8 +15,8 @@ export const OceanConfig = {
 export const CellConfig = {
   maxGeneration: 3, // 最大分裂次数
   maxNearingCells: 3, // 周围细胞数量超过此值时不分裂
-  breathInterval: 1000, // 呼吸间隔时间（毫秒）
-  breathDuration: 5000, // 呼吸颜色持续时间（毫秒）
+  breathInterval: 500, // 呼吸间隔时间（毫秒）
+  breathDuration: 3000, // 呼吸颜色持续时间（毫秒）
   breathColor: 'white', // 呼吸颜色
 };
 
@@ -49,7 +49,7 @@ export const CarnivCellConfig = {
   /** 觅食范围 */
   huntRange: 7,
   basedEnergy: 4, // 初始能量
-  energyToSplit: 8, // 分裂所需的能量
+  energyToSplit: 9, // 分裂所需的能量
   energyToMove: -0.2, // 移动所需的能量
 };
 
