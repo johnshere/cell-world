@@ -143,7 +143,7 @@ export default class CellHerbiv extends Cell {
     }
   }
 
-  /** 觅食 - 检测指定方向范围内的植物细胞 */
+  /** 觅食 - 在一定范围内寻找植物细胞作为目标 */
   hunt() {
     if (!this.ocean || this.target) return;
 

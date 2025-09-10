@@ -63,7 +63,9 @@ export const CarnivCellConfig = {
   /** 能量对速度的加成 */
   energyToSpeed: 80,
   /** 低能量阈值（低于等于该值时进入待机：不移动不消耗能量） */
-  lowEnergyThreshold: 2,
+  lowEnergyThreshold: 3,
+  /** 低能量状态下的能量消耗 */
+  lowEnergyConsumption: 0.001,
 };
 
 declare global {

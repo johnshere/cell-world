@@ -83,6 +83,7 @@ export default class CellCarniv extends Cell {
       } else {
         // 静止不动，但可吞食同格猎物，不扣能量
         this.eatHerbivoresAtCurrentPosition();
+        this.energy -= CarnivCellConfig.lowEnergyConsumption;
         return;
       }
     }
