@@ -2,7 +2,7 @@ export const RootEl = document.getElementById('app')!;
 
 // 帧率控制
 export const FrameRate = 10;
-export const Accelerate = 20; // 加速倍数
+export const Accelerate = 1; // 加速倍数
 
 // 海洋配置
 export const OceanConfig = {

@@ -91,7 +91,7 @@ export default class Cell extends Entity {
       );
     });
   }
-  getNextMovePosition(): { row: number; col: number } {
+  getNextMovePosition(): { row: number; col: number } | void {
     let count = 0;
     const getDirection = () => {
       if (count > 10) {
@@ -118,8 +118,10 @@ export default class Cell extends Entity {
     // 过滤出空闲位置
     const freePositions = this.findFreePosition(adjacentPositions);
 
-    // 随机移动到一个空闲位置
-    if (freePositions.length > 0) {
+    if (freePositions.length === 0) {
+      return;
+    } else if (freePositions.length > 0) {
+      // 随机移动到一个空闲位置
       const randomPos =
         freePositions[Math.floor(Math.random() * freePositions.length)];
       return randomPos;

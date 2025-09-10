@@ -51,9 +51,11 @@ export default class CellHerbiv extends Cell {
       this.moveTowardsTarget();
     } else {
       // 不处于狩猎状态，随即移动
-      const randomPos = this.getNextMovePosition();
-      this.row = randomPos.row;
-      this.col = randomPos.col;
+      const nextPos = this.getNextMovePosition();
+      if (nextPos) {
+        this.row = nextPos.row;
+        this.col = nextPos.col;
+      }
     }
     // 移动后检查当前位置是否有植物细胞并吃掉它们
     this.eatPlantsAtCurrentPosition();

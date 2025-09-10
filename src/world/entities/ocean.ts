@@ -6,13 +6,18 @@ import CellHerbiv from './cell-herbiv';
 import CellPlant from './cell-plant';
 import Entity from './entity';
 
+const CellTypeTpl = [] as (typeof Entity)[];
+CellTypeTpl.push(CellPlant, CellPlant, CellPlant);
+CellTypeTpl.push(CellHerbiv, CellHerbiv);
+// CellTypeTpl.push(CellCarniv);
+
 const ocean = {
   entities: [] as Entity[],
   deltaTime: 0,
   creator(cellTypes?: (typeof Entity)[]) {
     // 随机生成三种细胞类型之一
     if (!cellTypes) {
-      cellTypes = [CellPlant, CellHerbiv];
+      cellTypes = CellTypeTpl;
     }
     const randomType = cellTypes[Math.floor(Math.random() * cellTypes.length)];
     const newOne = new randomType();
@@ -31,9 +36,9 @@ const ocean = {
         this.creator([CellPlant]);
       }
       if (this.entities.length > OceanConfig.maxEntities) {
-        this.entities = this.entities.filter(entity => {
+        this.entities = this.entities.filter((entity, i) => {
           if (entity instanceof CellPlant) {
-            return Math.random() > 0.3;
+            return i % 2 === 0;
           }
           return true;
         });
