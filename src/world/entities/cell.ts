@@ -70,7 +70,7 @@ export default class Cell extends Entity {
   }
   /** 死亡 */
   die() {
-    this.ocean.entities = this.ocean.entities.filter(entity => entity !== this);
+    this.ocean.removeEntity(this);
   }
   getAdjacentPositions() {
     // 获取相邻位置（周围8个方向）
@@ -90,9 +90,7 @@ export default class Cell extends Entity {
       adjacentPositions = this.getAdjacentPositions();
     }
     return adjacentPositions.filter(pos => {
-      return !this.ocean.entities.some(
-        entity => entity.row === pos.row && entity.col === pos.col
-      );
+      return !this.ocean.hasEntityAt(pos.row, pos.col);
     });
   }
   getNextMovePosition(): { row: number; col: number } | void {
@@ -161,8 +159,8 @@ export default class Cell extends Entity {
       child.col = randomPos.col;
       child.ocean = this.ocean;
 
-      // 添加到海洋中
-      this.ocean.entities.push(child);
+      // 添加到海洋中（使用索引）
+      this.ocean.registerEntity(child);
 
       this.generation++;
       return child;

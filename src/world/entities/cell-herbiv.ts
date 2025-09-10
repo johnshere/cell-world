@@ -99,16 +99,12 @@ export default class CellHerbiv extends Cell {
       nextCol = this.col + (deltaCol > 0 ? 1 : -1);
     }
 
-    // 检查目标位置是否被非植物细胞占用
-    const blockingEntity = this.ocean.entities.find(
-      entity =>
-        entity !== this &&
-        entity.row === nextRow &&
-        entity.col === nextCol &&
-        !(entity instanceof CellPlant)
-    );
+    // 检查目标位置是否被非植物细胞占用（用索引加速）
+    const blocking = this.ocean
+      .getCellEntities(nextRow, nextCol)
+      .some(entity => entity !== this && !(entity instanceof CellPlant));
 
-    if (!blockingEntity) {
+    if (!blocking) {
       // 移动到新位置
       this.row = nextRow;
       this.col = nextCol;
@@ -120,13 +116,10 @@ export default class CellHerbiv extends Cell {
   private eatPlantsAtCurrentPosition() {
     if (!this.ocean) return;
 
-    // 找到当前位置的所有植物细胞
-    const plantsAtCurrentPosition = this.ocean.entities.filter(
-      entity =>
-        entity instanceof CellPlant &&
-        entity.row === this.row &&
-        entity.col === this.col
-    ) as CellPlant[];
+    // 用索引快速取出当前格子的植物
+    const plantsAtCurrentPosition = this.ocean
+      .getCellEntities(this.row, this.col)
+      .filter((e): e is CellPlant => e instanceof CellPlant);
 
     // 吃掉所有找到的植物细胞
     plantsAtCurrentPosition.forEach(plant => {
@@ -159,24 +152,27 @@ export default class CellHerbiv extends Cell {
     const endRow = this.row + range;
     const endCol = this.col + range;
 
-    // 检测搜索区域内是否有植物细胞
-    const plantCell = this.ocean.entities.find(entity => {
-      // 检查实体是否是植物细胞（通过类型判断）
-      if (!(entity instanceof CellPlant)) return false;
-      // 检查实体是否在搜索区域内
-      if (
-        entity.row >= startRow &&
-        entity.row <= endRow &&
-        entity.col >= startCol &&
-        entity.col <= endCol
-      ) {
-        return true;
+    // 先用索引收集候选植物集合
+    const candidates = new Set<CellPlant>();
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        const ents = this.ocean.getCellEntities(r, c);
+        for (const e of ents) {
+          if (e instanceof CellPlant) {
+            candidates.add(e);
+          }
+        }
       }
-      return false;
-    });
-    if (plantCell && !this.target) {
-      // 发现植物且当前不在狩猎状态，转换到狩猎状态
-      this.target = plantCell as CellPlant;
+    }
+
+    if (candidates.size === 0) return;
+
+    // 按原 entities 顺序选择首个候选，尽量不改变既有逻辑
+    for (const e of this.ocean.entities) {
+      if (candidates.has(e as CellPlant)) {
+        this.target = e as CellPlant;
+        break;
+      }
     }
   }
 }
