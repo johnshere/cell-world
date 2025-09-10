@@ -3,13 +3,13 @@ export const RootEl = document.getElementById('app')!;
 export const WorldConfig = {
   // 帧率控制
   FrameRate: 10,
-  Accelerate: 10,
+  Accelerate: 5,
 };
 
 // 海洋配置
 export const OceanConfig = {
   initEntities: 1000, // 最大细胞数量
-  maxEntities: 7000, // 最大细胞数量
+  maxEntities: 10000, // 最大细胞数量
 };
 
 export const CellConfig = {
@@ -36,8 +36,8 @@ export const HerbivCellConfig = {
   /** 觅食范围 */
   huntRange: 5,
   basedEnergy: 4, // 初始能量
-  energyToSplit: 6, // 分裂所需的能量
-  energyToMove: -0.1, // 移动所需的能量
+  energyToSplit: 7, // 分裂所需的能量
+  energyToMove: -0.15, // 移动所需的能量
 };
 
 // 肉食细胞配置

@@ -29,6 +29,8 @@ const ocean = {
       this.creator();
     }
     let time = 0;
+    // 灾难
+    let disasterTime = 0;
     this.storm = function () {
       time += this.deltaTime;
       if (time > 1000) {
@@ -36,11 +38,12 @@ const ocean = {
         this.creator([CellPlant]);
       }
       if (this.entities.length > OceanConfig.maxEntities) {
+        disasterTime = 3000;
+      }
+      if (disasterTime > 0) {
+        disasterTime -= this.deltaTime;
         this.entities = this.entities.filter((entity, i) => {
-          if (entity instanceof CellPlant) {
-            return i % 2 === 0;
-          }
-          return true;
+          return i % 9 !== 0;
         });
       }
     };
