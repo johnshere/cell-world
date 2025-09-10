@@ -6,11 +6,6 @@ import CellHerbiv from './cell-herbiv';
 import CellPlant from './cell-plant';
 import Entity from './entity';
 
-const CellTypeTpl = [] as (typeof Entity)[];
-CellTypeTpl.push(CellPlant, CellPlant, CellPlant);
-CellTypeTpl.push(CellHerbiv, CellHerbiv);
-// CellTypeTpl.push(CellCarniv);
-
 const ocean = {
   entities: [] as Entity[],
   deltaTime: 0,
@@ -98,12 +93,35 @@ const ocean = {
       this.registerEntity(e);
     }
   },
+  // 基于配置的初始生成权重（替代硬编码模板数组）
+  pickCellType(): typeof Entity {
+    const weights = OceanConfig.SpawnWeights;
+    const items: Array<{ ctor: typeof Entity; w: number }> = [
+      { ctor: CellPlant, w: weights.plant ?? 0 },
+      { ctor: CellHerbiv, w: weights.herbiv ?? 0 },
+      { ctor: CellCarniv, w: weights.carniv ?? 0 },
+    ];
+    const total = items.reduce((sum, it) => sum + Math.max(0, it.w), 0);
+    if (total <= 0) {
+      // 回退：若权重全为0，则默认使用植物
+      return CellPlant;
+    }
+    let r = Math.random() * total;
+    for (const it of items) {
+      const w = Math.max(0, it.w);
+      if (r < w) return it.ctor;
+      r -= w;
+    }
+    return items[0].ctor; // 理论上不会走到这里
+  },
   creator(cellTypes?: (typeof Entity)[]) {
     // 随机生成三种细胞类型之一
-    if (!cellTypes) {
-      cellTypes = CellTypeTpl;
+    let randomType: typeof Entity;
+    if (cellTypes && cellTypes.length > 0) {
+      randomType = cellTypes[Math.floor(Math.random() * cellTypes.length)];
+    } else {
+      randomType = this.pickCellType();
     }
-    const randomType = cellTypes[Math.floor(Math.random() * cellTypes.length)];
     const newOne = new randomType();
     newOne.ocean = this;
     // 使用索引注册
@@ -116,7 +134,7 @@ const ocean = {
     let time = 0;
     this.storm = function () {
       time += this.deltaTime;
-      if (time > 1000) {
+      if (time > OceanConfig.SpawnNaturalPlantInterval) {
         time = 0;
         this.creator([CellPlant]);
       }

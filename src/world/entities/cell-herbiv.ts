@@ -18,7 +18,7 @@ export default class CellHerbiv extends Cell {
         (HerbivCellConfig.moveMaxInterval - HerbivCellConfig.moveMinInterval) +
       HerbivCellConfig.moveMinInterval;
 
-    this.color = 'brown';
+    this.color = 'sandybrown';
   }
 
   grow() {
@@ -41,7 +41,10 @@ export default class CellHerbiv extends Cell {
     if (!this.ocean) return;
     this.lastMoveTime += this.deltaTime;
     // 检查是否可以移动
-    if (this.lastMoveTime < this.moveInterval - this.energy * 40) {
+    if (
+      this.lastMoveTime <
+      this.moveInterval - this.energy * HerbivCellConfig.energyToSpeed
+    ) {
       return;
     }
     this.lastMoveTime = 0;

@@ -1,6 +1,6 @@
 import { WorldConfig } from '../const/config.ts';
 import { createGraph, render } from '../graph/index.ts';
-import { createPanel } from '../panel/index.ts';
+import { createPanel, updatePerformance } from '../panel/index.ts';
 
 import ocean from './entities/ocean.ts';
 
@@ -11,13 +11,17 @@ const init = () => {
   let frameCount = 0;
   let totalRenderTime = 0;
   let totalEntityTime = 0;
+  let avgFrameTime100 = 0;
+  let avgEntityTimePerFrame100 = 0;
 
-  const intervalId = setInterval(() => {
+  const targetMs = 1000 / WorldConfig.FrameRate;
+
+  const tick = () => {
     const currentTime = performance.now();
     const deltaTime = currentTime - lastTime;
     lastTime = currentTime;
 
-    const renderStartTime = performance.now();
+    const frameStartTime = performance.now();
 
     ocean.update(deltaTime * WorldConfig.Accelerate);
 
@@ -25,43 +29,49 @@ const init = () => {
       render();
     }
 
-    if (frameCount < 1001) {
-      const renderEndTime = performance.now();
+    // 结束计时（包含update+render耗时）
+    const frameEndTime = performance.now();
+    const frameRenderTime = frameEndTime - frameStartTime;
 
-      // 计算渲染耗时
-      const frameRenderTime = renderEndTime - renderStartTime;
-      const entityCount = ocean.entities.length;
-      const avgEntityTime = entityCount > 0 ? frameRenderTime / entityCount : 0;
+    const entityCount = ocean.entities.length;
+    const currentEntityTime =
+      entityCount > 0 ? frameRenderTime / entityCount : 0;
 
-      // 累计统计
-      frameCount++;
-      totalRenderTime += frameRenderTime;
-      totalEntityTime += avgEntityTime;
+    // 统计与滚动平均（每100帧）
+    frameCount++;
+    totalRenderTime += frameRenderTime;
+    totalEntityTime += currentEntityTime;
 
-      // 每100帧输出一次性能统计
-      if (frameCount % 100 === 0) {
-        const avgFrameTime = totalRenderTime / 100;
-        const avgEntityTimePerFrame = totalEntityTime / 100;
-
-        console.log(`性能统计 (${frameCount}帧):`);
-        console.log(`  平均帧渲染耗时: ${avgFrameTime.toFixed(3)}ms`);
-        console.log(
-          `  平均每个实体耗时: ${(avgEntityTimePerFrame * 1000).toFixed(3)}μs`
-        );
-        console.log(`  当前实体数量: ${entityCount}`);
-        console.log(`  当前帧渲染耗时: ${frameRenderTime.toFixed(3)}ms`);
-        console.log(
-          `  当前帧每个实体耗时: ${(avgEntityTime * 1000).toFixed(3)}μs`
-        );
-
-        // 重置统计
-        totalRenderTime = 0;
-        totalEntityTime = 0;
-      }
+    if (frameCount % 100 === 0) {
+      avgFrameTime100 = totalRenderTime / 100;
+      avgEntityTimePerFrame100 = totalEntityTime / 100;
+      // 重置统计
+      totalRenderTime = 0;
+      totalEntityTime = 0;
     }
-  }, 1000 / WorldConfig.FrameRate);
 
-  return intervalId;
+    // 计算 FPS
+    const fpsCurrent = frameRenderTime > 0 ? 1000 / frameRenderTime : 0;
+    const avgFps100 = avgFrameTime100 > 0 ? 1000 / avgFrameTime100 : 0;
+
+    // 推送到面板
+    updatePerformance({
+      frameCount,
+      currentFrameTime: frameRenderTime,
+      currentEntityTime,
+      avgFrameTime100,
+      avgEntityTimePerFrame100,
+      currentEntityCount: entityCount,
+      fpsCurrent,
+      avgFps100,
+    });
+
+    // 根据上一帧耗时动态调度下一帧：休眠 = 目标帧时间 - 本帧耗时
+    const sleep = Math.max(0, targetMs - frameRenderTime);
+    setTimeout(tick, sleep) as unknown as number;
+  };
+
+  tick();
 };
 
 export function createWorld() {
