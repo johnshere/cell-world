@@ -3,18 +3,19 @@ export const RootEl = document.getElementById('app')!;
 export const WorldConfig = {
   // 帧率控制
   FrameRate: 10,
-  Accelerate: 10,
+  /** 开启加速 */
+  isAccelerate: true,
 };
 
 // 海洋配置
 export const OceanConfig = {
-  initEntities: 1000, // 最大细胞数量
+  initEntities: 3000, // 最大细胞数量
   /** 自然诞生植物细胞的时间间隔（毫秒） */
   SpawnNaturalPlantInterval: 2000,
   /** 初始细胞生成权重（用以控制概率，权重为0表示不生成该类型） */
   SpawnWeights: {
-    plant: 8, // 植物细胞权重（原模板为3份）
-    herbiv: 2, // 植食细胞权重（原模板为2份）
+    plant: 17, // 植物细胞权重（原模板为3份）
+    herbiv: 4, // 植食细胞权重（原模板为2份）
     carniv: 1, // 肉食细胞权重（原模板为1份）
   },
 };
@@ -38,34 +39,34 @@ export const PlantCellConfig = {
 export const HerbivCellConfig = {
   ...CellConfig,
   // maxGeneration: 5, // 最大分裂次数
-  moveMinInterval: 400, // 移动间隔时间（毫秒）
+  moveMinInterval: 1200, // 移动间隔时间（毫秒）
   moveMaxInterval: 4000, // 移动间隔时间（毫秒）
   /** 觅食范围 */
-  huntRange: 5,
+  huntRange: 4,
   basedEnergy: 4, // 初始能量
-  energyToSplit: 7, // 分裂所需的能量
-  energyToMove: -0.15, // 移动所需的能量
+  energyToSplit: 9, // 分裂所需的能量
+  energyToMove: -0.2, // 移动所需的能量
   /** 能量对速度的加成 */
-  energyToSpeed: 40,
+  energyToSpeed: 20,
 };
 
 // 肉食细胞配置
 export const CarnivCellConfig = {
   ...CellConfig,
   // maxGeneration: 5, // 最大分裂次数
-  moveMinInterval: 250, // 移动间隔时间（毫秒）
+  moveMinInterval: 300, // 移动间隔时间（毫秒）
   moveMaxInterval: 2000, // 移动间隔时间（毫秒）
   /** 觅食范围 */
-  huntRange: 10,
+  huntRange: 15,
   basedEnergy: 6, // 初始能量
   energyToSplit: 9, // 分裂所需的能量
   energyToMove: -0.15, // 移动所需的能量
   /** 能量对速度的加成 */
-  energyToSpeed: 80,
+  energyToSpeed: 30,
   /** 低能量阈值（低于等于该值时进入待机：不移动不消耗能量） */
   lowEnergyThreshold: 3,
   /** 低能量状态下的能量消耗 */
-  lowEnergyConsumption: 0.001,
+  lowEnergyConsumption: 0.003,
 };
 
 declare global {

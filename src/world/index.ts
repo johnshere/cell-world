@@ -14,6 +14,8 @@ const init = () => {
   let avgFrameTime100 = 0;
   let avgEntityTimePerFrame100 = 0;
 
+  let accelerate = 1;
+
   const targetMs = 1000 / WorldConfig.FrameRate;
 
   const tick = () => {
@@ -23,7 +25,7 @@ const init = () => {
 
     const frameStartTime = performance.now();
 
-    ocean.update(deltaTime * WorldConfig.Accelerate);
+    ocean.update(deltaTime * accelerate);
 
     if (!document.hidden) {
       render();
@@ -54,6 +56,15 @@ const init = () => {
     const fpsCurrent = frameRenderTime > 0 ? 1000 / frameRenderTime : 0;
     const avgFps100 = avgFrameTime100 > 0 ? 1000 / avgFrameTime100 : 0;
 
+    if (WorldConfig.isAccelerate) {
+      if (fpsCurrent > 10) {
+        accelerate++;
+      } else if (fpsCurrent < 5) {
+        accelerate--;
+      }
+      accelerate = Math.max(1, Math.min(10, accelerate));
+    }
+
     // 推送到面板
     updatePerformance({
       frameCount,
@@ -68,7 +79,7 @@ const init = () => {
 
     // 根据上一帧耗时动态调度下一帧：休眠 = 目标帧时间 - 本帧耗时
     const sleep = Math.max(0, targetMs - frameRenderTime);
-    setTimeout(tick, sleep) as unknown as number;
+    setTimeout(tick, sleep);
   };
 
   tick();
