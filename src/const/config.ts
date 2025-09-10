@@ -38,13 +38,13 @@ export const PlantCellConfig = {
 // 植食细胞配置
 export const HerbivCellConfig = {
   ...CellConfig,
-  // maxGeneration: 5, // 最大分裂次数
+  maxGeneration: 3, // 最大分裂次数
   moveMinInterval: 1200, // 移动间隔时间（毫秒）
   moveMaxInterval: 4000, // 移动间隔时间（毫秒）
   /** 觅食范围 */
   huntRange: 4,
   basedEnergy: 4, // 初始能量
-  energyToSplit: 9, // 分裂所需的能量
+  energyToSplit: 10, // 分裂所需的能量
   energyToMove: -0.2, // 移动所需的能量
   /** 能量对速度的加成 */
   energyToSpeed: 20,
@@ -54,12 +54,13 @@ export const HerbivCellConfig = {
 export const CarnivCellConfig = {
   ...CellConfig,
   // maxGeneration: 5, // 最大分裂次数
+  maxNearingCells: 5, // 周围细胞数量超过此值时不分裂
   moveMinInterval: 300, // 移动间隔时间（毫秒）
   moveMaxInterval: 2000, // 移动间隔时间（毫秒）
   /** 觅食范围 */
   huntRange: 15,
   basedEnergy: 6, // 初始能量
-  energyToSplit: 9, // 分裂所需的能量
+  energyToSplit: 7, // 分裂所需的能量
   energyToMove: -0.15, // 移动所需的能量
   /** 能量对速度的加成 */
   energyToSpeed: 30,
