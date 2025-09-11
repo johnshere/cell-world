@@ -15,6 +15,7 @@ interface PanelData {
     avgFps100: number; // average fps over last 100 frames
   };
   world: {
+    worldTime: number; // 世界时长
     accelerate: number; // 当前加速比率
     entityCount: number; // 当前实体数量（世界维度）
     distribution: {
@@ -38,6 +39,7 @@ const data: PanelData = {
     avgFps100: 0,
   },
   world: {
+    worldTime: 0,
     accelerate: 1,
     entityCount: 0,
     distribution: {
@@ -68,6 +70,7 @@ let viewportYEl: HTMLSpanElement;
 let viewportWEl: HTMLSpanElement;
 let viewportHEl: HTMLSpanElement;
 let viewportScaleEl: HTMLSpanElement;
+let worldTimeEl: HTMLSpanElement;
 let worldAccelerateEl: HTMLSpanElement;
 let worldEntityCountEl: HTMLSpanElement;
 let worldPlantCountEl: HTMLSpanElement;
@@ -129,7 +132,8 @@ export const init = () => {
   // 一次性构建结构并缓存节点
   content.append(
     createSection('🌍 世界信息', [
-      ['加速比率: ', (worldAccelerateEl = createValueSpan('#ff3d00')), ' x'],
+      ['世界时长: ', (worldTimeEl = createValueSpan('red'))],
+      ['加速比率: ', (worldAccelerateEl = createValueSpan('#ff3d00'))],
       ['实体数量: ', (worldEntityCountEl = createValueSpan('#d73a49'))],
       ['植物: ', (worldPlantCountEl = createValueSpan('#2e7d32'))],
       ['草食: ', (worldHerbivCountEl = createValueSpan('#20a4f3'))],
@@ -259,6 +263,22 @@ export const toggle = (toExpanded?: boolean) => {
   }
 };
 
+/** 时间单位进位功能（毫秒->秒->分钟->小时）。 */
+export const formatTime = (ms: number) => {
+  if (ms < 1000) {
+    return `${ms.toFixed(0)} ms`;
+  }
+  const s = ms / 1000;
+  if (s < 60) {
+    return `${s.toFixed(1)} sec`;
+  }
+  const m = s / 60;
+  if (m < 60) {
+    return `${m.toFixed(1)} min`;
+  }
+  const h = m / 60;
+  return `${h.toFixed(1)} hour`;
+};
 export const updateContent = () => {
   const { mousePosition, perf, world } = data;
 
@@ -287,6 +307,9 @@ export const updateContent = () => {
   if (viewportScaleEl) viewportScaleEl.textContent = viewport.scale.toFixed(2);
 
   // 世界信息
+  if (worldTimeEl) {
+    worldTimeEl.textContent = formatTime(world.worldTime);
+  }
   if (worldAccelerateEl)
     worldAccelerateEl.textContent = world.accelerate.toFixed(2);
   if (worldEntityCountEl)
@@ -298,7 +321,7 @@ export const updateContent = () => {
   if (worldCarnivCountEl)
     worldCarnivCountEl.textContent = `${world.distribution.carniv}`;
 };
-setInterval(() => updateContent && updateContent(), 500);
+setInterval(updateContent, 500);
 
 // 更新鼠标位置（不再主动触发重绘）
 export const updateMousePosition = (x: number, y: number) => {

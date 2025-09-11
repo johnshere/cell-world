@@ -11,6 +11,7 @@ import ocean from './entities/ocean.ts';
 const init = () => {
   console.log('init world');
 
+  let worldTime = 0;
   let lastTime = performance.now();
   let frameCount = 0;
   let totalRenderTime = 0;
@@ -28,12 +29,14 @@ const init = () => {
 
   const tick = () => {
     const currentTime = performance.now();
-    const deltaTime = currentTime - lastTime;
+    let deltaTime = currentTime - lastTime;
     lastTime = currentTime;
 
     const frameStartTime = performance.now();
 
-    ocean.update(deltaTime * accelerate);
+    deltaTime = deltaTime * accelerate;
+    worldTime += deltaTime;
+    ocean.update(deltaTime);
 
     if (!document.hidden) {
       render();
@@ -95,6 +98,7 @@ const init = () => {
       });
 
       updateWorldInfo({
+        worldTime,
         accelerate,
         entityCount,
         distribution: {
