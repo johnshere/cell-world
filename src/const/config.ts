@@ -28,6 +28,8 @@ export const OceanConfig = {
 };
 
 export const CellConfig = {
+  basedEnergy: 1, // 初始能量
+  energyToSplit: 20, // 分裂所需的能量
   maxGeneration: 3, // 最大分裂次数
   maxNearingCells: 2, // 周围同类细胞数量超过此值时不分裂
   breathInterval: 500, // 呼吸间隔时间（毫秒）
@@ -38,22 +40,20 @@ export const CellConfig = {
 // 植物细胞配置
 export const PlantCellConfig = {
   ...CellConfig,
-  splitMinInterval: 10000, // 分裂间隔时间（毫秒）
-  splitMaxInterval: 20000, // 分裂间隔时间（毫秒）
 };
 
 // 植食细胞配置
 export const HerbivCellConfig = {
   ...CellConfig,
-  maxGeneration: 3, // 最大分裂次数
-  maxNearingCells: 2, // 周围同类细胞数量超过此值时不分裂
+  maxGeneration: 2, // 最大分裂次数
+  maxNearingCells: 1, // 周围同类细胞数量超过此值时不分裂
   moveMinInterval: 1500, // 移动间隔时间（毫秒）
   moveMaxInterval: 4000, // 移动间隔时间（毫秒）
   /** 觅食范围 */
   huntRange: 5,
   basedEnergy: 4, // 初始能量
-  energyToSplit: 30, // 分裂所需的能量
-  energyToMove: -0.2, // 移动所需的能量
+  energyToSplit: 60, // 分裂所需的能量
+  energyToMove: -0.6, // 移动所需的能量
   /** 能量对速度的加成 */
   energyToSpeed: 20,
 };
@@ -61,7 +61,7 @@ export const HerbivCellConfig = {
 // 肉食细胞配置
 export const CarnivCellConfig = {
   ...CellConfig,
-  maxGeneration: 4, // 最大分裂次数
+  maxGeneration: 3, // 最大分裂次数
   maxNearingCells: 1, // 周围同类细胞数量超过此值时不分裂
   moveMinInterval: 700, // 移动间隔时间（毫秒）
   moveMaxInterval: 2000, // 移动间隔时间（毫秒）
@@ -70,12 +70,12 @@ export const CarnivCellConfig = {
   /** 低能量觅食范围 */
   huntRangeLowEnergy: 2,
   basedEnergy: 6, // 初始能量
-  energyToSplit: 16, // 分裂所需的能量
-  energyToMove: -0.3, // 移动所需的能量
+  energyToSplit: 40, // 分裂所需的能量
+  energyToMove: -1, // 移动所需的能量
   /** 能量对速度的加成 */
-  energyToSpeed: 50,
+  energyToSpeed: 10,
   /** 低能量阈值（低于等于该值时进入待机：不移动不消耗能量） */
-  lowEnergyThreshold: 5,
+  lowEnergyThreshold: 10,
   /** 低能量状态下的能量消耗 */
   lowEnergyConsumption: 0.035,
 };

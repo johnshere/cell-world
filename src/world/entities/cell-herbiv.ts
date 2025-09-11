@@ -123,7 +123,7 @@ export default class CellHerbiv extends Cell {
       plant.die();
 
       // 增加能量
-      this.energy += plant.generation;
+      this.energy += plant.energy;
 
       // 如果吃掉的是当前目标，清除目标
       if (plant === this.target) {

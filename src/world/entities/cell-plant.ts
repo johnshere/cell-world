@@ -4,22 +4,17 @@ import Cell from './cell';
 
 /** 植物细胞 */
 export default class CellPlant extends Cell {
-  private lastSplitTime = 0;
-  private splitInterval = 0;
+  energy = PlantCellConfig.basedEnergy;
   constructor() {
     super();
     this.color = 'green';
-    this.splitInterval =
-      PlantCellConfig.splitMinInterval +
-      Math.random() *
-        (PlantCellConfig.splitMaxInterval - PlantCellConfig.splitMinInterval);
+    this.energy = PlantCellConfig.basedEnergy * (1 + Math.random() * 4);
   }
 
   grow() {
-    this.lastSplitTime += this.deltaTime;
-
+    this.energy += this.deltaTime / 1000;
     // 检查是否可以分裂
-    if (this.lastSplitTime < this.splitInterval) {
+    if (this.energy < PlantCellConfig.energyToSplit) {
       return;
     }
 
@@ -32,7 +27,5 @@ export default class CellPlant extends Cell {
     if (!child) return;
     // 重置分裂计数
     child.generation = this.generation - 1;
-    child.lastSplitTime = 0;
-    this.lastSplitTime = 0;
   }
 }
