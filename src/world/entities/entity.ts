@@ -50,6 +50,24 @@ export default class Entity {
     }
   }
 
+  // 一次性设置位置，避免分别设置row/col导致的双次索引更新
+  setPosition(row: number, col: number) {
+    const oldRow = this._row;
+    const oldCol = this._col;
+    if (oldRow === row && oldCol === col) return;
+    this._row = row;
+    this._col = col;
+    if (this.ocean) {
+      this.ocean.updateEntityPosition(
+        this,
+        oldRow,
+        oldCol,
+        this._row,
+        this._col
+      );
+    }
+  }
+
   update(deltaTime: number) {
     this.deltaTime = deltaTime;
   }

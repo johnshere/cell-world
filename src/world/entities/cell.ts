@@ -1,4 +1,3 @@
-import { GraphConfig } from '../../const/graph-config';
 import { viewport } from '../../graph';
 import { CellConfig } from '../../const/config';
 
@@ -89,8 +88,15 @@ export default class Cell extends Entity {
     if (!adjacentPositions) {
       adjacentPositions = this.getAdjacentPositions();
     }
+    // 空闲位置定义：该格子中不存在与当前细胞同类的细胞（允许异类共址）
+    const SelfCtor = this.constructor as new () => Cell;
     return adjacentPositions.filter(pos => {
-      return !this.ocean.hasEntityAt(pos.row, pos.col);
+      const set = this.ocean.getCellSet(pos.row, pos.col);
+      if (!set) return true;
+      for (const e of set) {
+        if (e instanceof SelfCtor) return false;
+      }
+      return true;
     });
   }
   getNextMovePosition(): { row: number; col: number } | void {
@@ -141,9 +147,18 @@ export default class Cell extends Entity {
     // 过滤出空闲位置（没有其他细胞占据的位置）
     const freePositions = this.findFreePosition(adjacentPositions);
 
-    const nearingCellsCount = adjacentPositions.length - freePositions.length;
-    // 如果周围细胞超过配置的最大值，不进行分裂
-    if (nearingCellsCount > CellConfig.maxNearingCells) {
+    // 仅统计周围相邻格子中“同类”细胞的数量（每格按是否存在同类计数一次）
+    const SelfCtor2 = this.constructor as new () => Cell;
+    const sameTypeNeighbors = adjacentPositions.filter(pos => {
+      const set = this.ocean.getCellSet(pos.row, pos.col);
+      if (!set) return false;
+      for (const e of set) {
+        if (e instanceof SelfCtor2) return true;
+      }
+      return false;
+    }).length;
+    // 如果周围同类细胞数量超过配置的最大值，不进行分裂
+    if (sameTypeNeighbors > CellConfig.maxNearingCells) {
       return;
     }
 

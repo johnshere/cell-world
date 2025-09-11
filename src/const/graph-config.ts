@@ -5,7 +5,7 @@ export const GraphConfig = {
   },
   // 网格配置
   grid: {
-    size: 4,
+    size: 5,
     color: '#ccc',
     backgroundColor: '#dcdcdc',
   },

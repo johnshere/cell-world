@@ -348,5 +348,34 @@ export const drawRect = (col: number, row: number, color?: string) => {
   ctx.fillRect(screenPos.x, screenPos.y, scaledWidth, scaledHeight);
 };
 
+// 批量绘制相同颜色的矩形，减少Canvas状态切换
+export const drawRectsBatch = (
+  positions: { col: number; row: number }[],
+  color: string
+) => {
+  if (positions.length === 0) return;
+
+  // 一次性设置颜色
+  ctx.fillStyle = color;
+
+  // 预计算常用值，避免重复计算
+  const gridSize = GraphConfig.grid.size;
+  const scale = viewport.scale;
+  const scaledWidth = gridSize * scale;
+  const scaledHeight = gridSize * scale;
+  const axisX = axis.x + rulerSize;
+  const axisY = axis.y + rulerSize;
+
+  // 批量绘制所有矩形，内联坐标转换以减少函数调用
+  for (const pos of positions) {
+    const worldX = pos.col * gridSize;
+    const worldY = pos.row * gridSize;
+    // 内联worldToScreen计算，避免函数调用开销
+    const screenX = worldX * scale + axisX;
+    const screenY = worldY * scale + axisY;
+    ctx.fillRect(screenX, screenY, scaledWidth, scaledHeight);
+  }
+};
+
 // 保持向后兼容
 export default createGraph;

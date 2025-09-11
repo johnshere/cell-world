@@ -1,5 +1,6 @@
 import { OceanConfig } from '../../const/config';
 import { viewport } from '../../graph';
+import { drawRectsBatch } from '../../graph';
 
 import CellCarniv from './cell-carniv';
 import CellHerbiv from './cell-herbiv';
@@ -12,6 +13,13 @@ const ocean = {
   // 以行->列->实体集合 的索引结构，便于按网格快速查询
   grid: new Map<number, Map<number, Set<Entity>>>(),
 
+  // 增量统计缓存，避免每次遍历所有实体
+  entityStats: {
+    plant: 0,
+    herbiv: 0,
+    carniv: 0,
+    total: 0,
+  },
   // 获取单元格的实体集合
   getCellSet(
     row: number,
@@ -35,6 +43,8 @@ const ocean = {
   registerEntity(entity: Entity) {
     if (!this.entities.includes(entity)) {
       this.entities.push(entity);
+      // 增量更新统计
+      this.updateEntityStats(entity, 1);
     }
     const set = this.getCellSet(entity.row, entity.col, true)!;
     set.add(entity);
@@ -54,7 +64,34 @@ const ocean = {
     }
     // 再从实体数组移除
     const idx = this.entities.indexOf(entity);
-    if (idx !== -1) this.entities.splice(idx, 1);
+    if (idx !== -1) {
+      this.entities.splice(idx, 1);
+      // 增量更新统计
+      this.updateEntityStats(entity, -1);
+    }
+  },
+
+  // 增量更新实体统计
+  updateEntityStats(entity: Entity, delta: number) {
+    const entityType = entity.constructor.name;
+    if (entityType === 'CellPlant') {
+      this.entityStats.plant += delta;
+    } else if (entityType === 'CellHerbiv') {
+      this.entityStats.herbiv += delta;
+    } else if (entityType === 'CellCarniv') {
+      this.entityStats.carniv += delta;
+    }
+    this.entityStats.total += delta;
+  },
+
+  // 获取当前实体统计（无需遍历）
+  getEntityStats() {
+    return {
+      plant: this.entityStats.plant,
+      herbiv: this.entityStats.herbiv,
+      carniv: this.entityStats.carniv,
+      total: this.entityStats.total,
+    };
   },
   // 当实体位置发生变化时更新索引
   updateEntityPosition(
@@ -85,7 +122,9 @@ const ocean = {
   },
   getCellEntities(row: number, col: number): readonly Entity[] {
     const set = this.getCellSet(row, col);
-    return set ? Array.from(set) : [];
+    if (!set) return EMPTY;
+    // 惰性复制：仅在调用方需要数组语义时再展开
+    return Array.from(set);
   },
   rebuildGrid() {
     this.grid.clear();
@@ -153,6 +192,9 @@ const ocean = {
     const startCol = viewport.col;
     const endCol = viewport.col + viewport.cols;
 
+    // 按颜色分组实体，实现批量渲染
+    const colorGroups = new Map<string, { row: number; col: number }[]>();
+
     for (let r = startRow; r <= endRow; r++) {
       const rowMap = this.grid.get(r);
       if (!rowMap) continue;
@@ -160,12 +202,36 @@ const ocean = {
         const set = rowMap.get(c);
         if (!set) continue;
         for (const entity of set) {
-          entity.render();
+          const color = entity.color || 'white';
+          if (!colorGroups.has(color)) {
+            colorGroups.set(color, []);
+          }
+          colorGroups.get(color)!.push({ row: entity.row, col: entity.col });
         }
       }
     }
+
+    // 批量渲染相同颜色的实体
+    for (const [color, positions] of colorGroups) {
+      if (positions.length > 0) {
+        this.batchRenderRects(positions, color);
+      }
+    }
+  },
+
+  // 批量渲染相同颜色的矩形
+  batchRenderRects(positions: { row: number; col: number }[], color: string) {
+    // 转换为drawRectsBatch所需的格式
+    const batchPositions = positions.map(pos => ({
+      col: pos.col,
+      row: pos.row,
+    }));
+    drawRectsBatch(batchPositions, color);
   },
 };
+
+// 共享空数组实例，避免重复分配
+const EMPTY: readonly Entity[] = Object.freeze([]);
 
 export type Ocean = typeof ocean;
 export default ocean;

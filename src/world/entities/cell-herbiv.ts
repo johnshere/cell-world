@@ -56,8 +56,7 @@ export default class CellHerbiv extends Cell {
       // 不处于狩猎状态，随即移动
       const nextPos = this.getNextMovePosition();
       if (nextPos) {
-        this.row = nextPos.row;
-        this.col = nextPos.col;
+        this.setPosition(nextPos.row, nextPos.col);
       }
     }
     // 移动后检查当前位置是否有植物细胞并吃掉它们
@@ -102,27 +101,21 @@ export default class CellHerbiv extends Cell {
       nextCol = this.col + (deltaCol > 0 ? 1 : -1);
     }
 
-    // 检查目标位置是否被非植物细胞占用（用索引加速）
-    const blocking = this.ocean
-      .getCellEntities(nextRow, nextCol)
-      .some(entity => entity !== this && !(entity instanceof CellPlant));
-
-    if (!blocking) {
-      // 移动到新位置
-      this.row = nextRow;
-      this.col = nextCol;
-    }
-    // 如果目标位置被非植物细胞占用，保持当前位置，下次再尝试
+    // 移动到新位置
+    this.setPosition(nextRow, nextCol);
   }
 
   /** 吃掉当前位置的植物细胞 */
   private eatPlantsAtCurrentPosition() {
     if (!this.ocean) return;
 
-    // 用索引快速取出当前格子的植物
-    const plantsAtCurrentPosition = this.ocean
-      .getCellEntities(this.row, this.col)
-      .filter((e): e is CellPlant => e instanceof CellPlant);
+    // 用索引快速取出当前格子的植物（避免数组分配，先收集后处理）
+    const set = this.ocean.getCellSet(this.row, this.col);
+    if (!set) return;
+    const plantsAtCurrentPosition: CellPlant[] = [];
+    for (const e of set) {
+      if (e instanceof CellPlant) plantsAtCurrentPosition.push(e);
+    }
 
     // 吃掉所有找到的植物细胞
     plantsAtCurrentPosition.forEach(plant => {
@@ -159,8 +152,9 @@ export default class CellHerbiv extends Cell {
     const candidates = new Set<CellPlant>();
     for (let r = startRow; r <= endRow; r++) {
       for (let c = startCol; c <= endCol; c++) {
-        const ents = this.ocean.getCellEntities(r, c);
-        for (const e of ents) {
+        const set = this.ocean.getCellSet(r, c);
+        if (!set) continue;
+        for (const e of set) {
           if (e instanceof CellPlant) {
             candidates.add(e);
           }

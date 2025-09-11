@@ -46,14 +46,14 @@ export default class CellCarniv extends Cell {
 
     // 低能量待机但可反击：不做随机游走；若目标在半径内则追击；否则仅在半径内尝试锁定目标。
     if (this.energy <= CarnivCellConfig.lowEnergyThreshold) {
-      const halfRange = Math.max(1, Math.floor(CarnivCellConfig.huntRange / 2));
+      const huntRange = CarnivCellConfig.huntRangeLowEnergy;
 
       // 检查现有目标是否仍在半径内
       let canPursue = false;
       if (this.target) {
         const withinHalf =
-          Math.abs(this.target.row - this.row) <= halfRange &&
-          Math.abs(this.target.col - this.col) <= halfRange &&
+          Math.abs(this.target.row - this.row) <= huntRange &&
+          Math.abs(this.target.col - this.col) <= huntRange &&
           this.ocean.entities.includes(this.target);
         if (!withinHalf) this.target = null;
         else canPursue = true;
@@ -61,7 +61,7 @@ export default class CellCarniv extends Cell {
 
       // 若没有可追击目标，则在半径内尝试寻找
       if (!canPursue) {
-        const found = this.huntInRange(halfRange);
+        const found = this.huntInRange(huntRange);
         canPursue = !!found;
       }
 
@@ -104,8 +104,7 @@ export default class CellCarniv extends Cell {
       // 不处于狩猎状态，随机移动
       const nextPos = this.getNextMovePosition();
       if (nextPos) {
-        this.row = nextPos.row;
-        this.col = nextPos.col;
+        this.setPosition(nextPos.row, nextPos.col);
       }
     }
     // 移动后检查当前位置是否有植食细胞并吃掉它们
@@ -151,14 +150,20 @@ export default class CellCarniv extends Cell {
     }
 
     // 检查目标位置是否被非猎物占用（用索引加速）
-    const blocking = this.ocean
-      .getCellEntities(nextRow, nextCol)
-      .some(entity => entity !== this && !(entity instanceof CellHerbiv));
+    const blockingSet = this.ocean.getCellSet(nextRow, nextCol);
+    let blocking = false;
+    if (blockingSet) {
+      for (const entity of blockingSet) {
+        if (entity !== this && !(entity instanceof CellHerbiv)) {
+          blocking = true;
+          break;
+        }
+      }
+    }
 
     if (!blocking) {
       // 移动到新位置
-      this.row = nextRow;
-      this.col = nextCol;
+      this.setPosition(nextRow, nextCol);
     }
     // 如果目标位置被非猎物占用，保持当前位置，下次再尝试
   }
@@ -175,8 +180,9 @@ export default class CellCarniv extends Cell {
     const candidates = new Set<CellHerbiv>();
     for (let r = startRow; r <= endRow; r++) {
       for (let c = startCol; c <= endCol; c++) {
-        const ents = this.ocean.getCellEntities(r, c);
-        for (const e of ents) {
+        const set = this.ocean.getCellSet(r, c);
+        if (!set) continue;
+        for (const e of set) {
           if (e instanceof CellHerbiv) {
             candidates.add(e);
           }
@@ -200,9 +206,12 @@ export default class CellCarniv extends Cell {
     if (!this.ocean) return;
 
     // 用索引快速取出当前格子的植食细胞
-    const herbivsAtCurrentPosition = this.ocean
-      .getCellEntities(this.row, this.col)
-      .filter((e): e is CellHerbiv => e instanceof CellHerbiv);
+    const herbivSet = this.ocean.getCellSet(this.row, this.col);
+    if (!herbivSet) return;
+    const herbivsAtCurrentPosition: CellHerbiv[] = [];
+    for (const e of herbivSet) {
+      if (e instanceof CellHerbiv) herbivsAtCurrentPosition.push(e);
+    }
 
     // 吃掉所有找到的植食细胞
     herbivsAtCurrentPosition.forEach(prey => {
@@ -239,8 +248,9 @@ export default class CellCarniv extends Cell {
     const candidates = new Set<CellHerbiv>();
     for (let r = startRow; r <= endRow; r++) {
       for (let c = startCol; c <= endCol; c++) {
-        const ents = this.ocean.getCellEntities(r, c);
-        for (const e of ents) {
+        const set = this.ocean.getCellSet(r, c);
+        if (!set) continue;
+        for (const e of set) {
           if (e instanceof CellHerbiv) {
             candidates.add(e);
           }

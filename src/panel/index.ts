@@ -1,7 +1,6 @@
 import { RootEl } from '../const/config';
 import { GraphConfig } from '../const/graph-config';
 import { viewport } from '../graph';
-import ocean from '../world/entities/ocean';
 
 interface PanelData {
   mousePosition: { x: number; y: number };
@@ -14,6 +13,15 @@ interface PanelData {
     currentEntityCount: number;
     fpsCurrent: number; // frames per second (based on current frame time)
     avgFps100: number; // average fps over last 100 frames
+  };
+  world: {
+    accelerate: number; // 当前加速比率
+    entityCount: number; // 当前实体数量（世界维度）
+    distribution: {
+      plant: number;
+      herbiv: number;
+      carniv: number;
+    };
   };
 }
 
@@ -28,6 +36,15 @@ const data: PanelData = {
     currentEntityCount: 0,
     fpsCurrent: 0,
     avgFps100: 0,
+  },
+  world: {
+    accelerate: 1,
+    entityCount: 0,
+    distribution: {
+      plant: 0,
+      herbiv: 0,
+      carniv: 0,
+    },
   },
 };
 
@@ -51,6 +68,11 @@ let viewportYEl: HTMLSpanElement;
 let viewportWEl: HTMLSpanElement;
 let viewportHEl: HTMLSpanElement;
 let viewportScaleEl: HTMLSpanElement;
+let worldAccelerateEl: HTMLSpanElement;
+let worldEntityCountEl: HTMLSpanElement;
+let worldPlantCountEl: HTMLSpanElement;
+let worldHerbivCountEl: HTMLSpanElement;
+let worldCarnivCountEl: HTMLSpanElement;
 
 let isExpanded = true;
 
@@ -106,6 +128,13 @@ export const init = () => {
 
   // 一次性构建结构并缓存节点
   content.append(
+    createSection('🌍 世界信息', [
+      ['加速比率: ', (worldAccelerateEl = createValueSpan('#ff3d00')), ' x'],
+      ['实体数量: ', (worldEntityCountEl = createValueSpan('#d73a49'))],
+      ['植物: ', (worldPlantCountEl = createValueSpan('#2e7d32'))],
+      ['草食: ', (worldHerbivCountEl = createValueSpan('#20a4f3'))],
+      ['肉食: ', (worldCarnivCountEl = createValueSpan('#d73a49'))],
+    ]),
     createSection('⚡ 性能统计', [
       ['帧数: ', (frameCountEl = createValueSpan('#6f42c1'))],
       ['当前帧耗时: ', (frameTimeEl = createValueSpan('#ff6b35')), ' ms'],
@@ -231,7 +260,7 @@ export const toggle = (toExpanded?: boolean) => {
 };
 
 export const updateContent = () => {
-  const { mousePosition, perf } = data;
+  const { mousePosition, perf, world } = data;
 
   // 只更新文本，避免整块重绘
   if (mouseXEl) mouseXEl.textContent = mousePosition.x.toFixed(0);
@@ -256,6 +285,18 @@ export const updateContent = () => {
   if (viewportWEl) viewportWEl.textContent = viewport.width.toFixed(0);
   if (viewportHEl) viewportHEl.textContent = viewport.height.toFixed(0);
   if (viewportScaleEl) viewportScaleEl.textContent = viewport.scale.toFixed(2);
+
+  // 世界信息
+  if (worldAccelerateEl)
+    worldAccelerateEl.textContent = world.accelerate.toFixed(2);
+  if (worldEntityCountEl)
+    worldEntityCountEl.textContent = `${world.entityCount}`;
+  if (worldPlantCountEl)
+    worldPlantCountEl.textContent = `${world.distribution.plant}`;
+  if (worldHerbivCountEl)
+    worldHerbivCountEl.textContent = `${world.distribution.herbiv}`;
+  if (worldCarnivCountEl)
+    worldCarnivCountEl.textContent = `${world.distribution.carniv}`;
 };
 setInterval(() => updateContent && updateContent(), 500);
 
@@ -272,6 +313,11 @@ export const updateViewportPosition = () => {
 // 更新性能数据（不再主动触发重绘）
 export const updatePerformance = (perf: Partial<PanelData['perf']>) => {
   data.perf = { ...data.perf, ...perf };
+};
+
+// 更新世界信息（不再主动触发重绘）
+export const updateWorldInfo = (world: Partial<PanelData['world']>) => {
+  data.world = { ...data.world, ...world };
 };
 
 // 销毁函数
