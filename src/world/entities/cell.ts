@@ -62,9 +62,9 @@ export default class Cell extends Entity {
 
       const flash = () => {
         if (this.color === this.breathColor) {
-          this.color = this.breathColor;
-        } else {
           this.color = color;
+        } else {
+          this.color = this.breathColor;
         }
         if (Date.now() - startTime >= this.breathDuration) {
           this.color = color;
@@ -148,8 +148,6 @@ export default class Cell extends Entity {
   }
   /** 分裂 */
   split() {
-    if (!this.ocean) return;
-
     // 获取相邻位置（周围8个方向）
     const adjacentPositions = this.getAdjacentPositions();
 

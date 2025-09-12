@@ -15,17 +15,19 @@ export default class CellCarniv extends Cell {
   /** 觅食范围 */
   huntRange = 15;
   /** 低能量觅食范围 */
-  huntRangeLowEnergy = 2;
+  huntRangeLowEnergy = 3;
+  /** 捕猎失败被反杀的概率（比目标能量低时） */
+  huntFailedRatio = 0.2;
 
-  energy = 6;
-  energyToSplit = 150; // 分裂所需的能量
-  energyToMove = -6; // 移动所需的能量
+  energy = 60;
+  energyToSplit = 400; // 分裂所需的能量
+  energyToMove = -2.5; // 移动所需的能量
   /** 能量对速度的加成 */
-  energyToSpeed = 5;
-  /** 低能量阈值（低于等于该值时进入待机：不移动不消耗能量） */
-  lowEnergyThreshold = 14;
+  energyToSpeed = 2;
+  /** 低能量阈值%（低于等于该值时进入待机：不移动不消耗能量） */
+  lowEnergyThreshold = 16;
   /** 低能量状态下的能量消耗 */
-  lowEnergyConsumption = 0.04;
+  lowEnergyConsumption = 0.02;
   constructor() {
     super();
 
@@ -33,7 +35,8 @@ export default class CellCarniv extends Cell {
     this.moveInterval =
       Math.random() * (this.moveMaxInterval - this.moveMinInterval) +
       this.moveMinInterval;
-    this.energy = Math.ceil(Math.random() * this.lowEnergyConsumption * 2);
+    this.energy = this.energy * (Math.random() + 1);
+    this.lowEnergyThreshold = (1.5 - Math.random()) * this.lowEnergyThreshold;
 
     this.color = 'DeepPink';
   }
@@ -56,8 +59,6 @@ export default class CellCarniv extends Cell {
 
   /** 移动到相邻位置 */
   move() {
-    if (!this.ocean) return;
-
     // 所有状态下都先累积移动计时，便于低能量追击同样遵循节奏
     this.lastMoveTime += this.deltaTime;
 
@@ -89,17 +90,16 @@ export default class CellCarniv extends Cell {
           this.moveInterval - this.energy * this.energyToSpeed
         ) {
           // 未到移动时间，仍尝试原地进食
-          this.eatHerbivoresAtCurrentPosition();
+          this.attackAndEat();
           return;
         }
         this.lastMoveTime = 0;
         this.moveTowardsTarget();
-        this.eatHerbivoresAtCurrentPosition();
+        this.attackAndEat();
         this.energy += this.energyToMove; // 追击产生移动能耗
         return;
       } else {
-        // 静止不动，但可吞食同格猎物，不扣能量
-        this.eatHerbivoresAtCurrentPosition();
+        this.attackAndEat();
         this.energy -= this.lowEnergyConsumption;
         return;
       }
@@ -125,14 +125,14 @@ export default class CellCarniv extends Cell {
       }
     }
     // 移动后检查当前位置是否有植食细胞并吃掉它们
-    this.eatHerbivoresAtCurrentPosition();
+    this.attackAndEat();
 
     this.energy += this.energyToMove;
   }
 
   /** 向目标移动并尝试进食 */
   private moveTowardsTarget() {
-    if (!this.target || !this.ocean) {
+    if (!this.target) {
       this.target = null;
       return;
     }
@@ -187,8 +187,6 @@ export default class CellCarniv extends Cell {
 
   /** 在指定范围内寻找植食细胞目标（返回选择的目标或 null） */
   private huntInRange(range: number): CellHerbiv | null {
-    if (!this.ocean) return null;
-
     const startRow = this.row - range;
     const startCol = this.col - range;
     const endRow = this.row + range;
@@ -219,9 +217,7 @@ export default class CellCarniv extends Cell {
   }
 
   /** 吃掉当前位置的植食细胞 */
-  private eatHerbivoresAtCurrentPosition() {
-    if (!this.ocean) return;
-
+  private attackAndEat() {
     // 用索引快速取出当前格子的植食细胞
     const herbivSet = this.ocean.getCellSet(this.row, this.col);
     if (!herbivSet) return;
@@ -231,7 +227,13 @@ export default class CellCarniv extends Cell {
     }
 
     // 吃掉所有找到的植食细胞
-    herbivsAtCurrentPosition.forEach(prey => {
+    for (const prey of herbivsAtCurrentPosition) {
+      if (this.energy < prey.energy) {
+        if (Math.random() < this.huntFailedRatio) {
+          this.die();
+          return;
+        }
+      }
       // 从海洋中移除猎物
       prey.die();
 
@@ -242,16 +244,14 @@ export default class CellCarniv extends Cell {
       if (prey === this.target) {
         this.target = null;
       }
-    });
 
-    if (herbivsAtCurrentPosition.length) {
       this.breath();
     }
   }
 
   /** 觅食 - 在一定范围内寻找植食细胞作为目标（正常状态下使用全范围） */
   hunt() {
-    if (!this.ocean || this.target) return;
+    if (this.target) return;
 
     const range = this.huntRange;
 

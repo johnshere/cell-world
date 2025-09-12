@@ -69,11 +69,16 @@ const init = () => {
 
     if (WorldConfig.IsAutoAccelerate) {
       if (fpsCurrent > WorldConfig.FpsToAccelerate) {
-        accelerate += WorldConfig.AccelerateStep;
+        if (accelerate < WorldConfig.AccelerateMax) {
+          accelerate += WorldConfig.AccelerateStep;
+          accelerate = Math.min(WorldConfig.AccelerateMax, accelerate);
+        }
       } else if (fpsCurrent < WorldConfig.FpsToDecelerate) {
-        accelerate -= WorldConfig.AccelerateStep;
+        if (accelerate > 1) {
+          accelerate -= WorldConfig.AccelerateStep;
+          accelerate = Math.max(1, accelerate);
+        }
       }
-      accelerate = Math.max(1, Math.min(WorldConfig.AccelerateMax, accelerate));
     } else {
       accelerate = 1;
     }

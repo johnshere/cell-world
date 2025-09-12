@@ -10,9 +10,9 @@ export default class CellHerbiv extends Cell {
   /** 觅食范围 */
   huntRange = 5;
 
-  energy = 4;
-  energyToSplit = 90; // 分裂所需的能量
-  energyToMove = -3; // 移动所需的能量
+  energy = 40;
+  energyToSplit = 110; // 分裂所需的能量
+  energyToMove = -2; // 移动所需的能量
   /** 能量对速度的加成 */
   energyToSpeed = 10;
   private lastMoveTime = 0;
@@ -47,7 +47,6 @@ export default class CellHerbiv extends Cell {
 
   /** 移动到相邻位置 */
   move() {
-    if (!this.ocean) return;
     this.lastMoveTime += this.deltaTime;
     // 检查是否可以移动
     if (
@@ -76,7 +75,7 @@ export default class CellHerbiv extends Cell {
 
   /** 向目标移动并尝试进食 */
   private moveTowardsTarget() {
-    if (!this.target || !this.ocean) {
+    if (!this.target) {
       this.target = null;
       return;
     }
@@ -116,8 +115,6 @@ export default class CellHerbiv extends Cell {
 
   /** 吃掉当前位置的植物细胞 */
   private eatPlantsAtCurrentPosition() {
-    if (!this.ocean) return;
-
     // 用索引快速取出当前格子的植物（避免数组分配，先收集后处理）
     const set = this.ocean.getCellSet(this.row, this.col);
     if (!set) return;
@@ -147,7 +144,7 @@ export default class CellHerbiv extends Cell {
 
   /** 觅食 - 在一定范围内寻找植物细胞作为目标 */
   hunt() {
-    if (!this.ocean || this.target) return;
+    if (this.target) return;
 
     const range = this.huntRange;
 

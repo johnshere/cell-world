@@ -1,4 +1,4 @@
-import { RootEl } from '../const/config';
+import { RootEl, WorldConfig } from '../const/config';
 import { GraphConfig } from '../const/graph-config';
 import { viewport } from '../graph';
 
@@ -52,6 +52,7 @@ const data: PanelData = {
 
 let el: HTMLDivElement;
 let toggleBtn: HTMLButtonElement;
+let accelerateBtn: HTMLButtonElement;
 let content: HTMLDivElement;
 
 // 缓存面板中各数值节点的引用，避免每次重绘
@@ -120,6 +121,27 @@ export const init = () => {
       z-index: 1001;
     `;
 
+  // 创建加速控制按钮
+  accelerateBtn.innerHTML = '⚡';
+  accelerateBtn.style.cssText = `
+      position: fixed;
+      top: 40px;
+      right: 70px;
+      width: 40px;
+      height: 40px;
+      border: none;
+      background: #28a745;
+      color: white;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      z-index: 1001;
+    `;
+
   // 创建内容区域
   content.style.cssText = `
       padding: 20px;
@@ -175,10 +197,22 @@ export const init = () => {
   el.appendChild(content);
   RootEl.appendChild(el);
   RootEl.appendChild(toggleBtn);
+  RootEl.appendChild(accelerateBtn);
 
   bindEvents();
   updateContent();
   toggle(GraphConfig.panel.defaultExpanded);
+  
+  // 初始化加速按钮状态
+  if (WorldConfig.IsAutoAccelerate) {
+    accelerateBtn.style.background = '#28a745';
+    accelerateBtn.innerHTML = '⚡';
+    accelerateBtn.title = '自动加速已开启，点击关闭';
+  } else {
+    accelerateBtn.style.background = '#dc3545';
+    accelerateBtn.innerHTML = '⏸';
+    accelerateBtn.title = '自动加速已关闭，点击开启';
+  }
 };
 
 function createSection(
@@ -243,6 +277,20 @@ export const bindEvents = () => {
     toggleBtn.style.background = '#007acc';
     toggleBtn.style.transform = 'scale(1)';
   });
+
+  // 加速按钮事件
+  accelerateBtn.addEventListener('click', () => {
+    toggleAccelerate();
+  });
+
+  // 加速按钮悬停效果
+  accelerateBtn.addEventListener('mouseenter', () => {
+    accelerateBtn.style.transform = 'scale(1.05)';
+  });
+
+  accelerateBtn.addEventListener('mouseleave', () => {
+    accelerateBtn.style.transform = 'scale(1)';
+  });
 };
 
 export const toggle = (toExpanded?: boolean) => {
@@ -260,6 +308,20 @@ export const toggle = (toExpanded?: boolean) => {
     el.style.transform = 'translateX(100%)';
     toggleBtn.innerHTML = '📊';
     el.style.background = 'rgba(255, 255, 255, 0.95)';
+  }
+};
+
+export const toggleAccelerate = () => {
+  WorldConfig.IsAutoAccelerate = !WorldConfig.IsAutoAccelerate;
+  
+  if (WorldConfig.IsAutoAccelerate) {
+    accelerateBtn.style.background = '#28a745';
+    accelerateBtn.innerHTML = '⚡';
+    accelerateBtn.title = '自动加速已开启，点击关闭';
+  } else {
+    accelerateBtn.style.background = '#dc3545';
+    accelerateBtn.innerHTML = '⏸';
+    accelerateBtn.title = '自动加速已关闭，点击开启';
   }
 };
 
@@ -352,6 +414,7 @@ export const destroy = () => {
 export function createPanel() {
   el = document.createElement('div');
   toggleBtn = document.createElement('button');
+  accelerateBtn = document.createElement('button');
   content = document.createElement('div');
 
   // 初始化
