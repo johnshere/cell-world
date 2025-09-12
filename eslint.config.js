@@ -72,7 +72,15 @@ export default [
       curly: ['error', 'all'],
 
       // Prettier 规则
-      'prettier/prettier': 'error',
+      'prettier/prettier': [
+        'error',
+        {
+          endOfLine: 'lf',
+        },
+      ],
+
+      // 换行符规则
+      'linebreak-style': ['error', 'unix'],
 
       // 禁用与 Prettier 冲突的规则
       ...prettierConfig.rules,
