@@ -75,7 +75,7 @@ const init = () => {
       }
       accelerate = Math.max(1, Math.min(WorldConfig.AccelerateMax, accelerate));
     } else {
-      accelerate = WorldConfig.AccelerateMax;
+      accelerate = 1;
     }
 
     // 新增：对面板推送进行节流（减少跨线程/消息 & 避免每帧全量统计）

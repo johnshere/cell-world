@@ -1,25 +1,23 @@
-import { PlantCellConfig } from '../../const/config';
-
 import Cell from './cell';
 
 /** 植物细胞 */
 export default class CellPlant extends Cell {
-  energy = PlantCellConfig.basedEnergy;
+  color = 'green';
   constructor() {
     super();
-    this.color = 'green';
-    this.energy = PlantCellConfig.basedEnergy * (1 + Math.random() * 4);
+    this.energy = this.energy + Math.floor(Math.random() * this.energyToSplit);
   }
 
   grow() {
     this.energy += this.deltaTime / 1000;
     // 检查是否可以分裂
-    if (this.energy < PlantCellConfig.energyToSplit) {
+    if (this.energy < this.energyToSplit) {
       return;
     }
 
-    if (this.generation >= PlantCellConfig.maxGeneration) {
+    if (this.generation >= this.maxGeneration) {
       this.die();
+      return;
     }
 
     // 调用父类的分裂方法

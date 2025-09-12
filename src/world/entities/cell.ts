@@ -1,10 +1,19 @@
 import { viewport } from '../../graph';
-import { CellConfig } from '../../const/config';
 
 import Entity from './entity';
 
 export default class Cell extends Entity {
+  /** 能量 */
+  energy = 1;
+  energyToSplit = 20; // 分裂所需的能量
+
   generation = 0;
+  maxGeneration = 3; // 最大分裂次数
+  maxNearingCells = 2; // 周围同类细胞数量超过此值时不分裂
+  breathInterval = 500; // 呼吸间隔时间（毫秒）
+  breathDuration = 3000; // 呼吸颜色持续时间（毫秒）
+  breathColor = 'white'; // 呼吸颜色
+
   moveDirections = [0, 1]; // 0-上 1-右 2-下 3-左
   constructor() {
     super();
@@ -52,17 +61,17 @@ export default class Cell extends Entity {
       const startTime = Date.now();
 
       const flash = () => {
-        if (this.color === color) {
-          this.color = CellConfig.breathColor;
+        if (this.color === this.breathColor) {
+          this.color = this.breathColor;
         } else {
           this.color = color;
         }
-        if (Date.now() - startTime >= CellConfig.breathDuration) {
+        if (Date.now() - startTime >= this.breathDuration) {
           this.color = color;
           isBreathing = false;
           return;
         }
-        setTimeout(flash, CellConfig.breathInterval);
+        setTimeout(flash, this.breathInterval);
       };
       flash();
     };
@@ -158,7 +167,7 @@ export default class Cell extends Entity {
       return false;
     }).length;
     // 如果周围同类细胞数量超过配置的最大值，不进行分裂
-    if (sameTypeNeighbors > CellConfig.maxNearingCells) {
+    if (sameTypeNeighbors > this.maxNearingCells) {
       return;
     }
 

@@ -1,5 +1,3 @@
-import { CarnivCellConfig } from '../../const/config';
-
 import Cell from './cell';
 import CellHerbiv from './cell-herbiv';
 
@@ -8,26 +6,45 @@ export default class CellCarniv extends Cell {
   private lastMoveTime = 0;
   private moveInterval = 0;
   private target: CellHerbiv | null = null; // 处于狩猎状态
-  energy = CarnivCellConfig.basedEnergy;
 
+  maxGeneration = 3; // 最大分裂次数
+  maxNearingCells = 1; // 周围同类细胞数量超过此值时不分裂
+  moveMinInterval = 700; // 移动间隔时间（毫秒）
+  moveMaxInterval = 2000; // 移动间隔时间（毫秒）
+
+  /** 觅食范围 */
+  huntRange = 15;
+  /** 低能量觅食范围 */
+  huntRangeLowEnergy = 2;
+
+  energy = 6;
+  energyToSplit = 150; // 分裂所需的能量
+  energyToMove = -6; // 移动所需的能量
+  /** 能量对速度的加成 */
+  energyToSpeed = 5;
+  /** 低能量阈值（低于等于该值时进入待机：不移动不消耗能量） */
+  lowEnergyThreshold = 14;
+  /** 低能量状态下的能量消耗 */
+  lowEnergyConsumption = 0.04;
   constructor() {
     super();
 
     // 随机设置移动间隔
     this.moveInterval =
-      Math.random() *
-        (CarnivCellConfig.moveMaxInterval - CarnivCellConfig.moveMinInterval) +
-      CarnivCellConfig.moveMinInterval;
+      Math.random() * (this.moveMaxInterval - this.moveMinInterval) +
+      this.moveMinInterval;
+    this.energy = Math.ceil(Math.random() * this.lowEnergyConsumption * 2);
 
     this.color = 'DeepPink';
   }
 
   grow() {
-    if (this.generation >= CarnivCellConfig.maxGeneration || this.energy <= 0) {
+    if (this.generation >= this.maxGeneration || this.energy <= 0) {
       this.die();
+      return;
     }
     // 检查是否可以分裂
-    if (this.energy >= CarnivCellConfig.energyToSplit) {
+    if (this.energy >= this.energyToSplit) {
       const child = this.split() as CellCarniv;
       const energy = this.energy / 2;
       if (child) {
@@ -45,8 +62,8 @@ export default class CellCarniv extends Cell {
     this.lastMoveTime += this.deltaTime;
 
     // 低能量待机但可反击：不做随机游走；若目标在半径内则追击；否则仅在半径内尝试锁定目标。
-    if (this.energy <= CarnivCellConfig.lowEnergyThreshold) {
-      const huntRange = CarnivCellConfig.huntRangeLowEnergy;
+    if (this.energy <= this.lowEnergyThreshold) {
+      const huntRange = this.huntRangeLowEnergy;
 
       // 检查现有目标是否仍在半径内
       let canPursue = false;
@@ -69,7 +86,7 @@ export default class CellCarniv extends Cell {
       if (canPursue) {
         if (
           this.lastMoveTime <
-          this.moveInterval - this.energy * CarnivCellConfig.energyToSpeed
+          this.moveInterval - this.energy * this.energyToSpeed
         ) {
           // 未到移动时间，仍尝试原地进食
           this.eatHerbivoresAtCurrentPosition();
@@ -78,12 +95,12 @@ export default class CellCarniv extends Cell {
         this.lastMoveTime = 0;
         this.moveTowardsTarget();
         this.eatHerbivoresAtCurrentPosition();
-        this.energy += CarnivCellConfig.energyToMove; // 追击产生移动能耗
+        this.energy += this.energyToMove; // 追击产生移动能耗
         return;
       } else {
         // 静止不动，但可吞食同格猎物，不扣能量
         this.eatHerbivoresAtCurrentPosition();
-        this.energy -= CarnivCellConfig.lowEnergyConsumption;
+        this.energy -= this.lowEnergyConsumption;
         return;
       }
     }
@@ -91,7 +108,7 @@ export default class CellCarniv extends Cell {
     // 正常能量：保留原有逻辑
     if (
       this.lastMoveTime <
-      this.moveInterval - this.energy * CarnivCellConfig.energyToSpeed
+      this.moveInterval - this.energy * this.energyToSpeed
     ) {
       return;
     }
@@ -110,7 +127,7 @@ export default class CellCarniv extends Cell {
     // 移动后检查当前位置是否有植食细胞并吃掉它们
     this.eatHerbivoresAtCurrentPosition();
 
-    this.energy += CarnivCellConfig.energyToMove;
+    this.energy += this.energyToMove;
   }
 
   /** 向目标移动并尝试进食 */
@@ -236,7 +253,7 @@ export default class CellCarniv extends Cell {
   hunt() {
     if (!this.ocean || this.target) return;
 
-    const range = CarnivCellConfig.huntRange;
+    const range = this.huntRange;
 
     // 搜索范围的正方形区域
     const startRow = this.row - range;

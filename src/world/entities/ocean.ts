@@ -171,9 +171,12 @@ const ocean = {
       this.creator();
     }
     let time = 0;
+    const bornNumOfUnit =
+      (viewport.cols * viewport.rows) / OceanConfig.SpawnNaturalPlantRate;
+    const bornInterval = Math.ceil(1000 / bornNumOfUnit);
     this.storm = function () {
       time += this.deltaTime;
-      if (time > OceanConfig.SpawnNaturalPlantInterval) {
+      if (time > bornInterval) {
         time = 0;
         this.creator([CellPlant]);
       }

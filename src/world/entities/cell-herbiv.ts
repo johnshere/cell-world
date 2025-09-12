@@ -1,32 +1,41 @@
-import { HerbivCellConfig } from '../../const/config';
-
 import Cell from './cell';
 import CellPlant from './cell-plant';
 
 /** 植食细胞 */
 export default class CellHerbiv extends Cell {
+  maxGeneration = 2; // 最大分裂次数
+  maxNearingCells = 1; // 周围同类细胞数量超过此值时不分裂
+  moveMinInterval = 1500; // 移动间隔时间（毫秒）
+  moveMaxInterval = 4000; // 移动间隔时间（毫秒）
+  /** 觅食范围 */
+  huntRange = 5;
+
+  energy = 4;
+  energyToSplit = 90; // 分裂所需的能量
+  energyToMove = -3; // 移动所需的能量
+  /** 能量对速度的加成 */
+  energyToSpeed = 10;
   private lastMoveTime = 0;
   private moveInterval = 0;
   private target: CellPlant | null = null; // 处于狩猎状态
-  energy = HerbivCellConfig.basedEnergy;
   constructor() {
     super();
 
     // 随机设置移动间隔
     this.moveInterval =
-      Math.random() *
-        (HerbivCellConfig.moveMaxInterval - HerbivCellConfig.moveMinInterval) +
-      HerbivCellConfig.moveMinInterval;
+      Math.random() * (this.moveMaxInterval - this.moveMinInterval) +
+      this.moveMinInterval;
 
     this.color = 'sandybrown';
   }
 
   grow() {
-    if (this.generation >= HerbivCellConfig.maxGeneration || this.energy <= 0) {
+    if (this.generation >= this.maxGeneration || this.energy <= 0) {
       this.die();
+      return;
     }
     // 检查是否可以分裂
-    if (this.energy >= HerbivCellConfig.energyToSplit) {
+    if (this.energy >= this.energyToSplit) {
       const child = this.split() as CellHerbiv;
       const energy = this.energy / 2;
       if (child) {
@@ -43,7 +52,7 @@ export default class CellHerbiv extends Cell {
     // 检查是否可以移动
     if (
       this.lastMoveTime <
-      this.moveInterval - this.energy * HerbivCellConfig.energyToSpeed
+      this.moveInterval - this.energy * this.energyToSpeed
     ) {
       return;
     }
@@ -62,7 +71,7 @@ export default class CellHerbiv extends Cell {
     // 移动后检查当前位置是否有植物细胞并吃掉它们
     this.eatPlantsAtCurrentPosition();
 
-    this.energy += HerbivCellConfig.energyToMove;
+    this.energy += this.energyToMove;
   }
 
   /** 向目标移动并尝试进食 */
@@ -140,7 +149,7 @@ export default class CellHerbiv extends Cell {
   hunt() {
     if (!this.ocean || this.target) return;
 
-    const range = HerbivCellConfig.huntRange;
+    const range = this.huntRange;
 
     // 根据方向确定搜索的正方形区域
     const startRow = this.row - range;
