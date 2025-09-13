@@ -8,14 +8,12 @@ export default class CellHerbiv extends Cell {
   maxNearingCells = 1; // 周围同类细胞数量超过此值时不分裂
   moveMinInterval = 800; // 移动间隔时间（毫秒）
   moveMaxInterval = 1400; // 移动间隔时间（毫秒）
-  /** 觅食范围 */
-  huntRange = 3;
 
-  energy = 100;
-  energyToSplit = 120; // 分裂所需的能量
-  energyToMove = -4; // 移动所需的能量
+  energy = 90;
+  energyToSplit = 100; // 分裂所需的能量
+  energyToMove = -1; // 移动所需的能量
   /** 能量对速度的加成 */
-  energyToSpeed = 0.5;
+  energyToSpeed = 3;
   /** 低于此能量百分比时必定向目标移动 */
   private energyThresholdPercent = 0.5;
   private lastMoveTime = 0;
@@ -30,7 +28,7 @@ export default class CellHerbiv extends Cell {
   private velocity = { x: 0, y: 0 };
   /** 最大速度 */
   private maxSpeed = 1;
-  /** 感知范围 */
+  /** 感知范围(觅食范围/鸟群算法) */
   private perceptionRange = 4;
   /** 分离权重 */
   private separationWeight = 0.4;
@@ -251,6 +249,8 @@ export default class CellHerbiv extends Cell {
 
     // 如果能量低于阈值且有目标，必定向目标移动
     if (energyPercent < this.energyThresholdPercent && this.target) {
+      // 判定目标还在感知方格中吗，不在重新寻找目标
+      if (!this.target) this.hunt();
       this.moveTowardsTarget();
     } else {
       // 使用鸟群算法计算移动方向
@@ -308,7 +308,6 @@ export default class CellHerbiv extends Cell {
       this.target = null;
       return;
     }
-
     // 计算向目标移动的方向
     const deltaRow = this.target.row - this.row;
     const deltaCol = this.target.col - this.col;
@@ -369,7 +368,7 @@ export default class CellHerbiv extends Cell {
   hunt() {
     if (this.target) return;
 
-    const range = this.huntRange;
+    const range = this.perceptionRange;
 
     // 根据方向确定搜索的正方形区域
     const startRow = this.row - range;
