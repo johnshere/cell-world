@@ -6,18 +6,18 @@ import CellPlant from './cell-plant';
 export default class CellHerbiv extends Cell {
   maxGeneration = 2; // 最大分裂次数
   maxNearingCells = 1; // 周围同类细胞数量超过此值时不分裂
-  moveMinInterval = 1700; // 移动间隔时间（毫秒）
-  moveMaxInterval = 3000; // 移动间隔时间（毫秒）
+  moveMinInterval = 600; // 移动间隔时间（毫秒）
+  moveMaxInterval = 1000; // 移动间隔时间（毫秒）
   /** 觅食范围 */
   huntRange = 3;
 
-  energy = 200;
-  energyToSplit = 210; // 分裂所需的能量
-  energyToMove = -3; // 移动所需的能量
+  energy = 100;
+  energyToSplit = 100; // 分裂所需的能量
+  energyToMove = -2.5; // 移动所需的能量
   /** 能量对速度的加成 */
-  energyToSpeed = 1;
+  energyToSpeed = 0.5;
   /** 低于此能量百分比时必定向目标移动 */
-  private energyThresholdPercent = 0.5; // 30%
+  private energyThresholdPercent = 0.6;
   private lastMoveTime = 0;
   private moveInterval = 0;
   private target: CellPlant | null = null; // 处于狩猎状态
@@ -34,9 +34,7 @@ export default class CellHerbiv extends Cell {
   /** 对齐权重 */
   private alignmentWeight = 5;
   /** 聚集权重 */
-  private cohesionWeight = 1.8;
-  /** 觅食权重 */
-  private huntWeight = 3;
+  private cohesionWeight = 2;
   /** 速度衰减系数 */
   private velocityDecay = 0.9;
 
@@ -255,26 +253,14 @@ export default class CellHerbiv extends Cell {
       const alignment = this.align();
       const cohesion = this.cohesion();
 
-      // 计算觅食行为
-      const hunt = { x: 0, y: 0 };
-      if (this.target) {
-        const dx = this.target.col - this.col;
-        const dy = this.target.row - this.row;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        if (distance > 0) {
-          hunt.x = (dx / distance) * this.huntWeight;
-          hunt.y = (dy / distance) * this.huntWeight;
-        }
-      }
-
       // 应用速度衰减
       this.velocity.x *= this.velocityDecay;
       this.velocity.y *= this.velocityDecay;
 
       // 整合所有行为
       const acceleration = {
-        x: separation.x + alignment.x + cohesion.x + hunt.x,
-        y: separation.y + alignment.y + cohesion.y + hunt.y,
+        x: separation.x + alignment.x + cohesion.x,
+        y: separation.y + alignment.y + cohesion.y,
       };
 
       // 更新速度

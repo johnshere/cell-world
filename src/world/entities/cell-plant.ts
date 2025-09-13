@@ -3,11 +3,11 @@ import Cell from './cell';
 /** 植物细胞 */
 export default class CellPlant extends Cell {
   color = 'green';
-  energy = 20;
+  energy = 10;
   /** 每秒光合获取的能量 */
-  energyToGrow = 0.1;
+  energyToGrow = 0.3;
   /** 分裂所需的能量 */
-  energyToSplit = 20;
+  energyToSplit = 22;
   constructor() {
     super();
     this.energy = Math.random() * this.energyToSplit;

@@ -5,23 +5,23 @@ export const WorldConfig = {
   FrameRate: 10,
   AccelerateMax: 70,
   /** 开启加速 */
-  IsAutoAccelerate: true,
+  IsAutoAccelerate: false,
   /** fps超过时，加速 */
-  FpsToAccelerate: 50,
+  FpsToAccelerate: 25,
   /** fps小于时，减速 */
-  FpsToDecelerate: 30,
+  FpsToDecelerate: 20,
   /** 单次调整速度 */
   AccelerateStep: 0.4,
 };
 
 // 海洋配置
 export const OceanConfig = {
-  initEntityRatio: 10, // 初始投放比率（每xx格投放一个）
+  initEntityRatio: 20, // 初始投放比率（每xx格投放一个）
   /** 自然诞生植物细胞的比率（世界大小/rate）（单位时间（1s）内投放比例） */
   SpawnNaturalPlantRate: 20000, // xxx个细胞诞生一个
   /** 初始细胞生成权重（用以控制概率，权重为0表示不生成该类型） */
   SpawnWeights: {
-    plant: 20, // 植物细胞权重（原模板为3份）
+    plant: 10, // 植物细胞权重（原模板为3份）
     herbiv: 1, // 植食细胞权重（原模板为2份）
     carniv: 0, // 肉食细胞权重（原模板为1份）
   },
