@@ -3,10 +3,11 @@ import Cell from './cell';
 /** 植物细胞 */
 export default class CellPlant extends Cell {
   color = 'green';
+  energy = 20;
   /** 每秒光合获取的能量 */
-  energyToGrow = 0.7;
+  energyToGrow = 0.1;
   /** 分裂所需的能量 */
-  energyToSplit = 30;
+  energyToSplit = 20;
   constructor() {
     super();
     this.energy = Math.random() * this.energyToSplit;
@@ -25,6 +26,11 @@ export default class CellPlant extends Cell {
     }
 
     // 调用父类的分裂方法
-    super.split();
+    const child = super.split() as CellPlant;
+    if (child) {
+      const halfEnergy = this.energy / 2;
+      child.energy = halfEnergy;
+      this.energy = halfEnergy;
+    }
   }
 }

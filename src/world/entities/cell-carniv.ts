@@ -10,8 +10,8 @@ export default class CellCarniv extends Cell {
 
   maxGeneration = 3; // 最大分裂次数
   maxNearingCells = 1; // 周围同类细胞数量超过此值时不分裂
-  moveMinInterval = 700; // 移动间隔时间（毫秒）
-  moveMaxInterval = 1400; // 移动间隔时间（毫秒）
+  moveMinInterval = 300; // 移动间隔时间（毫秒）
+  moveMaxInterval = 1000; // 移动间隔时间（毫秒）
 
   /** 觅食范围 */
   huntRange = 7;
@@ -21,14 +21,14 @@ export default class CellCarniv extends Cell {
   huntFailedRatio = 0.5;
 
   energy = 30;
-  energyToSplit = 100; // 分裂所需的能量
-  energyToMove = -1; // 移动所需的能量
+  energyToSplit = 400; // 分裂所需的能量
+  energyToMove = -3; // 移动所需的能量
   /** 能量对速度的加成 */
-  energyToSpeed = 8;
+  energyToSpeed = 1;
   /** 低能量阈值（低于等于该值时进入待机：不移动不消耗能量） */
-  lowEnergyThreshold = 0.3;
+  lowEnergyThreshold = 0.2;
   /** 低能量状态下的能量消耗 */
-  lowEnergyConsumption = 1;
+  lowEnergyConsumption = 0.1;
   constructor() {
     super();
 
