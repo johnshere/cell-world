@@ -21,14 +21,14 @@ export default class CellCarniv extends Cell {
   huntFailedRatio = 0.5;
 
   energy = 30;
-  energyToSplit = 600; // 分裂所需的能量
-  energyToMove = -6; // 移动所需的能量
+  energyToSplit = 10000; // 分裂所需的能量
+  energyToMove = -12; // 移动所需的能量
   /** 能量对速度的加成 */
   energyToSpeed = 1;
   /** 低能量阈值（低于等于该值时进入待机：不移动不消耗能量） */
   lowEnergyThreshold = 0.1;
   /** 低能量状态下的能量消耗 */
-  lowEnergyConsumption = 0.1;
+  lowEnergyConsumption = 1;
   constructor() {
     super();
 
@@ -38,7 +38,7 @@ export default class CellCarniv extends Cell {
       this.moveMinInterval;
     this.energy = this.energy * (Math.random() + 1);
     this.lowEnergyThreshold =
-      (1.5 - Math.random()) * this.lowEnergyThreshold * this.energy;
+      (1.5 - Math.random()) * this.lowEnergyThreshold * this.energyToSplit;
 
     this.color = 'DeepPink';
   }

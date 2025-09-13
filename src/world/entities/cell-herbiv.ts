@@ -6,21 +6,24 @@ import CellPlant from './cell-plant';
 export default class CellHerbiv extends Cell {
   maxGeneration = 2; // 最大分裂次数
   maxNearingCells = 1; // 周围同类细胞数量超过此值时不分裂
-  moveMinInterval = 600; // 移动间隔时间（毫秒）
-  moveMaxInterval = 1000; // 移动间隔时间（毫秒）
+  moveMinInterval = 800; // 移动间隔时间（毫秒）
+  moveMaxInterval = 1400; // 移动间隔时间（毫秒）
   /** 觅食范围 */
   huntRange = 3;
 
   energy = 100;
-  energyToSplit = 100; // 分裂所需的能量
-  energyToMove = -2.5; // 移动所需的能量
+  energyToSplit = 120; // 分裂所需的能量
+  energyToMove = -4; // 移动所需的能量
   /** 能量对速度的加成 */
   energyToSpeed = 0.5;
   /** 低于此能量百分比时必定向目标移动 */
-  private energyThresholdPercent = 0.6;
+  private energyThresholdPercent = 0.5;
   private lastMoveTime = 0;
   private moveInterval = 0;
   private target: CellPlant | null = null; // 处于狩猎状态
+
+  /** 饥饿状态变成肉食细胞的概率 */
+  private starvationToCarnivProb = 0.3;
 
   // 鸟群算法相关属性
   /** 速度向量 */
@@ -30,13 +33,13 @@ export default class CellHerbiv extends Cell {
   /** 感知范围 */
   private perceptionRange = 4;
   /** 分离权重 */
-  private separationWeight = 1.0;
+  private separationWeight = 0.4;
   /** 对齐权重 */
-  private alignmentWeight = 5;
+  private alignmentWeight = 30;
   /** 聚集权重 */
-  private cohesionWeight = 2;
+  private cohesionWeight = 6;
   /** 速度衰减系数 */
-  private velocityDecay = 0.9;
+  private velocityDecay = 0.8;
 
   constructor() {
     super();
@@ -204,10 +207,12 @@ export default class CellHerbiv extends Cell {
       const nearSameCells = this.findSpecifyClassPositions(CellHerbiv, 2);
       if (nearSameCells.length > 0) {
         const nearPlantCells = this.findSpecifyClassPositions(CellPlant, 2);
-        if (nearPlantCells.length === 0) {
+        if (
+          nearPlantCells.length === 0 &&
+          Math.random() < this.starvationToCarnivProb
+        ) {
           // 转换为肉食细胞
           const newSelf = new CellCarniv();
-          newSelf.energy = this.energy;
           newSelf.ocean = this.ocean;
           newSelf.setPosition(this.row, this.col);
           this.ocean.registerEntity(newSelf);

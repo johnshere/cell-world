@@ -7,7 +7,7 @@ export default class CellPlant extends Cell {
   /** 每秒光合获取的能量 */
   energyToGrow = 0.3;
   /** 分裂所需的能量 */
-  energyToSplit = 22;
+  energyToSplit = 36;
   constructor() {
     super();
     this.energy = Math.random() * this.energyToSplit;
