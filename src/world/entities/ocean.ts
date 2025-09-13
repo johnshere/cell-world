@@ -167,7 +167,8 @@ const ocean = {
     this.registerEntity(newOne);
   },
   storm() {
-    while (this.entities.length < OceanConfig.initEntities) {
+    const count = (viewport.cols * viewport.rows) / OceanConfig.initEntityRatio;
+    while (this.entities.length < count) {
       this.creator();
     }
     let time = 0;

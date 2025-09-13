@@ -4,7 +4,7 @@ import Cell from './cell';
 export default class CellPlant extends Cell {
   color = 'green';
   /** 每秒光合获取的能量 */
-  energyToGrow = 0.1;
+  energyToGrow = 0.7;
   /** 分裂所需的能量 */
   energyToSplit = 30;
   constructor() {

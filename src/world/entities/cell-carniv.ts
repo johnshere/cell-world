@@ -20,13 +20,13 @@ export default class CellCarniv extends Cell {
   /** 捕猎失败被反杀的概率（比目标能量低时） */
   huntFailedRatio = 0.5;
 
-  energy = 60;
+  energy = 30;
   energyToSplit = 100; // 分裂所需的能量
   energyToMove = -1; // 移动所需的能量
   /** 能量对速度的加成 */
   energyToSpeed = 8;
-  /** 低能量阈值%（低于等于该值时进入待机：不移动不消耗能量） */
-  lowEnergyThreshold = 0;
+  /** 低能量阈值（低于等于该值时进入待机：不移动不消耗能量） */
+  lowEnergyThreshold = 0.3;
   /** 低能量状态下的能量消耗 */
   lowEnergyConsumption = 1;
   constructor() {
@@ -37,7 +37,8 @@ export default class CellCarniv extends Cell {
       Math.random() * (this.moveMaxInterval - this.moveMinInterval) +
       this.moveMinInterval;
     this.energy = this.energy * (Math.random() + 1);
-    this.lowEnergyThreshold = (1.5 - Math.random()) * this.lowEnergyThreshold;
+    this.lowEnergyThreshold =
+      (1.5 - Math.random()) * this.lowEnergyThreshold * this.energy;
 
     this.color = 'DeepPink';
   }
@@ -47,9 +48,8 @@ export default class CellCarniv extends Cell {
       return;
     }
     if (this.energy <= 0) {
-      if (this.findSpecifyClassPositions(CellCarniv, 2).length === 0) {
-        const plants = this.findSpecifyClassPositions(CellPlant);
-        if (plants.length > 4) {
+      if (this.findSpecifyClassPositions(CellPlant).length > 6) {
+        if (this.findSpecifyClassPositions(CellCarniv, 2).length === 0) {
           const newSelf = new CellHerbiv();
           newSelf.ocean = this.ocean;
           newSelf.setPosition(this.row, this.col);

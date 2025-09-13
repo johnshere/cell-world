@@ -144,11 +144,11 @@ export const init = () => {
 
   // 创建内容区域
   content.style.cssText = `
-      padding: 20px;
+      padding: 10px;
       width: 280px;
       flex: 1;
       overflow-y: auto;
-      margin-top: 60px;
+      margin-top: 30px;
     `;
 
   // 一次性构建结构并缓存节点
@@ -202,7 +202,7 @@ export const init = () => {
   bindEvents();
   updateContent();
   toggle(GraphConfig.panel.defaultExpanded);
-  
+
   // 初始化加速按钮状态
   if (WorldConfig.IsAutoAccelerate) {
     accelerateBtn.style.background = '#28a745';
@@ -220,7 +220,7 @@ function createSection(
   rows: Array<[string, HTMLSpanElement, string?]>
 ) {
   const section = document.createElement('div');
-  section.style.marginBottom = '12px';
+  section.style.marginBottom = '6px';
 
   const titleEl = document.createElement('div');
   titleEl.style.fontWeight = 'bold';
@@ -313,7 +313,7 @@ export const toggle = (toExpanded?: boolean) => {
 
 export const toggleAccelerate = () => {
   WorldConfig.IsAutoAccelerate = !WorldConfig.IsAutoAccelerate;
-  
+
   if (WorldConfig.IsAutoAccelerate) {
     accelerateBtn.style.background = '#28a745';
     accelerateBtn.innerHTML = '⚡';

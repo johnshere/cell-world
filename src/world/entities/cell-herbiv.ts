@@ -6,16 +6,16 @@ import CellPlant from './cell-plant';
 export default class CellHerbiv extends Cell {
   maxGeneration = 2; // 最大分裂次数
   maxNearingCells = 1; // 周围同类细胞数量超过此值时不分裂
-  moveMinInterval = 2500; // 移动间隔时间（毫秒）
-  moveMaxInterval = 4000; // 移动间隔时间（毫秒）
+  moveMinInterval = 500; // 移动间隔时间（毫秒）
+  moveMaxInterval = 800; // 移动间隔时间（毫秒）
   /** 觅食范围 */
-  huntRange = 5;
+  huntRange = 3;
 
   energy = 40;
-  energyToSplit = 180; // 分裂所需的能量
-  energyToMove = -3; // 移动所需的能量
+  energyToSplit = 150; // 分裂所需的能量
+  energyToMove = -2; // 移动所需的能量
   /** 能量对速度的加成 */
-  energyToSpeed = 8;
+  energyToSpeed = 2;
   private lastMoveTime = 0;
   private moveInterval = 0;
   private target: CellPlant | null = null; // 处于狩猎状态
@@ -36,9 +36,8 @@ export default class CellHerbiv extends Cell {
       return;
     }
     if (this.energy <= 0) {
-      // 能量达到最大，同时周边同类数量超过
-      const nearSameCells = this.findSpecifyClassPositions(CellHerbiv);
-      if (nearSameCells.length > 2) {
+      const nearSameCells = this.findSpecifyClassPositions(CellHerbiv, 2);
+      if (nearSameCells.length > 0) {
         const nearPlantCells = this.findSpecifyClassPositions(CellPlant, 2);
         if (nearPlantCells.length === 0) {
           // 转换为肉食细胞
