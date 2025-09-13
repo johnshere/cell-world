@@ -80,22 +80,50 @@ export default class Cell extends Entity {
   die() {
     this.ocean.removeEntity(this);
   }
-  getAdjacentPositions() {
-    // 获取相邻位置（周围8个方向）
-    return [
-      { row: this.row - 1, col: this.col - 1 }, // 左上
-      { row: this.row - 1, col: this.col }, // 上
-      { row: this.row - 1, col: this.col + 1 }, // 右上
-      { row: this.row, col: this.col + 1 }, // 右
-      { row: this.row + 1, col: this.col + 1 }, // 右下
-      { row: this.row + 1, col: this.col }, // 下
-      { row: this.row + 1, col: this.col - 1 }, // 左下
-      { row: this.row, col: this.col - 1 }, // 左
-    ];
+  /** 获取相邻位置 */
+  getNearPositions(range = 1) {
+    const positions: { row: number; col: number }[] = [];
+
+    // 按顺时针方向获取指定范围内的位置
+    for (let r = 1; r <= range; r++) {
+      // 上边（从左到右）
+      for (let col = this.col - r; col <= this.col + r; col++) {
+        positions.push({ row: this.row - r, col });
+      }
+
+      // 右边（从上到下，排除右上角）
+      for (let row = this.row - r + 1; row <= this.row + r; row++) {
+        positions.push({ row, col: this.col + r });
+      }
+
+      // 下边（从右到左，排除右下角）
+      for (let col = this.col + r - 1; col >= this.col - r; col--) {
+        positions.push({ row: this.row + r, col });
+      }
+
+      // 左边（从下到上，排除左下角和左上角）
+      for (let row = this.row + r - 1; row > this.row - r; row--) {
+        positions.push({ row, col: this.col - r });
+      }
+    }
+
+    return positions;
   }
-  findFreePosition(adjacentPositions?: { row: number; col: number }[]) {
+  /** 查找同类位置 */
+  findSpecifyClassPositions(Ctor: new () => Cell, range = 1) {
+    const adjacentPositions = this.getNearPositions(range);
+    return adjacentPositions.filter(pos => {
+      const set = this.ocean.getCellSet(pos.row, pos.col);
+      if (!set) return false;
+      for (const e of set) {
+        if (e instanceof Ctor) return true;
+      }
+      return false;
+    });
+  }
+  findNotSameFreePosition(adjacentPositions?: { row: number; col: number }[]) {
     if (!adjacentPositions) {
-      adjacentPositions = this.getAdjacentPositions();
+      adjacentPositions = this.getNearPositions();
     }
     // 空闲位置定义：该格子中不存在与当前细胞同类的细胞（允许异类共址）
     const SelfCtor = this.constructor as new () => Cell;
@@ -120,7 +148,7 @@ export default class Cell extends Entity {
       return direction;
     };
     const direction = getDirection();
-    let adjacentPositions = this.getAdjacentPositions();
+    let adjacentPositions = this.getNearPositions();
     if (direction === 0) {
       adjacentPositions = adjacentPositions.splice(0, 3);
     } else if (direction === 1) {
@@ -133,7 +161,7 @@ export default class Cell extends Entity {
         .concat(...adjacentPositions.splice(0, 1));
     }
     // 过滤出空闲位置
-    const freePositions = this.findFreePosition(adjacentPositions);
+    const freePositions = this.findNotSameFreePosition(adjacentPositions);
 
     if (freePositions.length === 0) {
       return;
@@ -149,10 +177,10 @@ export default class Cell extends Entity {
   /** 分裂 */
   split() {
     // 获取相邻位置（周围8个方向）
-    const adjacentPositions = this.getAdjacentPositions();
+    const adjacentPositions = this.getNearPositions();
 
     // 过滤出空闲位置（没有其他细胞占据的位置）
-    const freePositions = this.findFreePosition(adjacentPositions);
+    const freePositions = this.findNotSameFreePosition(adjacentPositions);
 
     // 仅统计周围相邻格子中“同类”细胞的数量（每格按是否存在同类计数一次）
     const SelfCtor2 = this.constructor as new () => Cell;
@@ -177,9 +205,8 @@ export default class Cell extends Entity {
       // 创建与当前细胞相同类型的新细胞
       const NewCellClass = this.constructor as new () => Cell;
       const child = new NewCellClass();
-      child.row = randomPos.row;
-      child.col = randomPos.col;
       child.ocean = this.ocean;
+      child.setPosition(randomPos.row, randomPos.col);
 
       // 添加到海洋中（使用索引）
       this.ocean.registerEntity(child);

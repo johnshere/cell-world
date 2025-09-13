@@ -1,20 +1,21 @@
 import Cell from './cell';
+import CellCarniv from './cell-carniv';
 import CellPlant from './cell-plant';
 
 /** 植食细胞 */
 export default class CellHerbiv extends Cell {
   maxGeneration = 2; // 最大分裂次数
   maxNearingCells = 1; // 周围同类细胞数量超过此值时不分裂
-  moveMinInterval = 1500; // 移动间隔时间（毫秒）
+  moveMinInterval = 2500; // 移动间隔时间（毫秒）
   moveMaxInterval = 4000; // 移动间隔时间（毫秒）
   /** 觅食范围 */
   huntRange = 5;
 
   energy = 40;
-  energyToSplit = 110; // 分裂所需的能量
-  energyToMove = -2; // 移动所需的能量
+  energyToSplit = 180; // 分裂所需的能量
+  energyToMove = -3; // 移动所需的能量
   /** 能量对速度的加成 */
-  energyToSpeed = 10;
+  energyToSpeed = 8;
   private lastMoveTime = 0;
   private moveInterval = 0;
   private target: CellPlant | null = null; // 处于狩猎状态
@@ -30,7 +31,26 @@ export default class CellHerbiv extends Cell {
   }
 
   grow() {
-    if (this.generation >= this.maxGeneration || this.energy <= 0) {
+    if (this.generation >= this.maxGeneration) {
+      this.die();
+      return;
+    }
+    if (this.energy <= 0) {
+      // 能量达到最大，同时周边同类数量超过
+      const nearSameCells = this.findSpecifyClassPositions(CellHerbiv);
+      if (nearSameCells.length > 2) {
+        const nearPlantCells = this.findSpecifyClassPositions(CellPlant, 2);
+        if (nearPlantCells.length === 0) {
+          // 转换为肉食细胞
+          const newSelf = new CellCarniv();
+          newSelf.energy = this.energy;
+          newSelf.ocean = this.ocean;
+          newSelf.setPosition(this.row, this.col);
+          this.ocean.registerEntity(newSelf);
+          this.die();
+          return;
+        }
+      }
       this.die();
       return;
     }
