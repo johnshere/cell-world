@@ -2,6 +2,8 @@ import { viewport } from '../../graph';
 
 import Entity from './entity';
 
+export type Direction = -1 | 0 | 1;
+
 export default class Cell extends Entity {
   /** 能量 */
   energy = 1;
@@ -15,6 +17,14 @@ export default class Cell extends Entity {
   breathColor = 'white'; // 呼吸颜色
 
   moveDirections = [0, 1]; // 0-上 1-右 2-下 3-左
+
+  // 新增：记录前一次位置
+  steps: { row: number; col: number }[] = [];
+  direction: { x: Direction; y: Direction } = { x: 0, y: 0 };
+
+  // 新增：方向改变概率相关参数
+  directionChangeChance = 0.05; // 基础改变方向概率 5%
+  directionChangeIncrement = 0.05; // 每次移动增加的概率 5%
   constructor() {
     super();
 
@@ -22,11 +32,19 @@ export default class Cell extends Entity {
     this.col = Math.floor(Math.random() * viewport.cols) + viewport.col;
     this.row = Math.floor(Math.random() * viewport.rows) + viewport.row;
 
-    const dir = Math.floor(Math.random() * 4);
-    const dir2 = (dir + 1) % 4;
-    this.moveDirections = [dir, dir2];
-
     this.color = 'pink';
+    this.directionChange(true);
+  }
+  directionChange(force = false) {
+    if (force || Math.random() < this.directionChangeChance) {
+      const dir = [-1, 0, 1] as Direction[];
+      this.direction = {
+        x: dir[Math.floor(Math.random() * dir.length)],
+        y: dir[Math.floor(Math.random() * dir.length)],
+      };
+    } else {
+      this.directionChangeChance += this.directionChangeIncrement;
+    }
   }
   update(deltaTime: number) {
     super.update(deltaTime);
@@ -137,41 +155,38 @@ export default class Cell extends Entity {
     });
   }
   getNextMovePosition(): { row: number; col: number } | void {
-    let count = 0;
-    const getDirection = () => {
-      if (count > 10) {
-        return 0;
-      }
-      count++;
-      const direction = Math.floor(Math.random() * 4);
-      if (!this.moveDirections.includes(direction)) return getDirection();
-      return direction;
-    };
-    const direction = getDirection();
-    let adjacentPositions = this.getNearPositions();
-    if (direction === 0) {
-      adjacentPositions = adjacentPositions.splice(0, 3);
-    } else if (direction === 1) {
-      adjacentPositions = adjacentPositions.splice(2, 3);
-    } else if (direction === 2) {
-      adjacentPositions = adjacentPositions.splice(4, 3);
-    } else if (direction === 3) {
-      adjacentPositions = adjacentPositions
-        .splice(6, 2)
-        .concat(...adjacentPositions.splice(0, 1));
-    }
-    // 过滤出空闲位置
-    const freePositions = this.findNotSameFreePosition(adjacentPositions);
+    // 根据当前方向获取目标位置
+    const targetRow = this.row + this.direction.y;
+    const targetCol = this.col + this.direction.x;
 
-    if (freePositions.length === 0) {
-      return;
-    } else if (freePositions.length > 0) {
-      // 随机移动到一个空闲位置
-      const randomPos =
-        freePositions[Math.floor(Math.random() * freePositions.length)];
-      return randomPos;
+    const targetPosition = { row: targetRow, col: targetCol };
+
+    // 检查目标位置是否空闲
+    const freePositions = this.findNotSameFreePosition([targetPosition]);
+
+    if (freePositions.length > 0) {
+      this.steps.push({ row: this.row, col: this.col });
+      return targetPosition;
     } else {
-      return this.getNextMovePosition();
+      // 目标位置被占用，尝试寻找附近的空闲位置
+      const nearPositions = this.getNearPositions();
+      const allFreePositions = this.findNotSameFreePosition(nearPositions);
+
+      if (allFreePositions.length > 0) {
+        // 随机选择一个空闲位置
+        const randomPos =
+          allFreePositions[Math.floor(Math.random() * allFreePositions.length)];
+
+        // 更新当前方向为实际移动的方向
+        this.direction.y = (randomPos.row - this.row) as Direction;
+        this.direction.x = (randomPos.col - this.col) as Direction;
+
+        this.steps.push({ row: this.row, col: this.col });
+        return randomPos;
+      } else {
+        // 没有空闲位置，无法移动
+        return;
+      }
     }
   }
   /** 分裂 */
