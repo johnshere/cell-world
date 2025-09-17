@@ -34,9 +34,6 @@ export default class Cell extends Entity {
   breathDuration = 3000; // 呼吸颜色持续时间（毫秒）
   breathColor = 'white'; // 呼吸颜色
 
-  // 新增：记录前一次位置
-  footprint: Position[] = [];
-  footprintMaxSize = 10;
   direction: Direction = { col: 0, row: 0 };
 
   // 新增：方向改变概率相关参数
@@ -73,38 +70,15 @@ export default class Cell extends Entity {
   }
   directionSense(force = false) {
     if (force || Math.random() < this.directionChangeChance) {
-      // 当前方向的取反方向
-      const opposite = {
-        col: -this.direction.col,
-        row: -this.direction.row,
-      } as Direction;
-
-      // 获取取反相邻的方向（与取反方向相邻的方向）
-      const oppositeDirections = this.getOppositeDirection(opposite);
-
-      // 过滤掉取反方向和取反相邻的方向
-      const validDirections = AllDirections.filter(dir => {
-        // 排除取反方向
-        if (dir.col === opposite.col && dir.row === opposite.row) {
-          return false;
-        }
-        // 排除取反相邻的方向
-        for (const adj of oppositeDirections) {
-          if (dir.col === adj.col && dir.row === adj.row) {
-            return false;
-          }
-        }
-        return true;
-      });
-
-      // 如果没有有效方向（理论上不应该发生），则保持当前方向
-      if (validDirections.length === 0) {
+      const col = (Math.random() < 0.5 ? -1 : 1) as Near;
+      const row = (Math.random() < 0.5 ? -1 : 1) as Near;
+      const isOpposite =
+        col === -this.direction.col && row === -this.direction.row;
+      if (isOpposite) {
+        this.directionSense(true);
         return;
       }
-
-      // 随机选择一个有效方向
-      const randomIndex = Math.floor(Math.random() * validDirections.length);
-      this.direction = validDirections[randomIndex];
+      this.direction = { col, row };
       this.directionChangeChance = this.directionChangeIncrement;
     } else {
       this.directionChangeChance += this.directionChangeIncrement;
@@ -223,10 +197,6 @@ export default class Cell extends Entity {
   }
   setPosition(row: number, col: number): void {
     if (this.row === row && this.col === col) return;
-    this.footprint.unshift({ row: this.row, col: this.col });
-    if (this.footprint.length > this.footprintMaxSize) {
-      this.footprint.pop();
-    }
     // 更新当前方向为实际移动的方向
     this.direction.row = (row - this.row) as Near;
     this.direction.col = (col - this.col) as Near;

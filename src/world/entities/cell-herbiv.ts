@@ -27,8 +27,6 @@ export default class CellHerbiv extends Cell {
   // 鸟群算法相关属性
   /** 速度向量 */
   private velocity = { x: 0, y: 0 };
-  /** 最大速度 */
-  private maxSpeed = 1;
   /** 感知范围(觅食范围/鸟群算法) */
   private senseRange = 4;
   /** 分离权重 */
@@ -37,8 +35,6 @@ export default class CellHerbiv extends Cell {
   private alignmentWeight = 30;
   /** 聚集权重 */
   private cohesionWeight = 6;
-  /** 速度衰减系数 */
-  private velocityDecay = 0.8;
 
   constructor() {
     super();
@@ -229,7 +225,53 @@ export default class CellHerbiv extends Cell {
 
     return steer;
   }
+  groupMove() {
+    // 整合所有行为
+    const acceleration = {
+      x: 0,
+      y: 0,
+    };
+    // 使用鸟群算法计算移动方向
+    const separation = this.separate();
+    acceleration.x += separation.x;
+    acceleration.y += separation.y;
+    if (acceleration.x === 0 && acceleration.y === 0) {
+      return false;
+    }
+    const alignment = this.align();
+    acceleration.x += alignment.x;
+    acceleration.y += alignment.y;
+    if (acceleration.x === 0 && acceleration.y === 0) {
+      return false;
+    }
+    const cohesion = this.cohesion();
+    acceleration.x += cohesion.x;
+    acceleration.y += cohesion.y;
+    if (acceleration.x === 0 && acceleration.y === 0) {
+      return false;
+    }
 
+    // 更新速度
+    this.velocity.x += acceleration.x;
+    this.velocity.y += acceleration.y;
+
+    // 限制最大速度
+    const speed = Math.sqrt(
+      this.velocity.x * this.velocity.x + this.velocity.y * this.velocity.y
+    );
+    if (speed > 1) {
+      this.velocity.x = this.velocity.x / speed;
+      this.velocity.y = this.velocity.y / speed;
+    }
+
+    // 根据速度移动
+    if (Math.abs(this.velocity.x) > 0.1 || Math.abs(this.velocity.y) > 0.1) {
+      const newCol = Math.round(this.col + this.velocity.x);
+      const newRow = Math.round(this.row + this.velocity.y);
+
+      this.setPosition(newRow, newCol);
+    }
+  }
   /** 移动到相邻位置 */
   move() {
     this.lastMoveTime += this.deltaTime;
@@ -253,40 +295,14 @@ export default class CellHerbiv extends Cell {
     ) {
       this.moveToward(this.target);
     } else {
-      // 使用鸟群算法计算移动方向
-      const separation = this.separate();
-      const alignment = this.align();
-      const cohesion = this.cohesion();
-
-      // 应用速度衰减
-      this.velocity.x *= this.velocityDecay;
-      this.velocity.y *= this.velocityDecay;
-
-      // 整合所有行为
-      const acceleration = {
-        x: separation.x + alignment.x + cohesion.x,
-        y: separation.y + alignment.y + cohesion.y,
-      };
-
-      // 更新速度
-      this.velocity.x += acceleration.x;
-      this.velocity.y += acceleration.y;
-
-      // 限制最大速度
-      const speed = Math.sqrt(
-        this.velocity.x * this.velocity.x + this.velocity.y * this.velocity.y
-      );
-      if (speed > this.maxSpeed) {
-        this.velocity.x = (this.velocity.x / speed) * this.maxSpeed;
-        this.velocity.y = (this.velocity.y / speed) * this.maxSpeed;
-      }
-
-      // 根据速度移动
-      if (Math.abs(this.velocity.x) > 0.1 || Math.abs(this.velocity.y) > 0.1) {
-        const newCol = Math.round(this.col + this.velocity.x);
-        const newRow = Math.round(this.row + this.velocity.y);
-
-        this.setPosition(newRow, newCol);
+      const moved = this.groupMove();
+      if (moved === false) {
+        // 没有集群移动，则随机移动
+        this.directionSense();
+        const next = this.getNextMovePosition();
+        if (next) {
+          this.setPosition(next.row, next.col);
+        }
       }
     }
 
