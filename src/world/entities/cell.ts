@@ -2,9 +2,21 @@ import { viewport } from '../../graph';
 
 import Entity from './entity';
 
-export type Direction = -1 | 0 | 1;
 export type Position = { row: number; col: number };
 export type Positions = Position[];
+export type Near = -1 | 0 | 1;
+export type Direction = { col: Near; row: Near };
+// 定义所有八个可能的方向
+export const AllDirections: Direction[] = [
+  { col: -1, row: -1 }, // 左上
+  { col: 0, row: -1 }, // 上
+  { col: 1, row: -1 }, // 右上
+  { col: -1, row: 0 }, // 左
+  { col: 1, row: 0 }, // 右
+  { col: -1, row: 1 }, // 左下
+  { col: 0, row: 1 }, // 下
+  { col: 1, row: 1 }, // 右下
+];
 
 export default class Cell extends Entity {
   color = 'black';
@@ -25,7 +37,7 @@ export default class Cell extends Entity {
   // 新增：记录前一次位置
   footprint: Position[] = [];
   footprintMaxSize = 10;
-  direction: { col: Direction; row: Direction } = { col: 0, row: 0 };
+  direction: Direction = { col: 0, row: 0 };
 
   // 新增：方向改变概率相关参数
   directionChangeChance = 0.05; // 基础改变方向概率 5%
@@ -40,21 +52,59 @@ export default class Cell extends Entity {
 
     this.directionSense(true);
   }
-  directionNormalize(dir: number): Direction {
+  directionNormalize(dir: number): Near {
     if (dir > 0) return 1;
     if (dir < 0) return -1;
     return 0;
   }
+  getOppositeDirection(dir: Direction): Direction[] {
+    const adjacent: Direction[] = [];
+    for (const d of AllDirections) {
+      // 计算两个方向之间的距离（切比雪夫距离）
+      const distance = Math.max(
+        Math.abs(d.col - dir.col),
+        Math.abs(d.row - dir.row)
+      );
+      if (distance === 1) {
+        adjacent.push(d);
+      }
+    }
+    return adjacent;
+  }
   directionSense(force = false) {
     if (force || Math.random() < this.directionChangeChance) {
-      const x = (Math.random() < 0.5 ? -1 : 1) as Direction;
-      const y = (Math.random() < 0.5 ? -1 : 1) as Direction;
-      const isOpposite = x === -this.direction.col && y === -this.direction.row;
-      if (isOpposite) {
-        this.directionSense(true);
+      // 当前方向的取反方向
+      const opposite = {
+        col: -this.direction.col,
+        row: -this.direction.row,
+      } as Direction;
+
+      // 获取取反相邻的方向（与取反方向相邻的方向）
+      const oppositeDirections = this.getOppositeDirection(opposite);
+
+      // 过滤掉取反方向和取反相邻的方向
+      const validDirections = AllDirections.filter(dir => {
+        // 排除取反方向
+        if (dir.col === opposite.col && dir.row === opposite.row) {
+          return false;
+        }
+        // 排除取反相邻的方向
+        for (const adj of oppositeDirections) {
+          if (dir.col === adj.col && dir.row === adj.row) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      // 如果没有有效方向（理论上不应该发生），则保持当前方向
+      if (validDirections.length === 0) {
         return;
       }
-      this.direction = { col: x, row: y };
+
+      // 随机选择一个有效方向
+      const randomIndex = Math.floor(Math.random() * validDirections.length);
+      this.direction = validDirections[randomIndex];
       this.directionChangeChance = this.directionChangeIncrement;
     } else {
       this.directionChangeChance += this.directionChangeIncrement;
@@ -62,10 +112,19 @@ export default class Cell extends Entity {
   }
   update(deltaTime: number) {
     super.update(deltaTime);
+    this.separate();
+    this.align();
+    this.cohesion();
     this.hunt();
     this.move();
     this.grow();
   }
+  /** 分离 */
+  separate() {}
+  /** 对齐 */
+  align() {}
+  /** 聚集 */
+  cohesion() {}
   /** 觅食 */
   hunt() {}
   /** 移动 */
@@ -169,8 +228,8 @@ export default class Cell extends Entity {
       this.footprint.pop();
     }
     // 更新当前方向为实际移动的方向
-    this.direction.row = (row - this.row) as Direction;
-    this.direction.col = (col - this.col) as Direction;
+    this.direction.row = (row - this.row) as Near;
+    this.direction.col = (col - this.col) as Near;
 
     super.setPosition(row, col);
   }
