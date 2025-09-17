@@ -4,6 +4,7 @@ import CellPlant from './cell-plant';
 
 /** 植食细胞 */
 export default class CellHerbiv extends Cell {
+  color = 'sandybrown';
   maxGeneration = 2; // 最大分裂次数
   maxNearingCells = 1; // 周围同类细胞数量超过此值时不分裂
   moveMinInterval = 800; // 移动间隔时间（毫秒）
@@ -24,6 +25,8 @@ export default class CellHerbiv extends Cell {
   /** 感知范围(觅食范围) */
   private senseRange = 4;
 
+  private isElder = Math.random() < 0.5;
+
   constructor() {
     super();
 
@@ -31,8 +34,6 @@ export default class CellHerbiv extends Cell {
     this.moveInterval =
       Math.random() * (this.moveMaxInterval - this.moveMinInterval) +
       this.moveMinInterval;
-
-    this.color = 'sandybrown';
   }
 
   grow() {
@@ -70,7 +71,6 @@ export default class CellHerbiv extends Cell {
       }
     }
   }
-
   /** 移动到相邻位置 */
   move() {
     this.lastMoveTime += this.deltaTime;
@@ -84,7 +84,7 @@ export default class CellHerbiv extends Cell {
     this.lastMoveTime = 0;
 
     if (this.target && this.ocean.isExist(this.target)) {
-      this.moveTowardsTarget(this.target);
+      this.moveToward(this.target);
     } else {
       this.directionSense();
       const next = this.getNextMovePosition();
@@ -104,7 +104,7 @@ export default class CellHerbiv extends Cell {
   /** 吃掉当前位置的植物细胞 */
   private eatPlantsAtCurrentPosition() {
     // 用索引快速取出当前格子的植物（避免数组分配，先收集后处理）
-    const set = this.ocean.getCellSet(this.row, this.col);
+    const set = this.ocean.getEntitySet(this.row, this.col);
     if (!set) return;
     const plantsAtCurrentPosition: CellPlant[] = [];
     for (const e of set) {
@@ -143,7 +143,7 @@ export default class CellHerbiv extends Cell {
     const targets = [] as CellPlant[];
     this.scanNearPositions(range, posis => {
       posis.forEach(pos => {
-        const set = this.ocean.getCellSet(pos.row, pos.col);
+        const set = this.ocean.getEntitySet(pos.row, pos.col);
         if (!set) return;
         for (const e of set) {
           if (e instanceof CellPlant) {

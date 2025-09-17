@@ -7,9 +7,13 @@ export type Position = { row: number; col: number };
 export type Positions = Position[];
 
 export default class Cell extends Entity {
+  color = 'black';
   /** 能量 */
   energy = 1;
   energyToSplit = 20; // 分裂所需的能量
+
+  /** 先代 */
+  ancestor?: Cell;
 
   generation = 0;
   maxGeneration = 3; // 最大分裂次数
@@ -19,29 +23,33 @@ export default class Cell extends Entity {
   breathColor = 'white'; // 呼吸颜色
 
   // 新增：记录前一次位置
-  footprint?: Position;
+  footprint: Position[] = [];
   direction: { x: Direction; y: Direction } = { x: 0, y: 0 };
 
   // 新增：方向改变概率相关参数
   directionChangeChance = 0.05; // 基础改变方向概率 5%
-  directionChangeIncrement = 0.05; // 每次移动增加的概率 5%
+  directionChangeIncrement = 0.02; // 每次移动增加的概率 5%
   constructor() {
     super();
 
     // 取当前视窗范围，随机生成逻辑位置
-    this.col = Math.floor(Math.random() * viewport.cols) + viewport.col;
-    this.row = Math.floor(Math.random() * viewport.rows) + viewport.row;
+    const col = Math.floor(Math.random() * viewport.cols) + viewport.col;
+    const row = Math.floor(Math.random() * viewport.rows) + viewport.row;
+    this.setPosition(row, col);
 
-    this.color = 'pink';
     this.directionSense(true);
   }
   directionSense(force = false) {
     if (force || Math.random() < this.directionChangeChance) {
+      const x = (Math.random() < 0.5 ? -1 : 1) as Direction;
+      const y = (Math.random() < 0.5 ? -1 : 1) as Direction;
+      const isOpposite = x === -this.direction.x && y === -this.direction.y;
+      if (isOpposite) {
+        this.directionSense(true);
+        return;
+      }
+      this.direction = { x, y };
       this.directionChangeChance = this.directionChangeIncrement;
-      this.direction = {
-        x: Math.random() < 0.5 ? -1 : 1,
-        y: Math.random() < 0.5 ? -1 : 1,
-      };
     } else {
       this.directionChangeChance += this.directionChangeIncrement;
     }
@@ -134,7 +142,7 @@ export default class Cell extends Entity {
   findSpecifyClassPositions(Ctor: new () => Cell, range = 1) {
     const adjacentPositions = this.scanNearPositions(range);
     return adjacentPositions.filter(pos => {
-      const set = this.ocean.getCellSet(pos.row, pos.col);
+      const set = this.ocean.getEntitySet(pos.row, pos.col);
       if (!set) return false;
       for (const e of set) {
         if (e instanceof Ctor) return true;
@@ -149,7 +157,7 @@ export default class Cell extends Entity {
     // 空闲位置定义：该格子中不存在与当前细胞同类的细胞（允许异类共址）
     const SelfCtor = this.constructor as new () => Cell;
     return adjacentPositions.filter(pos => {
-      const set = this.ocean.getCellSet(pos.row, pos.col);
+      const set = this.ocean.getEntitySet(pos.row, pos.col);
       if (!set) return true;
       for (const e of set) {
         if (e instanceof SelfCtor) return false;
@@ -159,7 +167,7 @@ export default class Cell extends Entity {
   }
   setPosition(row: number, col: number): void {
     if (this.row === row && this.col === col) return;
-    this.footprint = { row: this.row, col: this.col };
+    this.footprint.push({ row: this.row, col: this.col });
     // 更新当前方向为实际移动的方向
     this.direction.y = (row - this.row) as Direction;
     this.direction.x = (col - this.col) as Direction;
@@ -196,7 +204,7 @@ export default class Cell extends Entity {
     }
   }
   /** 向目标移动 */
-  moveTowardsTarget(target: Cell) {
+  moveToward(target: Position | Cell) {
     // 计算向目标移动的方向
     const deltaRow = target.row - this.row;
     const deltaCol = target.col - this.col;
@@ -217,22 +225,34 @@ export default class Cell extends Entity {
       // 优先在列方向移动
       nextCol = this.col + (deltaCol > 0 ? 1 : -1);
     }
-
+    // 判断是否目标位置有同类
+    const targetCell = this.ocean.getEntitySet(target.row, target.col);
+    if (targetCell) {
+      for (const e of targetCell) {
+        if (e instanceof this.constructor) {
+          const next = this.getNextMovePosition();
+          if (next) {
+            nextRow = next.row;
+            nextCol = next.col;
+          }
+        }
+      }
+    }
     // 移动到新位置
     this.setPosition(nextRow, nextCol);
   }
   /** 分裂 */
   split() {
     // 获取相邻位置（周围8个方向）
-    const adjacentPositions = this.scanNearPositions();
+    const nearPositions = this.scanNearPositions();
 
     // 过滤出空闲位置（没有其他细胞占据的位置）
-    const freePositions = this.findNotSameFreePosition(adjacentPositions);
+    const freePositions = this.findNotSameFreePosition(nearPositions);
 
     // 仅统计周围相邻格子中“同类”细胞的数量（每格按是否存在同类计数一次）
     const SelfCtor = this.constructor as new () => Cell;
-    const sameTypeNeighbors = adjacentPositions.filter(pos => {
-      const set = this.ocean.getCellSet(pos.row, pos.col);
+    const sameTypeNeighbors = nearPositions.filter(pos => {
+      const set = this.ocean.getEntitySet(pos.row, pos.col);
       if (!set) return false;
       for (const e of set) {
         if (e instanceof SelfCtor) return true;
@@ -252,6 +272,7 @@ export default class Cell extends Entity {
       // 创建与当前细胞相同类型的新细胞
       const NewCellClass = this.constructor as new () => Cell;
       const child = new NewCellClass();
+      child.ancestor = this;
       child.ocean = this.ocean;
       child.setPosition(randomPos.row, randomPos.col);
 

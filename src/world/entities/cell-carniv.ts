@@ -4,6 +4,7 @@ import CellPlant from './cell-plant';
 
 /** 食肉细胞（以植食细胞为食） */
 export default class CellCarniv extends Cell {
+  color = 'DeepPink';
   private lastMoveTime = 0;
   private moveInterval = 0;
   private target?: CellHerbiv; // 处于狩猎状态
@@ -39,8 +40,6 @@ export default class CellCarniv extends Cell {
     this.energy = this.energy * (Math.random() + 1);
     this.lowEnergyThreshold =
       (1.5 - Math.random()) * this.lowEnergyThreshold * this.energyToSplit;
-
-    this.color = 'DeepPink';
   }
   grow() {
     if (this.generation >= this.maxGeneration) {
@@ -85,7 +84,7 @@ export default class CellCarniv extends Cell {
 
     if (this.target && this.ocean.isExist(this.target)) {
       // 处于狩猎状态则向目标移动
-      this.moveTowardsTarget(this.target);
+      this.moveToward(this.target);
     } else {
       // 不处于狩猎状态，随机移动
       this.directionSense();
@@ -104,7 +103,7 @@ export default class CellCarniv extends Cell {
   /** 吃掉当前位置的植食细胞 */
   private attackAndEat() {
     // 用索引快速取出当前格子的植食细胞
-    const herbivSet = this.ocean.getCellSet(this.row, this.col);
+    const herbivSet = this.ocean.getEntitySet(this.row, this.col);
     if (!herbivSet) return;
     const herbivsAtCurrentPosition: CellHerbiv[] = [];
     for (const e of herbivSet) {
@@ -162,7 +161,7 @@ export default class CellCarniv extends Cell {
     const targets: CellHerbiv[] = [];
     this.scanNearPositions(range, posis => {
       posis.forEach(pos => {
-        const set = this.ocean.getCellSet(pos.row, pos.col);
+        const set = this.ocean.getEntitySet(pos.row, pos.col);
         if (!set) return;
         for (const e of set) {
           if (e instanceof CellHerbiv) {

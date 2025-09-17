@@ -12,7 +12,7 @@ const ocean = {
   // 以行->列->实体集合 的索引结构，便于按网格快速查询
   grid: new Map<number, Map<number, Set<Entity>>>(),
   // 高性能实体存在性查找的Set索引，O(1)时间复杂度
-  entitySet: new Set<Entity>(),
+  entities: new Set<Entity>(),
 
   // 增量统计缓存，避免每次遍历所有实体
   entityStats: {
@@ -22,19 +22,19 @@ const ocean = {
     total: 0,
   },
   // 获取单元格的实体集合
-  getCellSet(
+  getEntitySet(
     row: number,
     col: number,
-    create = false
+    newWhenNone = false
   ): Set<Entity> | undefined {
     let rowMap = this.grid.get(row);
     if (!rowMap) {
-      if (!create) return undefined;
+      if (!newWhenNone) return undefined;
       rowMap = new Map<number, Set<Entity>>();
       this.grid.set(row, rowMap);
     }
     let set = rowMap.get(col);
-    if (!set && create) {
+    if (!set && newWhenNone) {
       set = new Set<Entity>();
       rowMap.set(col, set);
     }
@@ -42,18 +42,18 @@ const ocean = {
   },
   // 注册实体（加入数组与索引）
   registerEntity(entity: Entity) {
-    if (!this.entitySet.has(entity)) {
-      this.entitySet.add(entity);
+    if (!this.isExist(entity)) {
+      this.entities.add(entity);
       // 增量更新统计
       this.updateEntityStats(entity, 1);
     }
-    const set = this.getCellSet(entity.row, entity.col, true)!;
+    const set = this.getEntitySet(entity.row, entity.col, true)!;
     set.add(entity);
   },
   // 从世界中移除实体（数组与索引）
   removeEntity(entity: Entity) {
     // 先从索引移除
-    const set = this.getCellSet(entity.row, entity.col);
+    const set = this.getEntitySet(entity.row, entity.col);
     if (set) {
       set.delete(entity);
       // 清理空集合
@@ -64,8 +64,8 @@ const ocean = {
       }
     }
     // 再从实体数组和Set移除
-    if (this.entitySet.has(entity)) {
-      this.entitySet.delete(entity);
+    if (this.isExist(entity)) {
+      this.entities.delete(entity);
       // 增量更新统计
       this.updateEntityStats(entity, -1);
     }
@@ -103,7 +103,7 @@ const ocean = {
   ) {
     if (oldRow === newRow && oldCol === newCol) return;
     // 从旧位置移除
-    const oldSet = this.getCellSet(oldRow, oldCol);
+    const oldSet = this.getEntitySet(oldRow, oldCol);
     if (oldSet) {
       oldSet.delete(entity);
       if (oldSet.size === 0) {
@@ -113,17 +113,17 @@ const ocean = {
       }
     }
     // 加入新位置
-    const newSet = this.getCellSet(newRow, newCol, true)!;
+    const newSet = this.getEntitySet(newRow, newCol, true)!;
     newSet.add(entity);
   },
   // 高性能判断实体是否还在ocean中，O(1)时间复杂度
   isExist(entity?: Entity): boolean {
     if (!entity) return false;
-    return this.entitySet.has(entity);
+    return this.entities.has(entity);
   },
   rebuildGrid() {
     this.grid.clear();
-    this.entitySet.clear();
+    this.entities.clear();
   },
   // 基于配置的初始生成权重（替代硬编码模板数组）
   pickCellType(): typeof Entity {
@@ -161,7 +161,7 @@ const ocean = {
   },
   storm() {
     const count = (viewport.cols * viewport.rows) / OceanConfig.initEntityRatio;
-    while (this.entitySet.size < count) {
+    while (this.entities.size < count) {
       this.creator();
     }
     let time = 0;
@@ -180,7 +180,7 @@ const ocean = {
     this.deltaTime = deltaTime;
     this.storm();
     // 更新所有实体
-    this.entitySet.forEach(entity => entity.update(deltaTime));
+    this.entities.forEach(entity => entity.update(deltaTime));
   },
   render() {
     // 仅渲染视窗范围内的实体
