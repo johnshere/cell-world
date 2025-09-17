@@ -1,4 +1,4 @@
-import Cell from './cell';
+import Cell, { type Position } from './cell';
 import CellCarniv from './cell-carniv';
 import CellPlant from './cell-plant';
 
@@ -25,7 +25,8 @@ export default class CellHerbiv extends Cell {
   /** 感知范围(觅食范围) */
   private senseRange = 4;
 
-  private isElder = Math.random() < 0.5;
+  private isElder = Math.random() < 0.05;
+  private elderPower = 0.5; // 长老者的力量，影响其他细胞的移动方向
 
   constructor() {
     super();
@@ -35,7 +36,6 @@ export default class CellHerbiv extends Cell {
       Math.random() * (this.moveMaxInterval - this.moveMinInterval) +
       this.moveMinInterval;
   }
-
   grow() {
     if (this.generation >= this.maxGeneration) {
       this.die();
