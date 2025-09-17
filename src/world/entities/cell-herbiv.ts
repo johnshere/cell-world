@@ -18,8 +18,6 @@ export default class CellHerbiv extends Cell {
   private lastMoveTime = 0;
   private moveInterval = 0;
   private target?: CellPlant; // 处于狩猎状态
-  /** 低于此能量百分比时必定向目标移动 */
-  private energyThresholdPercent = 0.5;
 
   /** 饥饿状态变成肉食细胞的概率 */
   private starvationToCarnivProb = 0.3;
@@ -30,11 +28,13 @@ export default class CellHerbiv extends Cell {
   /** 感知范围(觅食范围/鸟群算法) */
   private senseRange = 4;
   /** 分离权重 */
-  private separationWeight = 0.4;
+  private separationWeight = 0.3;
   /** 对齐权重 */
   private alignmentWeight = 30;
   /** 聚集权重 */
-  private cohesionWeight = 6;
+  private cohesionWeight = 9;
+  /** 捕食向量权重 */
+  private huntingWeight = 30;
 
   constructor() {
     super();
@@ -225,12 +225,36 @@ export default class CellHerbiv extends Cell {
 
     return steer;
   }
+
+  /** 捕食向量 - 向捕食目标移动 */
+  hunting() {
+    const steer = { x: 0, y: 0 };
+
+    if (this.target && this.ocean.isExist(this.target)) {
+      // 计算向目标的方向向量
+      const dx = this.target.col - this.col;
+      const dy = this.target.row - this.row;
+
+      // 归一化并应用权重
+      const magnitude = Math.sqrt(dx * dx + dy * dy);
+      const hunger = 1 - this.energy / this.energyToSplit;
+      if (magnitude > 0) {
+        steer.x = (dx / magnitude) * this.huntingWeight * hunger;
+        steer.y = (dy / magnitude) * this.huntingWeight * hunger;
+      }
+    }
+
+    return steer;
+  }
+
+  /** 群体移动 - 整合分离、对齐、聚集、捕食行为 */
   groupMove() {
     // 整合所有行为
     const acceleration = {
       x: 0,
       y: 0,
     };
+
     // 使用鸟群算法计算移动方向
     const separation = this.separate();
     acceleration.x += separation.x;
@@ -270,7 +294,9 @@ export default class CellHerbiv extends Cell {
       const newRow = Math.round(this.row + this.velocity.y);
 
       this.setPosition(newRow, newCol);
+      return true;
     }
+    return false;
   }
   /** 移动到相邻位置 */
   move() {
@@ -284,19 +310,16 @@ export default class CellHerbiv extends Cell {
     }
     this.lastMoveTime = 0;
 
-    // 计算当前能量百分比
-    const energyPercent = this.energy / this.energyToSplit;
-
-    // 如果能量低于阈值且有目标，必定向目标移动
-    if (
-      energyPercent < this.energyThresholdPercent &&
-      this.target &&
-      this.ocean.isExist(this.target)
-    ) {
-      this.moveToward(this.target);
-    } else {
-      const moved = this.groupMove();
-      if (moved === false) {
+    const nears = this.findSpecifyClassPositions(CellHerbiv, this.senseRange);
+    let moved = false;
+    if (nears.length > 1) {
+      moved = this.groupMove();
+    }
+    if (moved === false) {
+      this.velocity = { x: 0, y: 0 };
+      if (this.target && this.ocean.isExist(this.target)) {
+        this.moveToward(this.target);
+      } else {
         // 没有集群移动，则随机移动
         this.directionSense();
         const next = this.getNextMovePosition();
