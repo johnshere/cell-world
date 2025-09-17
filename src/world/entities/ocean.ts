@@ -8,10 +8,11 @@ import CellPlant from './cell-plant';
 import Entity from './entity';
 
 const ocean = {
-  entities: [] as Entity[],
   deltaTime: 0,
   // 以行->列->实体集合 的索引结构，便于按网格快速查询
   grid: new Map<number, Map<number, Set<Entity>>>(),
+  // 高性能实体存在性查找的Set索引，O(1)时间复杂度
+  entitySet: new Set<Entity>(),
 
   // 增量统计缓存，避免每次遍历所有实体
   entityStats: {
@@ -41,8 +42,8 @@ const ocean = {
   },
   // 注册实体（加入数组与索引）
   registerEntity(entity: Entity) {
-    if (!this.entities.includes(entity)) {
-      this.entities.push(entity);
+    if (!this.entitySet.has(entity)) {
+      this.entitySet.add(entity);
       // 增量更新统计
       this.updateEntityStats(entity, 1);
     }
@@ -62,10 +63,9 @@ const ocean = {
         if (rowMap && rowMap.size === 0) this.grid.delete(entity.row);
       }
     }
-    // 再从实体数组移除
-    const idx = this.entities.indexOf(entity);
-    if (idx !== -1) {
-      this.entities.splice(idx, 1);
+    // 再从实体数组和Set移除
+    if (this.entitySet.has(entity)) {
+      this.entitySet.delete(entity);
       // 增量更新统计
       this.updateEntityStats(entity, -1);
     }
@@ -116,21 +116,14 @@ const ocean = {
     const newSet = this.getCellSet(newRow, newCol, true)!;
     newSet.add(entity);
   },
-  hasEntityAt(row: number, col: number): boolean {
-    const set = this.getCellSet(row, col);
-    return !!set && set.size > 0;
-  },
-  getCellEntities(row: number, col: number): readonly Entity[] {
-    const set = this.getCellSet(row, col);
-    if (!set) return EMPTY;
-    // 惰性复制：仅在调用方需要数组语义时再展开
-    return Array.from(set);
+  // 高性能判断实体是否还在ocean中，O(1)时间复杂度
+  isExist(entity?: Entity): boolean {
+    if (!entity) return false;
+    return this.entitySet.has(entity);
   },
   rebuildGrid() {
     this.grid.clear();
-    for (const e of this.entities) {
-      this.registerEntity(e);
-    }
+    this.entitySet.clear();
   },
   // 基于配置的初始生成权重（替代硬编码模板数组）
   pickCellType(): typeof Entity {
@@ -168,7 +161,7 @@ const ocean = {
   },
   storm() {
     const count = (viewport.cols * viewport.rows) / OceanConfig.initEntityRatio;
-    while (this.entities.length < count) {
+    while (this.entitySet.size < count) {
       this.creator();
     }
     let time = 0;
@@ -187,7 +180,7 @@ const ocean = {
     this.deltaTime = deltaTime;
     this.storm();
     // 更新所有实体
-    this.entities.forEach(entity => entity.update(deltaTime));
+    this.entitySet.forEach(entity => entity.update(deltaTime));
   },
   render() {
     // 仅渲染视窗范围内的实体

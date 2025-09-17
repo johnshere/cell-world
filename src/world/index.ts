@@ -46,7 +46,7 @@ const init = () => {
     const frameEndTime = performance.now();
     const frameRenderTime = frameEndTime - frameStartTime;
 
-    const entityCount = ocean.entities.length;
+    const entityCount = ocean.entitySet.size;
     const currentEntityTime =
       entityCount > 0 ? frameRenderTime / entityCount : 0;
 
