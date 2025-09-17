@@ -2,6 +2,7 @@ import { OceanConfig } from '../../const/config';
 import { viewport } from '../../graph';
 import { drawRectsBatch } from '../../graph';
 
+import type { Positions } from './cell';
 import CellCarniv from './cell-carniv';
 import CellHerbiv from './cell-herbiv';
 import CellPlant from './cell-plant';
@@ -190,7 +191,7 @@ const ocean = {
     const endCol = viewport.col + viewport.cols;
 
     // 按颜色分组实体，实现批量渲染
-    const colorGroups = new Map<string, { row: number; col: number }[]>();
+    const colorGroups = new Map<string, Positions>();
 
     for (let r = startRow; r <= endRow; r++) {
       const rowMap = this.grid.get(r);
@@ -217,7 +218,7 @@ const ocean = {
   },
 
   // 批量渲染相同颜色的矩形
-  batchRenderRects(positions: { row: number; col: number }[], color: string) {
+  batchRenderRects(positions: Positions, color: string) {
     // 转换为drawRectsBatch所需的格式
     const batchPositions = positions.map(pos => ({
       col: pos.col,

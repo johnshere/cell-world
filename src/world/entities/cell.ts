@@ -24,7 +24,8 @@ export default class Cell extends Entity {
 
   // 新增：记录前一次位置
   footprint: Position[] = [];
-  direction: { x: Direction; y: Direction } = { x: 0, y: 0 };
+  footprintMaxSize = 10;
+  direction: { col: Direction; row: Direction } = { col: 0, row: 0 };
 
   // 新增：方向改变概率相关参数
   directionChangeChance = 0.05; // 基础改变方向概率 5%
@@ -39,16 +40,21 @@ export default class Cell extends Entity {
 
     this.directionSense(true);
   }
+  directionNormalize(dir: number): Direction {
+    if (dir > 0) return 1;
+    if (dir < 0) return -1;
+    return 0;
+  }
   directionSense(force = false) {
     if (force || Math.random() < this.directionChangeChance) {
       const x = (Math.random() < 0.5 ? -1 : 1) as Direction;
       const y = (Math.random() < 0.5 ? -1 : 1) as Direction;
-      const isOpposite = x === -this.direction.x && y === -this.direction.y;
+      const isOpposite = x === -this.direction.col && y === -this.direction.row;
       if (isOpposite) {
         this.directionSense(true);
         return;
       }
-      this.direction = { x, y };
+      this.direction = { col: x, row: y };
       this.directionChangeChance = this.directionChangeIncrement;
     } else {
       this.directionChangeChance += this.directionChangeIncrement;
@@ -56,19 +62,10 @@ export default class Cell extends Entity {
   }
   update(deltaTime: number) {
     super.update(deltaTime);
-    this.separate();
-    this.align();
-    this.cohesion();
     this.hunt();
     this.move();
     this.grow();
   }
-  /** 分离 */
-  separate() {}
-  /** 对齐 */
-  align() {}
-  /** 聚集 */
-  cohesion() {}
   /** 觅食 */
   hunt() {}
   /** 移动 */
@@ -167,17 +164,20 @@ export default class Cell extends Entity {
   }
   setPosition(row: number, col: number): void {
     if (this.row === row && this.col === col) return;
-    this.footprint.push({ row: this.row, col: this.col });
+    this.footprint.unshift({ row: this.row, col: this.col });
+    if (this.footprint.length > this.footprintMaxSize) {
+      this.footprint.pop();
+    }
     // 更新当前方向为实际移动的方向
-    this.direction.y = (row - this.row) as Direction;
-    this.direction.x = (col - this.col) as Direction;
+    this.direction.row = (row - this.row) as Direction;
+    this.direction.col = (col - this.col) as Direction;
 
     super.setPosition(row, col);
   }
   getNextMovePosition(): Position | void {
     // 根据当前方向获取目标位置
-    const targetRow = this.row + this.direction.y;
-    const targetCol = this.col + this.direction.x;
+    const targetRow = this.row + this.direction.row;
+    const targetCol = this.col + this.direction.col;
 
     const targetPosition = { row: targetRow, col: targetCol };
 
