@@ -18,6 +18,8 @@ export const AllDirections: Direction[] = [
   { col: 1, row: 1 }, // 右下
 ];
 
+type Scan = (poss: Positions) => boolean | void;
+
 export default class Cell extends Entity {
   color = 'black';
   /** 能量 */
@@ -89,7 +91,7 @@ export default class Cell extends Entity {
     this.separate();
     this.align();
     this.cohesion();
-    this.hunt();
+    this.sense();
     this.move();
     this.grow();
   }
@@ -99,8 +101,8 @@ export default class Cell extends Entity {
   align() {}
   /** 聚集 */
   cohesion() {}
-  /** 觅食 */
-  hunt() {}
+  /** 感知 */
+  sense() {}
   /** 移动 */
   move() {}
   /** 生长 */
@@ -136,30 +138,43 @@ export default class Cell extends Entity {
   die() {
     this.ocean.removeEntity(this);
   }
-  /** 获取相邻位置 */
-  scanNearPositions(range = 1, scan?: (poss: Positions) => boolean | void) {
+  /**
+   * 获取相邻位置
+   * @param range 范围
+   * @param center 中心位置
+   * @param scan 扫描函数 返回true时停止扫描
+   * @returns 相邻位置
+   */
+  scanNearPositions(range = 1, center?: Position | Scan, scan?: Scan) {
     const positions: Position[] = [];
+
+    if (typeof center === 'function') {
+      scan = center;
+      center = { row: this.row, col: this.col };
+    } else if (!center) {
+      center = { row: this.row, col: this.col };
+    }
 
     // 按顺时针方向获取指定范围内的位置
     for (let r = 1; r <= range; r++) {
       // 上边（从左到右）
-      for (let col = this.col - r; col <= this.col + r; col++) {
-        positions.push({ row: this.row - r, col });
+      for (let col = center.col - r; col <= center.col + r; col++) {
+        positions.push({ row: center.row - r, col });
       }
 
       // 右边（从上到下，排除右上角）
-      for (let row = this.row - r + 1; row <= this.row + r; row++) {
-        positions.push({ row, col: this.col + r });
+      for (let row = center.row - r + 1; row <= center.row + r; row++) {
+        positions.push({ row, col: center.col + r });
       }
 
       // 下边（从右到左，排除右下角）
-      for (let col = this.col + r - 1; col >= this.col - r; col--) {
-        positions.push({ row: this.row + r, col });
+      for (let col = center.col + r - 1; col >= center.col - r; col--) {
+        positions.push({ row: center.row + r, col });
       }
 
       // 左边（从下到上，排除左下角和左上角）
-      for (let row = this.row + r - 1; row > this.row - r; row--) {
-        positions.push({ row, col: this.col - r });
+      for (let row = center.row + r - 1; row > center.row - r; row--) {
+        positions.push({ row, col: center.col - r });
       }
       if (scan?.(positions)) {
         return positions;

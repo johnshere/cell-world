@@ -5,18 +5,18 @@ import CellPlant from './cell-plant';
 /** 食肉细胞（以植食细胞为食） */
 export default class CellCarniv extends Cell {
   color = 'DeepPink';
-  private lastMoveTime = 0;
+  private moveTimer = 0;
   private moveInterval = 0;
-  private target?: CellHerbiv; // 处于狩猎状态
+  private prey?: CellHerbiv; // 处于狩猎状态
 
   maxGeneration = 3; // 最大分裂次数
   maxNearingCells = 1; // 周围同类细胞数量超过此值时不分裂
   moveMinInterval = 50; // 移动间隔时间（毫秒）
   moveMaxInterval = 800; // 移动间隔时间（毫秒）
 
-  /** 觅食范围 */
+  /** 感知范围 */
   senseRange = 7;
-  /** 低能量觅食范围 */
+  /** 低能量感知范围 */
   senseRangeLowEnergy = 3;
   /** 捕猎失败被反杀的概率（比目标能量低时） */
   huntFailedRatio = 0.5;
@@ -72,19 +72,16 @@ export default class CellCarniv extends Cell {
   /** 移动到相邻位置 */
   move() {
     // 所有状态下都先累积移动计时，便于低能量追击同样遵循节奏
-    this.lastMoveTime += this.deltaTime;
+    this.moveTimer += this.deltaTime;
 
-    if (
-      this.lastMoveTime <
-      this.moveInterval - this.energy * this.energyToSpeed
-    ) {
+    if (this.moveTimer < this.moveInterval - this.energy * this.energyToSpeed) {
       return;
     }
-    this.lastMoveTime = 0;
+    this.moveTimer = 0;
 
-    if (this.target && this.ocean.isExist(this.target)) {
+    if (this.prey && this.ocean.isExist(this.prey)) {
       // 处于狩猎状态则向目标移动
-      this.moveToward(this.target);
+      this.moveToward(this.prey);
     } else {
       // 不处于狩猎状态，随机移动
       this.directionSense();
@@ -125,54 +122,54 @@ export default class CellCarniv extends Cell {
       this.energy += prey.energy;
 
       // 如果吃掉的是当前目标，清除目标
-      if (prey === this.target) {
-        this.target = undefined;
+      if (prey === this.prey) {
+        this.prey = undefined;
       }
 
       this.breath();
     }
   }
 
-  /** 觅食 - 在一定范围内寻找植食细胞作为目标（正常状态下使用全范围） */
-  hunt() {
-    const tar = this.target;
-    const isExist = tar && this.ocean.isExist(tar);
+  /** 感知 - 在一定范围内寻找植食细胞作为目标（正常状态下使用全范围） */
+  sense() {
+    const prey = this.prey;
+    const isExist = prey && this.ocean.isExist(prey);
     let range = this.senseRange;
     if (isExist) {
       if (this.energy <= this.lowEnergyThreshold) {
         range = this.senseRangeLowEnergy;
         // 检查现有目标是否仍在半径内
         const withinHalf =
-          Math.abs(tar.row - this.row) <= range &&
-          Math.abs(tar.col - this.col) <= range;
+          Math.abs(prey.row - this.row) <= range &&
+          Math.abs(prey.col - this.col) <= range;
         if (withinHalf) return;
       } else {
         if (
-          Math.abs(tar.row - this.row) <= range &&
-          Math.abs(tar.col - this.col) <= range
+          Math.abs(prey.row - this.row) <= range &&
+          Math.abs(prey.col - this.col) <= range
         ) {
           return;
         }
       }
     }
-    this.target = undefined;
+    this.prey = undefined;
 
     // 用索引收集候选猎物集合
-    const targets: CellHerbiv[] = [];
+    const preys: CellHerbiv[] = [];
     this.scanNearPositions(range, posis => {
       posis.forEach(pos => {
         const set = this.ocean.getEntitySet(pos.row, pos.col);
         if (!set) return;
         for (const e of set) {
           if (e instanceof CellHerbiv) {
-            targets.push(e);
+            preys.push(e);
           }
         }
       });
-      return !!targets.length;
+      return !!preys.length;
     });
 
-    if (targets.length === 0) return;
-    this.target = targets[Math.floor(Math.random() * targets.length)];
+    if (preys.length === 0) return;
+    this.prey = preys[Math.floor(Math.random() * preys.length)];
   }
 }

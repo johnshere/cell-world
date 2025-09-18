@@ -7,17 +7,17 @@ export default class CellHerbiv extends Cell {
   color = 'sandybrown';
   maxGeneration = 2; // 最大分裂次数
   maxNearingCells = 1; // 周围同类细胞数量超过此值时不分裂
-  moveMinInterval = 800; // 移动间隔时间（毫秒）
-  moveMaxInterval = 1400; // 移动间隔时间（毫秒）
+  moveMinInterval = 700; // 移动间隔时间（毫秒）
+  moveMaxInterval = 1200; // 移动间隔时间（毫秒）
 
   energy = 90;
-  energyToSplit = 100; // 分裂所需的能量
+  energyToSplit = 140; // 分裂所需的能量
   energyToMove = -1; // 移动所需的能量
   /** 能量对速度的加成 */
-  energyToSpeed = 3;
-  private lastMoveTime = 0;
+  energyToSpeed = 4;
+  private moveTimer = 0;
   private moveInterval = 0;
-  private target?: CellPlant; // 处于狩猎状态
+  private prey?: CellPlant; // 处于狩猎状态
 
   /** 饥饿状态变成肉食细胞的概率 */
   private starvationToCarnivProb = 0.3;
@@ -25,8 +25,8 @@ export default class CellHerbiv extends Cell {
   // 鸟群算法相关属性
   /** 速度向量 */
   private velocity = { x: 0, y: 0 };
-  /** 感知范围(觅食范围/鸟群算法) */
-  private senseRange = 4;
+  /** 感知范围(感知范围/鸟群算法) */
+  private senseRange = 5;
   /** 分离权重 */
   private separationWeight = 0.3;
   /** 对齐权重 */
@@ -230,10 +230,10 @@ export default class CellHerbiv extends Cell {
   hunting() {
     const steer = { x: 0, y: 0 };
 
-    if (this.target && this.ocean.isExist(this.target)) {
+    if (this.prey && this.ocean.isExist(this.prey)) {
       // 计算向目标的方向向量
-      const dx = this.target.col - this.col;
-      const dy = this.target.row - this.row;
+      const dx = this.prey.col - this.col;
+      const dy = this.prey.row - this.row;
 
       // 归一化并应用权重
       const magnitude = Math.sqrt(dx * dx + dy * dy);
@@ -250,10 +250,7 @@ export default class CellHerbiv extends Cell {
   /** 群体移动 - 整合分离、对齐、聚集、捕食行为 */
   groupMove() {
     // 整合所有行为
-    const acceleration = {
-      x: 0,
-      y: 0,
-    };
+    const acceleration = { x: 0, y: 0 };
 
     // 使用鸟群算法计算移动方向
     const separation = this.separate();
@@ -274,51 +271,58 @@ export default class CellHerbiv extends Cell {
     if (acceleration.x === 0 && acceleration.y === 0) {
       return false;
     }
+    const hunting = this.hunting();
+    acceleration.x += hunting.x;
+    acceleration.y += hunting.y;
+    if (acceleration.x === 0 && acceleration.y === 0) {
+      return false;
+    }
 
     // 更新速度
     this.velocity.x += acceleration.x;
     this.velocity.y += acceleration.y;
 
     // 限制最大速度
-    const speed = Math.sqrt(
-      this.velocity.x * this.velocity.x + this.velocity.y * this.velocity.y
-    );
-    if (speed > 1) {
+    const sum =
+      this.velocity.x * this.velocity.x + this.velocity.y * this.velocity.y;
+    if (sum > 1) {
+      const speed = Math.sqrt(sum);
       this.velocity.x = this.velocity.x / speed;
       this.velocity.y = this.velocity.y / speed;
     }
 
-    // 根据速度移动
-    if (Math.abs(this.velocity.x) > 0.1 || Math.abs(this.velocity.y) > 0.1) {
-      const newCol = Math.round(this.col + this.velocity.x);
-      const newRow = Math.round(this.row + this.velocity.y);
-
-      this.setPosition(newRow, newCol);
+    let col = this.col;
+    let row = this.row;
+    if (Math.abs(this.velocity.x) > 0.5) {
+      col += this.velocity.x > 0 ? 1 : -1;
+    }
+    if (Math.abs(this.velocity.y) > 0.5) {
+      row += this.velocity.y > 0 ? 1 : -1;
+    }
+    if (this.col !== col || this.row !== row) {
+      this.setPosition(row, col);
       return true;
     }
     return false;
   }
   /** 移动到相邻位置 */
   move() {
-    this.lastMoveTime += this.deltaTime;
+    this.moveTimer += this.deltaTime;
     // 检查是否可以移动
-    if (
-      this.lastMoveTime <
-      this.moveInterval - this.energy * this.energyToSpeed
-    ) {
+    if (this.moveTimer < this.moveInterval - this.energy * this.energyToSpeed) {
       return;
     }
-    this.lastMoveTime = 0;
+    this.moveTimer = 0;
 
     const nears = this.findSpecifyClassPositions(CellHerbiv, this.senseRange);
-    let moved = false;
+    let isGroupMove = false;
     if (nears.length > 1) {
-      moved = this.groupMove();
+      isGroupMove = this.groupMove();
     }
-    if (moved === false) {
+    if (isGroupMove === false) {
       this.velocity = { x: 0, y: 0 };
-      if (this.target && this.ocean.isExist(this.target)) {
-        this.moveToward(this.target);
+      if (this.prey && this.ocean.isExist(this.prey)) {
+        this.moveToward(this.prey);
       } else {
         // 没有集群移动，则随机移动
         this.directionSense();
@@ -354,8 +358,8 @@ export default class CellHerbiv extends Cell {
       this.energy += plant.energy;
 
       // 如果吃掉的是当前目标，清除目标
-      if (plant === this.target) {
-        this.target = undefined;
+      if (plant === this.prey) {
+        this.prey = undefined;
       }
     });
 
@@ -364,33 +368,54 @@ export default class CellHerbiv extends Cell {
     }
   }
 
-  /** 觅食 - 在一定范围内寻找植物细胞作为目标 */
-  hunt() {
-    const tar = this.target;
+  /** 感知 - 在前方一定范围内寻找植物细胞作为目标 */
+  sense() {
+    const prey = this.prey;
     const range = this.senseRange;
-    const isExist = tar && this.ocean.isExist(tar);
-    if (isExist && tar.row - this.row <= range && tar.col - this.col <= range) {
+    const isExist = prey && this.ocean.isExist(prey);
+    if (
+      isExist &&
+      prey.row - this.row <= range &&
+      prey.col - this.col <= range
+    ) {
       return;
     }
+    this.prey = undefined;
+    // 速度方向上，距离是senseRange+1的位置
+    const velocityMagnitude = Math.sqrt(
+      this.velocity.x * this.velocity.x + this.velocity.y * this.velocity.y
+    );
+    const normalizedVelocity = {
+      x: this.velocity.x / velocityMagnitude,
+      y: this.velocity.y / velocityMagnitude,
+    };
 
+    const center = {
+      row: this.row + Math.round(normalizedVelocity.y * (this.senseRange + 1)),
+      col: this.col + Math.round(normalizedVelocity.x * (this.senseRange + 1)),
+    };
     // 先用索引收集候选植物集合
-    const targets = [] as CellPlant[];
-    this.scanNearPositions(range, posis => {
-      posis.forEach(pos => {
+    const preys = [] as CellPlant[];
+    let hasSame = false;
+    this.scanNearPositions(range, center, posis => {
+      for (const pos of posis) {
         const set = this.ocean.getEntitySet(pos.row, pos.col);
-        if (!set) return;
+        if (!set) continue;
         for (const e of set) {
+          if (e instanceof CellHerbiv) {
+            hasSame = true;
+          }
           if (e instanceof CellPlant) {
-            targets.push(e);
+            preys.push(e);
           }
         }
-      });
-      return !!targets.length;
+      }
+      return hasSame || !!preys.length;
     });
 
-    if (targets.length === 0) return;
+    if (hasSame || preys.length === 0) return;
 
     // 随机选择一个候选作为目标
-    this.target = targets[Math.floor(Math.random() * targets.length)];
+    this.prey = preys[Math.floor(Math.random() * preys.length)];
   }
 }

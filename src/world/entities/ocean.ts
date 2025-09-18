@@ -159,11 +159,15 @@ const ocean = {
     newOne.ocean = this;
     // 使用索引注册
     this.registerEntity(newOne);
+    return newOne;
   },
   storm() {
     const count = (viewport.cols * viewport.rows) / OceanConfig.initEntityRatio;
     while (this.entities.size < count) {
-      this.creator();
+      const newOne = this.creator();
+      if (newOne instanceof CellPlant) {
+        newOne.energy = OceanConfig.initPlantEnergy;
+      }
     }
     let time = 0;
     const bornNumOfUnit =
