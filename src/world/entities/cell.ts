@@ -157,25 +157,39 @@ export default class Cell extends Entity {
 
     // 按顺时针方向获取指定范围内的位置
     for (let r = 1; r <= range; r++) {
+      const layerPositions: Position[] = [];
+
       // 上边（从左到右）
       for (let col = center.col - r; col <= center.col + r; col++) {
-        positions.push({ row: center.row - r, col });
+        layerPositions.push({ row: center.row - r, col });
       }
 
       // 右边（从上到下，排除右上角）
       for (let row = center.row - r + 1; row <= center.row + r; row++) {
-        positions.push({ row, col: center.col + r });
+        layerPositions.push({ row, col: center.col + r });
       }
 
       // 下边（从右到左，排除右下角）
       for (let col = center.col + r - 1; col >= center.col - r; col--) {
-        positions.push({ row: center.row + r, col });
+        layerPositions.push({ row: center.row + r, col });
       }
 
       // 左边（从下到上，排除左下角和左上角）
       for (let row = center.row + r - 1; row > center.row - r; row--) {
-        positions.push({ row, col: center.col - r });
+        layerPositions.push({ row, col: center.col - r });
       }
+
+      // 随机打乱当前层的位置顺序，消除方向偏向
+      for (let i = layerPositions.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [layerPositions[i], layerPositions[j]] = [
+          layerPositions[j],
+          layerPositions[i],
+        ];
+      }
+
+      positions.push(...layerPositions);
+
       if (scan?.(positions)) {
         return positions;
       }
