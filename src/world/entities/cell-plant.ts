@@ -6,9 +6,10 @@ export default class CellPlant extends Cell {
   energy = 50;
   /** 每秒光合获取的能量 */
   energyToGrow = 1.5;
+  energyMax = 500;
   /** 分裂所需的能量 */
   energyToSplit = 130;
-  maxGeneration = 4;
+  maxGeneration = 3;
   maxNearingCells = 3;
   splitInterval = 6000; // 分裂间隔时间（毫秒）
   private splitTimer = 0;
@@ -23,7 +24,9 @@ export default class CellPlant extends Cell {
       this.die();
       return;
     }
-    this.energy += (this.energyToGrow * this.deltaTime) / 1000;
+    if (this.energy < this.energyMax) {
+      this.energy += (this.energyToGrow * this.deltaTime) / 1000;
+    }
     this.splitTimer += this.deltaTime;
 
     // 检查是否可以分裂

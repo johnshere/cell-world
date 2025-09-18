@@ -11,16 +11,16 @@ export default class CellHerbiv extends Cell {
   moveMaxInterval = 1200; // 移动间隔时间（毫秒）
 
   energy = 90;
-  energyToSplit = 140; // 分裂所需的能量
-  energyToMove = -1; // 移动所需的能量
+  energyToSplit = 150; // 分裂所需的能量
+  energyToMove = -1.5; // 移动所需的能量
   /** 能量对速度的加成 */
-  energyToSpeed = 4;
+  energyToSpeed = 1.5;
   private moveTimer = 0;
   private moveInterval = 0;
   private prey?: CellPlant; // 处于狩猎状态
 
   /** 饥饿状态变成肉食细胞的概率 */
-  private starvationToCarnivProb = 0.3;
+  private starvationToCarnivProb = 0.1;
 
   // 鸟群算法相关属性
   /** 速度向量 */
@@ -34,7 +34,7 @@ export default class CellHerbiv extends Cell {
   /** 聚集权重 */
   private cohesionWeight = 9;
   /** 捕食向量权重 */
-  private huntingWeight = 30;
+  private huntingWeight = 50;
 
   constructor() {
     super();
@@ -404,6 +404,7 @@ export default class CellHerbiv extends Cell {
         for (const e of set) {
           if (e instanceof CellHerbiv) {
             hasSame = true;
+            return true;
           }
           if (e instanceof CellPlant) {
             preys.push(e);

@@ -3,7 +3,7 @@ export const RootEl = document.getElementById('app')!;
 export const WorldConfig = {
   // 帧率控制
   FrameRate: 10,
-  AccelerateMax: 50,
+  AccelerateMax: 30,
   /** 开启加速 */
   IsAutoAccelerate: false,
   /** fps超过时，加速 */
@@ -11,7 +11,7 @@ export const WorldConfig = {
   /** fps小于时，减速 */
   FpsToDecelerate: 20,
   /** 单次调整速度 */
-  AccelerateStep: 0.4,
+  AccelerateStep: 0.6,
 };
 
 // 海洋配置

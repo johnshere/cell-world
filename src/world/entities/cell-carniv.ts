@@ -23,7 +23,7 @@ export default class CellCarniv extends Cell {
 
   energy = 30;
   energyToSplit = 10000; // 分裂所需的能量
-  energyToMove = -12; // 移动所需的能量
+  energyToMove = -16; // 移动所需的能量
   /** 能量对速度的加成 */
   energyToSpeed = 1;
   /** 低能量阈值（低于等于该值时进入待机：不移动不消耗能量） */
