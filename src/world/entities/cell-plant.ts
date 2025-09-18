@@ -9,7 +9,7 @@ export default class CellPlant extends Cell {
   energyMax = 500;
   /** 分裂所需的能量 */
   energyToSplit = 130;
-  maxGeneration = 3;
+  maxGeneration = 20;
   maxNearingCells = 3;
   splitInterval = 6000; // 分裂间隔时间（毫秒）
   private splitTimer = 0;
@@ -42,9 +42,8 @@ export default class CellPlant extends Cell {
         const halfEnergy = this.energy / 2;
         child.energy = halfEnergy;
         this.energy = halfEnergy;
-        const generation = Math.floor(this.generation / 2);
-        this.generation = generation;
-        child.generation = this.generation + 1;
+        child.generation = this.generation;
+        this.generation += 1;
       }
     }
   }
