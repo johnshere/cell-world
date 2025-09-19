@@ -188,7 +188,7 @@ export default class Cell extends Entity {
 
     return positions;
   }
-  findSpecifyClassPositions<T extends Cell>(Ctor: new () => T, range = 1) {
+  findSpecifyClass<T extends Cell>(Ctor: new () => T, range = 1) {
     const positions = this.scanNearPositions(range);
     const result: T[] = [];
     positions.forEach(pos => {

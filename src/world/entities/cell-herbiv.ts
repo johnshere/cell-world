@@ -37,7 +37,7 @@ export default class CellHerbiv extends Cell {
   /** 聚集权重 */
   private cohesionWeight = 9;
   /** 捕食向量权重 */
-  private huntingWeight = 50;
+  private huntingWeight = 150;
 
   constructor() {
     super();
@@ -54,9 +54,9 @@ export default class CellHerbiv extends Cell {
       return;
     }
     if (this.energy <= 0) {
-      const nearSameCells = this.findSpecifyClassPositions(CellHerbiv, 2);
+      const nearSameCells = this.findSpecifyClass(CellHerbiv, 2);
       if (nearSameCells.length > 0) {
-        const nearPlantCells = this.findSpecifyClassPositions(CellPlant, 2);
+        const nearPlantCells = this.findSpecifyClass(CellPlant, 2);
         if (
           nearPlantCells.length === 0 &&
           Math.random() < this.starvationToCarnivProb
@@ -290,7 +290,7 @@ export default class CellHerbiv extends Cell {
     }
     this.moveTimer = 0;
 
-    this.mates = this.findSpecifyClassPositions(CellHerbiv, this.senseRange);
+    this.mates = this.findSpecifyClass(CellHerbiv, this.senseRange);
     let isGroupMove = false;
     if (this.mates.length > 1) {
       isGroupMove = this.groupMove();

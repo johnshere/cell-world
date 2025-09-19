@@ -21,9 +21,9 @@ export default class CellCarniv extends Cell {
   /** 捕猎失败被反杀的概率（比目标能量低时） */
   huntFailedRatio = 0.5;
 
-  energy = 30;
+  energy = 100;
   energyToSplit = 10000; // 分裂所需的能量
-  energyToMove = 27; // 移动所需的能量
+  energyToMove = 70; // 移动所需的能量
   /** 能量对速度的加成 */
   energyToSpeed = 1;
   /** 低能量阈值（低于等于该值时进入待机：不移动不消耗能量） */
@@ -47,8 +47,8 @@ export default class CellCarniv extends Cell {
       return;
     }
     if (this.energy <= 0) {
-      if (this.findSpecifyClassPositions(CellPlant).length > 6) {
-        if (this.findSpecifyClassPositions(CellCarniv, 2).length === 0) {
+      if (this.findSpecifyClass(CellPlant).length > 5) {
+        if (this.findSpecifyClass(CellCarniv, 2).length === 0) {
           const newSelf = new CellHerbiv();
           newSelf.ocean = this.ocean;
           newSelf.setPosition(this.row, this.col);
