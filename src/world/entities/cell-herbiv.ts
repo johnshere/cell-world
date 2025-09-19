@@ -12,9 +12,12 @@ export default class CellHerbiv extends Cell {
 
   energy = 90;
   energyToSplit = 150; // 分裂所需的能量
-  energyToMove = -1.5; // 移动所需的能量
+  splitInterval = 200; // 分裂间隔时间（毫秒）
+  splitTimer = 0;
+
+  energyToMove = 1.5; // 移动所需的能量
   /** 能量对速度的加成 */
-  energyToSpeed = 1.5;
+  energyToSpeed = 1;
   private moveTimer = 0;
   private moveInterval = 0;
   private prey?: CellPlant; // 处于狩猎状态
@@ -43,6 +46,7 @@ export default class CellHerbiv extends Cell {
     this.moveInterval =
       Math.random() * (this.moveMaxInterval - this.moveMinInterval) +
       this.moveMinInterval;
+    this.splitInterval = (1.5 - Math.random()) * this.splitInterval;
   }
   grow() {
     if (this.generation >= this.maxGeneration) {
@@ -69,8 +73,13 @@ export default class CellHerbiv extends Cell {
       this.die();
       return;
     }
+    this.splitTimer += this.deltaTime;
     // 检查是否可以分裂
-    if (this.energy >= this.energyToSplit) {
+    if (
+      this.energy >= this.energyToSplit &&
+      this.splitTimer > this.splitInterval
+    ) {
+      this.splitTimer = 0;
       const child = this.split() as CellHerbiv;
       const energy = this.energy / 2;
       if (child) {
@@ -303,7 +312,7 @@ export default class CellHerbiv extends Cell {
     // 移动后检查当前位置是否有植物细胞并吃掉它们
     this.eatPlantsAtCurrentPosition();
 
-    this.energy += this.energyToMove;
+    this.energy -= this.energyToMove;
   }
 
   /** 吃掉当前位置的植物细胞 */
@@ -342,8 +351,8 @@ export default class CellHerbiv extends Cell {
     const isExist = prey && this.ocean.isExist(prey);
     if (
       isExist &&
-      prey.row - this.row <= range &&
-      prey.col - this.col <= range
+      Math.abs(prey.row - this.row) <= range &&
+      Math.abs(prey.col - this.col) <= range
     ) {
       return;
     }

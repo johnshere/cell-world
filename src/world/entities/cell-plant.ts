@@ -3,19 +3,20 @@ import Cell from './cell';
 /** 植物细胞 */
 export default class CellPlant extends Cell {
   color = 'green';
-  energy = 50;
+  energy = 40;
   /** 每秒光合获取的能量 */
-  energyToGrow = 1.5;
-  energyMax = 500;
+  energyToGrow = 3;
   /** 分裂所需的能量 */
-  energyToSplit = 130;
-  maxGeneration = 20;
-  maxNearingCells = 3;
-  splitInterval = 6000; // 分裂间隔时间（毫秒）
-  private splitTimer = 0;
+  energyToSplit = 110;
+  maxGeneration = 200;
+  maxNearingCells = 2; // 周围同类细胞数量超过此值时不分裂
+  splitInterval = 1000; // 分裂间隔时间（毫秒）
+  splitTimer = 0;
+
   constructor() {
     super();
     this.energy = (1.5 - Math.random()) * this.energy;
+    this.energyToSplit = (1.5 - Math.random()) * this.energyToSplit;
     this.splitInterval = (1.5 - Math.random()) * this.splitInterval;
   }
 
@@ -24,9 +25,11 @@ export default class CellPlant extends Cell {
       this.die();
       return;
     }
-    if (this.energy < this.energyMax) {
-      this.energy += (this.energyToGrow * this.deltaTime) / 1000;
+    if (this.energy < 0) {
+      this.die();
+      return;
     }
+    this.energy += (this.energyToGrow * this.deltaTime) / 1000;
     this.splitTimer += this.deltaTime;
 
     // 检查是否可以分裂

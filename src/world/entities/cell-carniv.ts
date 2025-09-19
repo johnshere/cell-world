@@ -23,7 +23,7 @@ export default class CellCarniv extends Cell {
 
   energy = 30;
   energyToSplit = 10000; // 分裂所需的能量
-  energyToMove = -16; // 移动所需的能量
+  energyToMove = 27; // 移动所需的能量
   /** 能量对速度的加成 */
   energyToSpeed = 1;
   /** 低能量阈值（低于等于该值时进入待机：不移动不消耗能量） */
@@ -95,7 +95,7 @@ export default class CellCarniv extends Cell {
     // 移动后检查当前位置是否有植食细胞并吃掉它们
     this.attackAndEat();
 
-    this.energy += this.energyToMove;
+    this.energy -= this.energyToMove;
   }
   /** 吃掉当前位置的植食细胞 */
   private attackAndEat() {
