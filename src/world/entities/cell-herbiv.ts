@@ -85,32 +85,22 @@ export default class CellHerbiv extends Cell {
     const steer = { x: 0, y: 0 };
     let count = 0;
 
-    // 获取感知范围内的位置
-    const nearPositions = this.scanNearPositions(this.senseRange);
+    for (const mate of this.mates) {
+      // 计算距离 (x对应col，y对应row)
+      const dx = this.col - mate.col;
+      const dy = this.row - mate.row;
+      const distance = Math.sqrt(dx * dx + dy * dy);
 
-    for (const pos of nearPositions) {
-      const set = this.ocean.getEntitySet(pos.row, pos.col);
-      if (!set) continue;
-
-      for (const entity of set) {
-        if (entity instanceof CellHerbiv && entity !== this) {
-          // 计算距离
-          const dx = this.col - entity.col;
-          const dy = this.row - entity.row;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-
-          if (distance > 0 && distance < this.senseRange) {
-            // 累加邻居的速度向量
-            steer.x += entity.velocity.x;
-            steer.y += entity.velocity.y;
-            count++;
-          }
-        }
+      if (distance > 0 && distance < this.senseRange) {
+        // 累加邻居的速度向量
+        steer.x += mate.velocity.x;
+        steer.y += mate.velocity.y;
+        count++;
       }
     }
 
+    // 只有当有邻居时才计算平均速度
     if (count > 0) {
-      // 计算平均速度
       steer.x /= count;
       steer.y /= count;
 
@@ -130,37 +120,27 @@ export default class CellHerbiv extends Cell {
     const steer = { x: 0, y: 0 };
     let count = 0;
 
-    // 获取感知范围内的位置
-    const nearPositions = this.scanNearPositions(this.senseRange);
+    for (const mate of this.mates) {
+      // 计算距离 (x对应col，y对应row)
+      const dx = this.col - mate.col;
+      const dy = this.row - mate.row;
+      const distance = Math.sqrt(dx * dx + dy * dy);
 
-    for (const pos of nearPositions) {
-      const set = this.ocean.getEntitySet(pos.row, pos.col);
-      if (!set) continue;
+      if (distance > 0 && distance < this.senseRange) {
+        // 计算分离向量（远离邻居）
+        const separateX = dx / distance;
+        const separateY = dy / distance;
 
-      for (const entity of set) {
-        if (entity instanceof CellHerbiv && entity !== this) {
-          // 计算距离
-          const dx = this.col - entity.col;
-          const dy = this.row - entity.row;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-
-          if (distance > 0 && distance < this.senseRange) {
-            // 计算分离向量（远离邻居）
-            const separateX = dx / distance;
-            const separateY = dy / distance;
-
-            // 距离越近，分离力越强
-            const force = 1 / distance;
-            steer.x += separateX * force;
-            steer.y += separateY * force;
-            count++;
-          }
-        }
+        // 距离越近，分离力越强
+        const force = 1 / distance;
+        steer.x += separateX * force;
+        steer.y += separateY * force;
+        count++;
       }
     }
 
+    // 只有当有邻居时才平均化分离向量
     if (count > 0) {
-      // 平均化分离向量
       steer.x /= count;
       steer.y /= count;
 
@@ -180,32 +160,23 @@ export default class CellHerbiv extends Cell {
     const center = { x: 0, y: 0 };
     let count = 0;
 
-    // 获取感知范围内的位置
-    const nearPositions = this.scanNearPositions(this.senseRange);
+    for (const mate of this.mates) {
+      // 计算距离 (x对应col，y对应row)
+      const dx = this.col - mate.col;
+      const dy = this.row - mate.row;
+      const distance = Math.sqrt(dx * dx + dy * dy);
 
-    for (const pos of nearPositions) {
-      const set = this.ocean.getEntitySet(pos.row, pos.col);
-      if (!set) continue;
-
-      for (const entity of set) {
-        if (entity instanceof CellHerbiv && entity !== this) {
-          // 计算距离
-          const dx = this.col - entity.col;
-          const dy = this.row - entity.row;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-
-          if (distance > 0 && distance < this.senseRange) {
-            // 累加邻居位置
-            center.x += entity.col;
-            center.y += entity.row;
-            count++;
-          }
-        }
+      if (distance > 0 && distance < this.senseRange) {
+        // 累加邻居位置
+        center.x += mate.col;
+        center.y += mate.row;
+        count++;
       }
     }
 
     const steer = { x: 0, y: 0 };
 
+    // 只有当有邻居时才计算聚集行为
     if (count > 0) {
       // 计算邻居的中心位置
       center.x /= count;
@@ -256,24 +227,19 @@ export default class CellHerbiv extends Cell {
     const separation = this.separate();
     acceleration.x += separation.x;
     acceleration.y += separation.y;
-    if (acceleration.x === 0 && acceleration.y === 0) {
-      return false;
-    }
+
     const alignment = this.align();
     acceleration.x += alignment.x;
     acceleration.y += alignment.y;
-    if (acceleration.x === 0 && acceleration.y === 0) {
-      return false;
-    }
+
     const cohesion = this.cohesion();
     acceleration.x += cohesion.x;
     acceleration.y += cohesion.y;
-    if (acceleration.x === 0 && acceleration.y === 0) {
-      return false;
-    }
+
     const hunting = this.hunting();
     acceleration.x += hunting.x;
     acceleration.y += hunting.y;
+
     if (acceleration.x === 0 && acceleration.y === 0) {
       return false;
     }
@@ -305,6 +271,7 @@ export default class CellHerbiv extends Cell {
     }
     return false;
   }
+  private mates: CellHerbiv[] = [];
   /** 移动到相邻位置 */
   move() {
     this.moveTimer += this.deltaTime;
@@ -314,9 +281,9 @@ export default class CellHerbiv extends Cell {
     }
     this.moveTimer = 0;
 
-    const nears = this.findSpecifyClassPositions(CellHerbiv, this.senseRange);
+    this.mates = this.findSpecifyClassPositions(CellHerbiv, this.senseRange);
     let isGroupMove = false;
-    if (nears.length > 1) {
+    if (this.mates.length > 1) {
       isGroupMove = this.groupMove();
     }
     if (isGroupMove === false) {

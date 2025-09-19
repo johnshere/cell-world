@@ -88,19 +88,10 @@ export default class Cell extends Entity {
   }
   update(deltaTime: number) {
     super.update(deltaTime);
-    this.separate();
-    this.align();
-    this.cohesion();
     this.sense();
     this.move();
     this.grow();
   }
-  /** 分离 */
-  separate() {}
-  /** 对齐 */
-  align() {}
-  /** 聚集 */
-  cohesion() {}
   /** 感知 */
   sense() {}
   /** 移动 */
@@ -197,17 +188,19 @@ export default class Cell extends Entity {
 
     return positions;
   }
-  /** 查找同类位置 */
-  findSpecifyClassPositions(Ctor: new () => Cell, range = 1) {
-    const adjacentPositions = this.scanNearPositions(range);
-    return adjacentPositions.filter(pos => {
+  findSpecifyClassPositions<T extends Cell>(Ctor: new () => T, range = 1) {
+    const positions = this.scanNearPositions(range);
+    const result: T[] = [];
+    positions.forEach(pos => {
       const set = this.ocean.getEntitySet(pos.row, pos.col);
-      if (!set) return false;
+      if (!set) return;
       for (const e of set) {
-        if (e instanceof Ctor) return true;
+        if (e instanceof Ctor) {
+          result.push(e);
+        }
       }
-      return false;
     });
+    return result;
   }
   findNotSameFreePosition(adjacentPositions?: Positions) {
     if (!adjacentPositions) {
