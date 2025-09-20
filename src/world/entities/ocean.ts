@@ -8,12 +8,17 @@ import CellHerbiv from './cell-herbiv';
 import CellPlant from './cell-plant';
 import Entity from './entity';
 
+type Ctor<T> = new () => T;
+
 const ocean = {
   deltaTime: 0,
   // 以行->列->实体集合 的索引结构，便于按网格快速查询
   grid: new Map<number, Map<number, Set<Entity>>>(),
   // 高性能实体存在性查找的Set索引，O(1)时间复杂度
   entities: new Set<Entity>(),
+
+  // 对象池：按构造函数分类复用实例
+  pools: new Map<Function, Entity[]>(),
 
   // 增量统计缓存，避免每次遍历所有实体
   entityStats: {
@@ -70,6 +75,8 @@ const ocean = {
       // 增量更新统计
       this.updateEntityStats(entity, -1);
     }
+    // 回收至对象池
+    this.release(entity);
   },
 
   // 增量更新实体统计
@@ -147,6 +154,34 @@ const ocean = {
     }
     return items[0].ctor; // 理论上不会走到这里
   },
+
+  // 从对象池/构造函数获取实例
+  acquire<T extends Entity>(Ctor: Ctor<T>): T {
+    const stack = this.pools.get(Ctor) ?? [];
+    const inst = stack.pop();
+    if (inst) {
+      // 复用实例：做必要的初始化
+      inst.init();
+      return inst as T;
+    }
+    // 新建实例（构造器内有初始随机化）
+    const fresh = new Ctor();
+    // 这里不调用 initFromPool，避免重复随机化，保持与构造器逻辑一致
+    fresh.init();
+    return fresh;
+  },
+  // 释放实例到对象池
+  release(entity: Entity) {
+    entity.releaseToPool();
+    const ctor = entity.constructor as Function;
+    let stack = this.pools.get(ctor);
+    if (!stack) {
+      stack = [];
+      this.pools.set(ctor, stack);
+    }
+    stack.push(entity);
+  },
+
   creator(cellTypes?: (typeof Entity)[]) {
     // 随机生成三种细胞类型之一
     let randomType: typeof Entity;
@@ -155,8 +190,7 @@ const ocean = {
     } else {
       randomType = this.pickCellType();
     }
-    const newOne = new randomType();
-    newOne.ocean = this;
+    const newOne = this.acquire(randomType);
     // 使用索引注册
     this.registerEntity(newOne);
     return newOne;

@@ -1,45 +1,70 @@
 import Cell from './cell';
 import CellHerbiv from './cell-herbiv';
 import CellPlant from './cell-plant';
+import type { Ocean } from './ocean';
 
 /** 食肉细胞（以植食细胞为食） */
 export default class CellCarniv extends Cell {
-  color = 'DeepPink';
+  declare color: string;
   private moveTimer = 0;
   private moveInterval = 0;
   private prey?: CellHerbiv; // 处于狩猎状态
 
-  maxGeneration = 3; // 最大分裂次数
-  maxNearingCells = 1; // 周围同类细胞数量超过此值时不分裂
-  moveMinInterval = 50; // 移动间隔时间（毫秒）
-  moveMaxInterval = 800; // 移动间隔时间（毫秒）
+  declare maxGeneration: number; // 最大分裂次数
+  declare maxNearingCells: number; // 周围同类细胞数量超过此值时不分裂
+  moveMinInterval!: number; // 移动间隔时间（毫秒）
+  moveMaxInterval!: number; // 移动间隔时间（毫秒）
 
   /** 感知范围 */
-  senseRange = 7;
+  senseRange!: number;
   /** 低能量感知范围 */
-  senseRangeLowEnergy = 3;
+  senseRangeLowEnergy!: number;
   /** 捕猎失败被反杀的概率（比目标能量低时） */
-  huntFailedRatio = 0.5;
+  huntFailedRatio!: number;
 
-  energy = 100;
-  energyToSplit = 10000; // 分裂所需的能量
-  energyToMove = 70; // 移动所需的能量
+  declare energy: number;
+  declare energyToSplit: number; // 分裂所需的能量
+  energyToMove!: number; // 移动所需的能量
   /** 能量对速度的加成 */
-  energyToSpeed = 1;
+  energyToSpeed!: number;
   /** 低能量阈值（低于等于该值时进入待机：不移动不消耗能量） */
-  lowEnergyThreshold = 0.1;
+  lowEnergyThreshold!: number;
   /** 低能量状态下的能量消耗 */
-  lowEnergyConsumption = 1;
-  constructor() {
-    super();
+  lowEnergyConsumption!: number;
 
-    // 随机设置移动间隔
+  // 对象池复用初始化：重置字段，保持与构造器随机化一致
+  override init() {
+    super.init();
+    this.color = 'DeepPink';
+    this.maxGeneration = 3;
+    this.maxNearingCells = 1;
+    this.moveMinInterval = 50;
+    this.moveMaxInterval = 800;
+    this.senseRange = 7;
+    this.senseRangeLowEnergy = 3;
+    this.huntFailedRatio = 0.5;
+    this.energyToSplit = 10000;
+    this.energyToMove = 70;
+    this.energyToSpeed = 1;
+    this.lowEnergyConsumption = 1;
+    // 能量与阈值随机化
+    this.energy = 100;
+    this.energy = this.energy * (Math.random() + 1);
+    this.lowEnergyThreshold = 0.1;
+    this.lowEnergyThreshold =
+      (1.5 - Math.random()) * this.lowEnergyThreshold * this.energyToSplit;
+    // 移动节奏与计时
+    this.moveTimer = 0;
     this.moveInterval =
       Math.random() * (this.moveMaxInterval - this.moveMinInterval) +
       this.moveMinInterval;
-    this.energy = this.energy * (Math.random() + 1);
-    this.lowEnergyThreshold =
-      (1.5 - Math.random()) * this.lowEnergyThreshold * this.energyToSplit;
+    // 清理捕食目标
+    this.prey = undefined;
+  }
+  override releaseToPool() {
+    super.releaseToPool();
+    this.prey = undefined;
+    this.moveTimer = 0;
   }
   grow() {
     if (this.generation >= this.maxGeneration) {
@@ -49,8 +74,7 @@ export default class CellCarniv extends Cell {
     if (this.energy <= 0) {
       if (this.findSpecifyClass(CellPlant).length > 5) {
         if (this.findSpecifyClass(CellCarniv, 2).length === 0) {
-          const newSelf = new CellHerbiv();
-          newSelf.ocean = this.ocean;
+          const newSelf = this.ocean.acquire(CellHerbiv);
           newSelf.setPosition(this.row, this.col);
           this.ocean.registerEntity(newSelf);
         }
@@ -118,58 +142,50 @@ export default class CellCarniv extends Cell {
       // 从海洋中移除猎物
       prey.die();
 
-      // 增加能量：用被吃猎物的代际数作为增量
+      // 增加能量（根据猎物能量值）
       this.energy += prey.energy;
-
-      // 如果吃掉的是当前目标，清除目标
-      if (prey === this.prey) {
-        this.prey = undefined;
-      }
-
       this.breath();
     }
   }
 
-  /** 感知 - 在一定范围内寻找植食细胞作为目标（正常状态下使用全范围） */
+  /** 感知 - 在前方一定范围内寻找植食细胞作为目标 */
   sense() {
     const prey = this.prey;
+    const range = this.senseRange;
     const isExist = prey && this.ocean.isExist(prey);
-    let range = this.senseRange;
-    if (isExist) {
-      if (this.energy <= this.lowEnergyThreshold) {
-        range = this.senseRangeLowEnergy;
-        // 检查现有目标是否仍在半径内
-        const withinHalf =
-          Math.abs(prey.row - this.row) <= range &&
-          Math.abs(prey.col - this.col) <= range;
-        if (withinHalf) return;
-      } else {
-        if (
-          Math.abs(prey.row - this.row) <= range &&
-          Math.abs(prey.col - this.col) <= range
-        ) {
-          return;
-        }
-      }
+    if (
+      isExist &&
+      Math.abs(prey.row - this.row) <= range &&
+      Math.abs(prey.col - this.col) <= range
+    ) {
+      return;
     }
-    this.prey = undefined;
 
-    // 用索引收集候选猎物集合
-    const preys: CellHerbiv[] = [];
-    this.scanNearPositions(range, posis => {
-      posis.forEach(pos => {
+    // 速度方向上，距离是senseRange+1的位置
+    const dir = this.direction;
+    const center = {
+      row: this.row + dir.row * (this.senseRange + 1),
+      col: this.col + dir.col * (this.senseRange + 1),
+    };
+
+    // 先用索引收集候选植食集合
+    const preys = [] as CellHerbiv[];
+    this.scanNearPositions(this.senseRange, center, posis => {
+      for (const pos of posis) {
         const set = this.ocean.getEntitySet(pos.row, pos.col);
-        if (!set) return;
+        if (!set) continue;
         for (const e of set) {
           if (e instanceof CellHerbiv) {
             preys.push(e);
           }
         }
-      });
-      return !!preys.length;
+      }
+      return preys.length > 0;
     });
 
     if (preys.length === 0) return;
+
+    // 随机选择一个候选作为目标
     this.prey = preys[Math.floor(Math.random() * preys.length)];
   }
 }

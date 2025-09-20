@@ -1,17 +1,28 @@
 import { drawRect } from '../../graph';
 
 import type { Ocean } from './ocean';
+import ocean from './ocean';
 
 export default class Entity {
-  private _row: number;
-  private _col: number;
-  color: string;
+  private _row = 0;
+  private _col = 0;
+  color = '';
   ocean!: Ocean;
   deltaTime = 0;
-  constructor() {
+  // 标记对象是否处于激活状态（在世界中）
+  alive = true;
+  // 对象池初始化钩子（子类可覆盖）
+  init() {
+    this.ocean = ocean;
     this._col = 0;
     this._row = 0;
+    this.deltaTime = 0;
     this.color = 'black';
+    this.alive = true;
+  }
+  // 释放到对象池钩子（子类可覆盖）
+  releaseToPool() {
+    this.alive = false;
   }
 
   get row() {

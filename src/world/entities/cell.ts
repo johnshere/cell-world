@@ -1,6 +1,7 @@
 import { viewport } from '../../graph';
 
 import Entity from './entity';
+import type { Ocean } from './ocean';
 
 export type Position = { row: number; col: number };
 export type Positions = Position[];
@@ -21,36 +22,61 @@ export const AllDirections: Direction[] = [
 type Scan = (poss: Positions) => boolean | void;
 
 export default class Cell extends Entity {
-  color = 'black';
   /** 能量 */
-  energy = 1;
-  energyToSplit = 20; // 分裂所需的能量
+  energy!: number;
+  energyToSplit!: number; // 分裂所需的能量
 
   /** 先代 */
   ancestor?: Cell;
 
-  generation = 0;
-  maxGeneration = 3; // 最大分裂次数
-  maxNearingCells = 2; // 周围同类细胞数量超过此值时不分裂
-  breathInterval = 500; // 呼吸间隔时间（毫秒）
-  breathDuration = 3000; // 呼吸颜色持续时间（毫秒）
-  breathColor = 'white'; // 呼吸颜色
+  generation!: number;
+  maxGeneration!: number; // 最大分裂次数
+  maxNearingCells!: number; // 周围同类细胞数量超过此值时不分裂
+  breathInterval!: number; // 呼吸间隔时间（毫秒）
+  breathDuration!: number; // 呼吸颜色持续时间（毫秒）
+  breathColor!: string; // 呼吸颜色
 
-  direction: Direction = { col: 0, row: 0 };
+  direction!: Direction;
 
   // 新增：方向改变概率相关参数
-  directionChangeChance = 0.05; // 基础改变方向概率 5%
-  directionChangeIncrement = 0.02; // 每次移动增加的概率 5%
-  constructor() {
-    super();
+  directionChangeChance!: number; // 基础改变方向概率 5%
+  directionChangeIncrement!: number; // 每次移动增加的概率 5%
 
-    // 取当前视窗范围，随机生成逻辑位置
+  // 对象池复用初始化：重置公共Cell状态
+  override init() {
+    super.init();
+    // 恢复颜色（子类会在各自init中覆盖）
+    this.color = 'black';
+    /** 能量 */
+    this.energy = 1;
+    this.energyToSplit = 20; // 分裂所需的能量
+
+    /** 先代 */
+    this.ancestor = undefined;
+
+    this.generation = 0;
+    this.maxGeneration = 3; // 最大分裂次数
+    this.maxNearingCells = 2; // 周围同类细胞数量超过此值时不分裂
+    this.breathInterval = 500; // 呼吸间隔时间（毫秒）
+    this.breathDuration = 3000; // 呼吸颜色持续时间（毫秒）
+    this.breathColor = 'white'; // 呼吸颜色
+
+    this.direction = { col: 0, row: 0 };
+
+    // 新增：方向改变概率相关参数
+    this.directionChangeChance = 0.05; // 基础改变方向概率 5%
+    this.directionChangeIncrement = 0.02; // 每次移动增加的概率 5%
+    // 重新随机初始位置与初始方向
     const col = Math.floor(Math.random() * viewport.cols) + viewport.col;
     const row = Math.floor(Math.random() * viewport.rows) + viewport.row;
     this.setPosition(row, col);
-
     this.directionSense(true);
   }
+  override releaseToPool() {
+    super.releaseToPool();
+    this.ancestor = undefined;
+  }
+
   directionNormalize(dir: number): Near {
     if (dir > 0) return 1;
     if (dir < 0) return -1;
@@ -102,7 +128,7 @@ export default class Cell extends Entity {
   breath() {
     let isBreathing = false;
     const color = this.color;
-    this.breath = function () {
+    this.breath = () => {
       if (isBreathing) {
         return;
       }
@@ -320,11 +346,10 @@ export default class Cell extends Entity {
       const randomPos =
         freePositions[Math.floor(Math.random() * freePositions.length)];
 
-      // 创建与当前细胞相同类型的新细胞
+      // 创建与当前细胞相同类型的新细胞（对象池）
       const NewCellClass = this.constructor as new () => Cell;
-      const child = new NewCellClass();
+      const child = this.ocean.acquire(NewCellClass) as Cell;
       child.ancestor = this;
-      child.ocean = this.ocean;
       child.setPosition(randomPos.row, randomPos.col);
 
       // 添加到海洋中（使用索引）

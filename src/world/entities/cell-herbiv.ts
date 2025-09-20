@@ -1,53 +1,86 @@
 import Cell, { type Position } from './cell';
 import CellCarniv from './cell-carniv';
 import CellPlant from './cell-plant';
+import type { Ocean } from './ocean';
 
-/** 植食细胞 */
+/** 植食细胞（以植物细胞为食） */
 export default class CellHerbiv extends Cell {
-  color = 'sandybrown';
-  maxGeneration = 2; // 最大分裂次数
-  maxNearingCells = 1; // 周围同类细胞数量超过此值时不分裂
-  moveMinInterval = 700; // 移动间隔时间（毫秒）
-  moveMaxInterval = 1200; // 移动间隔时间（毫秒）
+  declare color: string;
+  declare maxGeneration: number; // 最大分裂次数
+  declare maxNearingCells: number; // 周围同类细胞数量超过此值时不分裂
+  moveMinInterval!: number; // 移动间隔时间（毫秒）
+  moveMaxInterval!: number; // 移动间隔时间（毫秒）
 
-  energy = 90;
-  energyToSplit = 150; // 分裂所需的能量
-  splitInterval = 400; // 分裂间隔时间（毫秒）
+  declare energy: number;
+  declare energyToSplit: number; // 分裂所需的能量
+  splitInterval!: number; // 分裂间隔时间（毫秒）
   splitTimer = 0;
 
-  energyToMove = 2; // 移动所需的能量
+  energyToMove!: number; // 移动所需的能量
   /** 能量对速度的加成 */
-  energyToSpeed = 1;
+  energyToSpeed!: number;
   private moveTimer = 0;
   private moveInterval = 0;
   private prey?: CellPlant; // 处于狩猎状态
 
   /** 饥饿状态变成肉食细胞的概率 */
-  private starvationToCarnivProb = 0.1;
+  private starvationToCarnivProb!: number;
 
   // 鸟群算法相关属性
   /** 速度向量 */
   private velocity = { x: 0, y: 0 };
   /** 感知范围(感知范围/鸟群算法) */
-  private senseRange = 5;
+  private senseRange!: number;
   /** 分离权重 */
-  private separationWeight = 0.3;
+  private separationWeight!: number;
   /** 对齐权重 */
-  private alignmentWeight = 30;
+  private alignmentWeight!: number;
   /** 聚集权重 */
-  private cohesionWeight = 9;
+  private cohesionWeight!: number;
   /** 捕食向量权重 */
-  private huntingWeight = 150;
+  private huntingWeight!: number;
+  private mates: CellHerbiv[] = [];
 
-  constructor() {
-    super();
-
-    // 随机设置移动间隔
+  // 对象池复用初始化：重置字段，保持与构造器随机化一致
+  override init() {
+    super.init();
+    this.color = 'sandybrown';
+    this.maxGeneration = 2;
+    this.maxNearingCells = 1;
+    this.moveMinInterval = 700;
+    this.moveMaxInterval = 1200;
+    this.energy = 90;
+    this.energyToSplit = 150;
+    this.energyToMove = 2;
+    this.energyToSpeed = 1;
+    this.starvationToCarnivProb = 0.1;
+    this.senseRange = 5;
+    this.separationWeight = 0.3;
+    this.alignmentWeight = 30;
+    this.cohesionWeight = 9;
+    this.huntingWeight = 150;
+    // 分裂计时与间隔
+    this.splitTimer = 0;
+    this.splitInterval = 400;
+    this.splitInterval = (1.5 - Math.random()) * this.splitInterval;
+    // 移动节奏与计时
+    this.moveTimer = 0;
     this.moveInterval =
       Math.random() * (this.moveMaxInterval - this.moveMinInterval) +
       this.moveMinInterval;
-    this.splitInterval = (1.5 - Math.random()) * this.splitInterval;
+    // 清理捕食与群体状态
+    this.prey = undefined;
+    this.velocity = { x: 0, y: 0 };
+    this.mates = [];
   }
+  override releaseToPool() {
+    super.releaseToPool();
+    this.prey = undefined;
+    this.mates = [];
+    this.moveTimer = 0;
+    this.splitTimer = 0;
+  }
+
   grow() {
     if (this.generation >= this.maxGeneration) {
       this.die();
@@ -61,9 +94,8 @@ export default class CellHerbiv extends Cell {
           nearPlantCells.length === 0 &&
           Math.random() < this.starvationToCarnivProb
         ) {
-          // 转换为肉食细胞
-          const newSelf = new CellCarniv();
-          newSelf.ocean = this.ocean;
+          // 转换为肉食细胞（对象池获取）
+          const newSelf = this.ocean.acquire(CellCarniv);
           newSelf.setPosition(this.row, this.col);
           this.ocean.registerEntity(newSelf);
           this.die();
@@ -280,7 +312,6 @@ export default class CellHerbiv extends Cell {
     }
     return false;
   }
-  private mates: CellHerbiv[] = [];
   /** 移动到相邻位置 */
   move() {
     this.moveTimer += this.deltaTime;
