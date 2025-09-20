@@ -141,8 +141,6 @@ export const bindEvents = () => {
 };
 
 export const render = () => {
-  ctx.clearRect(0, 0, el.width, el.height);
-
   // 绘制主画布区域（留出刻度尺空间）
   ctx.save();
 
