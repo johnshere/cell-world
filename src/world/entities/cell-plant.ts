@@ -18,8 +18,8 @@ export default class CellPlant extends Cell {
     super.init();
     this.color = 'green';
     this.energy = 40;
-    this.energyToGrow = 3;
-    this.energyToSplit = 110;
+    this.energyToGrow = 2;
+    this.energyToSplit = 90;
     this.maxGeneration = 200;
     this.maxNearingCells = 2;
     this.splitInterval = 1000;

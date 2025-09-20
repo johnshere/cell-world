@@ -8,8 +8,6 @@ export default class CellHerbiv extends Cell {
   declare color: string;
   declare maxGeneration: number; // 最大分裂次数
   declare maxNearingCells: number; // 周围同类细胞数量超过此值时不分裂
-  moveMinInterval!: number; // 移动间隔时间（毫秒）
-  moveMaxInterval!: number; // 移动间隔时间（毫秒）
 
   declare energy: number;
   declare energyToSplit: number; // 分裂所需的能量
@@ -47,11 +45,9 @@ export default class CellHerbiv extends Cell {
     this.color = 'sandybrown';
     this.maxGeneration = 2;
     this.maxNearingCells = 1;
-    this.moveMinInterval = 700;
-    this.moveMaxInterval = 1200;
     this.energy = 90;
     this.energyToSplit = 150;
-    this.energyToMove = 2;
+    this.energyToMove = 3;
     this.energyToSpeed = 1;
     this.starvationToCarnivProb = 0.1;
     this.senseRange = 5;
@@ -65,9 +61,10 @@ export default class CellHerbiv extends Cell {
     this.splitInterval = (1.5 - Math.random()) * this.splitInterval;
     // 移动节奏与计时
     this.moveTimer = 0;
+    const moveMinInterval = 700;
+    const moveMaxInterval = 1000;
     this.moveInterval =
-      Math.random() * (this.moveMaxInterval - this.moveMinInterval) +
-      this.moveMinInterval;
+      Math.random() * (moveMaxInterval - moveMinInterval) + moveMinInterval;
     // 清理捕食与群体状态
     this.prey = undefined;
     this.velocity = { x: 0, y: 0 };
