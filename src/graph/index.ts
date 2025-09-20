@@ -364,14 +364,32 @@ export const drawRectsBatch = (
   const axisX = axis.x + rulerSize;
   const axisY = axis.y + rulerSize;
 
-  // 批量绘制所有矩形，内联坐标转换以减少函数调用
-  for (const pos of positions) {
-    const worldX = pos.col * gridSize;
-    const worldY = pos.row * gridSize;
-    // 内联worldToScreen计算，避免函数调用开销
-    const screenX = worldX * scale + axisX;
-    const screenY = worldY * scale + axisY;
-    ctx.fillRect(screenX, screenY, scaledWidth, scaledHeight);
+  // 使用Path2D进行批量渲染优化
+  if (positions.length > 10) {
+    // 当矩形数量较多时，使用Path2D批量绘制
+    const path = new Path2D();
+
+    for (const pos of positions) {
+      const worldX = pos.col * gridSize;
+      const worldY = pos.row * gridSize;
+      // 内联worldToScreen计算，避免函数调用开销
+      const screenX = worldX * scale + axisX;
+      const screenY = worldY * scale + axisY;
+      path.rect(screenX, screenY, scaledWidth, scaledHeight);
+    }
+
+    // 一次性填充所有矩形
+    ctx.fill(path);
+  } else {
+    // 当矩形数量较少时，直接使用fillRect（避免Path2D的创建开销）
+    for (const pos of positions) {
+      const worldX = pos.col * gridSize;
+      const worldY = pos.row * gridSize;
+      // 内联worldToScreen计算，避免函数调用开销
+      const screenX = worldX * scale + axisX;
+      const screenY = worldY * scale + axisY;
+      ctx.fillRect(screenX, screenY, scaledWidth, scaledHeight);
+    }
   }
 };
 
