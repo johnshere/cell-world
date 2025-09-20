@@ -170,9 +170,9 @@ const ocean = {
       }
     }
     let time = 0;
-    const bornNumOfUnit =
-      (viewport.cols * viewport.rows) / OceanConfig.SpawnNaturalPlantRate;
-    const bornInterval = Math.ceil(1000 / bornNumOfUnit);
+    let unit = (viewport.cols * viewport.rows) / 100000;
+    unit *= OceanConfig.SpawnNaturalPlantRate;
+    const bornInterval = Math.ceil(1000 / unit);
     this.storm = function () {
       time += this.deltaTime;
       if (time > bornInterval) {

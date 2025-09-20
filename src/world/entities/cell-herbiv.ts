@@ -12,10 +12,10 @@ export default class CellHerbiv extends Cell {
 
   energy = 90;
   energyToSplit = 150; // 分裂所需的能量
-  splitInterval = 200; // 分裂间隔时间（毫秒）
+  splitInterval = 400; // 分裂间隔时间（毫秒）
   splitTimer = 0;
 
-  energyToMove = 1.5; // 移动所需的能量
+  energyToMove = 2; // 移动所需的能量
   /** 能量对速度的加成 */
   energyToSpeed = 1;
   private moveTimer = 0;

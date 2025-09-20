@@ -19,7 +19,7 @@ export const OceanConfig = {
   initEntityRatio: 200, // 初始投放比率（每xx格投放一个）
   initPlantEnergy: 400,
   /** 自然诞生植物细胞的比率（世界大小/rate）（单位时间（1s）内投放比例） */
-  SpawnNaturalPlantRate: 3000000, // xxx个细胞诞生一个
+  SpawnNaturalPlantRate: 1, // 每秒每100000个格子，诞生多少个细胞
   /** 初始细胞生成权重（用以控制概率，权重为0表示不生成该类型） */
   SpawnWeights: {
     plant: 4, // 植物细胞权重（原模板为3份）
