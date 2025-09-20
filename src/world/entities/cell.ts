@@ -246,8 +246,12 @@ export default class Cell extends Entity {
   setPosition(row: number, col: number): void {
     if (this.row === row && this.col === col) return;
     // 更新当前方向为实际移动的方向
-    this.direction.row = (row - this.row) as Near;
-    this.direction.col = (col - this.col) as Near;
+    let r = row - this.row;
+    r = r === 0 ? 0 : r > 0 ? 1 : -1;
+    this.direction.row = r as Near;
+    let c = col - this.col;
+    c = c === 0 ? 0 : c > 0 ? 1 : -1;
+    this.direction.col = c as Near;
 
     super.setPosition(row, col);
   }
