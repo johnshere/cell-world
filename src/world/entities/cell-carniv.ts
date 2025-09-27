@@ -35,6 +35,7 @@ export default class CellCarniv extends Cell {
   // 对象池复用初始化：重置字段，保持与构造器随机化一致
   override init() {
     super.init();
+    this.name = '肉食'; // 设置name属性
     this.color = 'DeepPink';
     this.maxGeneration = 3;
     this.maxNearingCells = 1;
@@ -43,8 +44,8 @@ export default class CellCarniv extends Cell {
     this.senseRange = 7;
     this.senseRangeLowEnergy = 3;
     this.huntFailedRatio = 0.5;
-    this.energyToSplit = 10000;
-    this.energyToMove = 70;
+    this.energyToSplit = 1000;
+    this.energyToMove = 40;
     this.energyToSpeed = 1;
     this.lowEnergyConsumption = 1;
     // 能量与阈值随机化
@@ -112,8 +113,6 @@ export default class CellCarniv extends Cell {
       const next = this.getNextMovePosition();
       if (next) {
         this.setPosition(next.row, next.col);
-      } else {
-        return;
       }
     }
     // 移动后检查当前位置是否有植食细胞并吃掉它们

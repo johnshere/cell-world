@@ -87,8 +87,8 @@ const init = () => {
     if (currentTime - lastPanelUpdateTime >= PANEL_UPDATE_INTERVAL_MS) {
       lastPanelUpdateTime = currentTime;
 
-      // 使用增量统计，避免遍历所有实体
-      const stats = ocean.getEntityStats();
+      // 直接使用entityStats数据，避免调用getEntityStats方法
+      const entityStats = ocean.entityStats;
 
       // 推送到面板（性能 + 世界信息）
       updatePerformance({
@@ -106,11 +106,7 @@ const init = () => {
         worldTime,
         accelerate,
         entityCount,
-        distribution: {
-          plant: stats.plant,
-          herbiv: stats.herbiv,
-          carniv: stats.carniv,
-        },
+        distribution: entityStats, // 直接传递entityStats Map数据
       });
     }
 

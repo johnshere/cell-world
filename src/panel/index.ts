@@ -18,11 +18,7 @@ interface PanelData {
     worldTime: number; // 世界时长
     accelerate: number; // 当前加速比率
     entityCount: number; // 当前实体数量（世界维度）
-    distribution: {
-      plant: number;
-      herbiv: number;
-      carniv: number;
-    };
+    distribution: Map<string, number>; // 改为Map类型，支持动态实体统计
   };
 }
 
@@ -42,11 +38,7 @@ const data: PanelData = {
     worldTime: 0,
     accelerate: 1,
     entityCount: 0,
-    distribution: {
-      plant: 0,
-      herbiv: 0,
-      carniv: 0,
-    },
+    distribution: new Map(), // 初始化为空Map
   },
 };
 
@@ -72,11 +64,10 @@ let viewportWEl: HTMLSpanElement;
 let viewportHEl: HTMLSpanElement;
 let viewportScaleEl: HTMLSpanElement;
 let worldTimeEl: HTMLSpanElement;
+let worldInfoEl: HTMLDivElement;
 let worldAccelerateEl: HTMLSpanElement;
 let worldEntityCountEl: HTMLSpanElement;
-let worldPlantCountEl: HTMLSpanElement;
-let worldHerbivCountEl: HTMLSpanElement;
-let worldCarnivCountEl: HTMLSpanElement;
+const cellCountEls: Record<string, HTMLSpanElement> = {};
 
 let isExpanded = true;
 
@@ -153,14 +144,11 @@ export const init = () => {
 
   // 一次性构建结构并缓存节点
   content.append(
-    createSection('🌍 世界信息', [
+    (worldInfoEl = createSection('🌍 世界信息', [
       ['世界时长: ', (worldTimeEl = createValueSpan('red'))],
       ['加速比率: ', (worldAccelerateEl = createValueSpan('#ff3d00'))],
       ['实体数量: ', (worldEntityCountEl = createValueSpan('#d73a49'))],
-      ['植物: ', (worldPlantCountEl = createValueSpan('#2e7d32'))],
-      ['草食: ', (worldHerbivCountEl = createValueSpan('#20a4f3'))],
-      ['肉食: ', (worldCarnivCountEl = createValueSpan('#d73a49'))],
-    ]),
+    ])),
     createSection('⚡ 性能统计', [
       ['帧数: ', (frameCountEl = createValueSpan('#6f42c1'))],
       ['当前帧耗时: ', (frameTimeEl = createValueSpan('#ff6b35')), ' ms'],
@@ -215,6 +203,22 @@ export const init = () => {
   }
 };
 
+function createLine(label: string, valueEl: HTMLSpanElement, unit?: string) {
+  const line = document.createElement('div');
+  const labelEl = document.createElement('span');
+  labelEl.textContent = label;
+
+  line.appendChild(labelEl);
+  line.appendChild(valueEl);
+  if (unit) {
+    const unitEl = document.createElement('span');
+    unitEl.textContent = unit;
+    line.appendChild(unitEl);
+  }
+
+  return line;
+}
+
 function createSection(
   title: string,
   rows: Array<[string, HTMLSpanElement, string?]>
@@ -234,18 +238,7 @@ function createSection(
   bodyEl.style.lineHeight = '1.4';
 
   rows.forEach(([label, valueEl, unit]) => {
-    const line = document.createElement('div');
-    const labelEl = document.createElement('span');
-    labelEl.textContent = label;
-
-    line.appendChild(labelEl);
-    line.appendChild(valueEl);
-    if (unit) {
-      const unitEl = document.createElement('span');
-      unitEl.textContent = unit;
-      line.appendChild(unitEl);
-    }
-
+    const line = createLine(label, valueEl, unit);
     bodyEl.appendChild(line);
   });
 
@@ -376,12 +369,15 @@ export const updateContent = () => {
     worldAccelerateEl.textContent = world.accelerate.toFixed(2);
   if (worldEntityCountEl)
     worldEntityCountEl.textContent = `${world.entityCount}`;
-  if (worldPlantCountEl)
-    worldPlantCountEl.textContent = `${world.distribution.plant}`;
-  if (worldHerbivCountEl)
-    worldHerbivCountEl.textContent = `${world.distribution.herbiv}`;
-  if (worldCarnivCountEl)
-    worldCarnivCountEl.textContent = `${world.distribution.carniv}`;
+  Array.from(world.distribution.keys()).forEach(key => {
+    if (cellCountEls[key]) {
+      cellCountEls[key].textContent = `${world.distribution.get(key) || 0}`;
+    } else {
+      cellCountEls[key] = createValueSpan('#20a4f3');
+      const line = createLine(key + '：', cellCountEls[key]);
+      worldInfoEl?.appendChild(line);
+    }
+  });
 };
 setInterval(updateContent, 500);
 

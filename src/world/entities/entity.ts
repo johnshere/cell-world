@@ -7,12 +7,14 @@ export default class Entity {
   private _row = 0;
   private _col = 0;
   color = '';
+  name = ''; // 新增name属性
   ocean!: Ocean;
   deltaTime = 0;
   // 标记对象是否处于激活状态（在世界中）
   alive = true;
   // 对象池初始化钩子（子类可覆盖）
   init() {
+    this.name = '实体'; // 初始化name属性
     this.ocean = ocean;
     this._col = 0;
     this._row = 0;

@@ -1,14 +1,14 @@
 import { OceanConfig } from '../../const/config';
 import { viewport } from '../../graph';
 import { drawRectsBatch } from '../../graph';
+import type { Ctor } from '../types';
 
 import type { Positions } from './cell';
 import CellCarniv from './cell-carniv';
 import CellHerbiv from './cell-herbiv';
+import CellOmniv from './cell-omniv';
 import CellPlant from './cell-plant';
 import Entity from './entity';
-
-type Ctor<T> = new () => T;
 
 const ocean = {
   deltaTime: 0,
@@ -21,12 +21,9 @@ const ocean = {
   pools: new Map<Function, Entity[]>(),
 
   // 增量统计缓存，避免每次遍历所有实体
-  entityStats: {
-    plant: 0,
-    herbiv: 0,
-    carniv: 0,
-    total: 0,
-  },
+  // 使用动态Map结构，支持任意类型的实体统计
+  entityStats: new Map<string, number>(),
+
   // 获取单元格的实体集合
   getEntitySet(
     row: number,
@@ -81,27 +78,11 @@ const ocean = {
 
   // 增量更新实体统计
   updateEntityStats(entity: Entity, delta: number) {
-    const entityType = entity.constructor.name;
-    if (entityType === 'CellPlant') {
-      this.entityStats.plant += delta;
-    } else if (entityType === 'CellHerbiv') {
-      this.entityStats.herbiv += delta;
-    } else if (entityType === 'CellCarniv') {
-      this.entityStats.carniv += delta;
-    }
-    this.entityStats.total += delta;
+    const type = entity.name;
+    const current = this.entityStats.get(type) || 0;
+    this.entityStats.set(type, current + delta);
   },
 
-  // 获取当前实体统计（无需遍历）
-  getEntityStats() {
-    return {
-      plant: this.entityStats.plant,
-      herbiv: this.entityStats.herbiv,
-      carniv: this.entityStats.carniv,
-      total: this.entityStats.total,
-    };
-  },
-  // 当实体位置发生变化时更新索引
   updateEntityPosition(
     entity: Entity,
     oldRow: number,
@@ -139,6 +120,7 @@ const ocean = {
     const items: Array<{ ctor: typeof Entity; w: number }> = [
       { ctor: CellPlant, w: weights.plant ?? 0 },
       { ctor: CellHerbiv, w: weights.herbiv ?? 0 },
+      { ctor: CellOmniv, w: weights.omniv ?? 0 },
       { ctor: CellCarniv, w: weights.carniv ?? 0 },
     ];
     const total = items.reduce((sum, it) => sum + Math.max(0, it.w), 0);
@@ -183,7 +165,7 @@ const ocean = {
   },
 
   creator(cellTypes?: (typeof Entity)[]) {
-    // 随机生成三种细胞类型之一
+    // 随机生成细胞类型之一
     let randomType: typeof Entity;
     if (cellTypes && cellTypes.length > 0) {
       randomType = cellTypes[Math.floor(Math.random() * cellTypes.length)];
@@ -220,6 +202,10 @@ const ocean = {
     this.storm();
     // 更新所有实体
     this.entities.forEach(entity => entity.update(deltaTime));
+
+    console.log(
+      Array.from(this.entities).filter(e => e instanceof CellOmniv).length
+    );
   },
   render() {
     // 仅渲染视窗范围内的实体

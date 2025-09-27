@@ -1,3 +1,6 @@
+import { viewport } from '../../graph';
+import type { Ctor } from '../types';
+
 import Cell, { type Position } from './cell';
 import CellCarniv from './cell-carniv';
 import CellPlant from './cell-plant';
@@ -17,40 +20,41 @@ export default class CellHerbiv extends Cell {
   energyToMove!: number; // 移动所需的能量
   /** 能量对速度的加成 */
   energyToSpeed!: number;
-  private moveTimer = 0;
-  private moveInterval = 0;
-  private prey?: CellPlant; // 处于狩猎状态
+  moveTimer = 0;
+  moveInterval = 0;
+  preyClasses: Ctor<Cell>[] = [CellPlant];
+  prey?: Cell; // 处于狩猎状态
+  pioneers: Cell[] = []; // 先行细胞
 
   /** 饥饿状态变成肉食细胞的概率 */
-  private starvationToCarnivProb!: number;
+  starvationToCarnivProb!: number;
 
   // 鸟群算法相关属性
-  /** 速度向量 */
-  private velocity = { x: 0, y: 0 };
   /** 感知范围(感知范围/鸟群算法) */
-  private senseRange!: number;
+  senseRange!: number;
   /** 分离权重 */
-  private separationWeight!: number;
+  separationWeight!: number;
   /** 对齐权重 */
-  private alignmentWeight!: number;
+  alignmentWeight!: number;
   /** 聚集权重 */
-  private cohesionWeight!: number;
+  cohesionWeight!: number;
   /** 捕食向量权重 */
-  private huntingWeight!: number;
-  private mates: CellHerbiv[] = [];
+  huntingWeight!: number;
+  mates: Cell[] = [];
 
   // 对象池复用初始化：重置字段，保持与构造器随机化一致
   override init() {
     super.init();
+    this.name = '草食'; // 设置name属性
     this.color = 'sandybrown';
     this.maxGeneration = 2;
     this.maxNearingCells = 1;
-    this.energy = 90;
+    this.energy = 60;
     this.energyToSplit = 150;
-    this.energyToMove = 3;
-    this.energyToSpeed = 1;
-    this.starvationToCarnivProb = 0.1;
-    this.senseRange = 5;
+    this.energyToMove = 4;
+    this.energyToSpeed = 0.5;
+    this.starvationToCarnivProb = 0.15;
+    this.senseRange = 4;
     this.separationWeight = 0.3;
     this.alignmentWeight = 30;
     this.cohesionWeight = 9;
@@ -62,7 +66,7 @@ export default class CellHerbiv extends Cell {
     // 移动节奏与计时
     this.moveTimer = 0;
     const moveMinInterval = 700;
-    const moveMaxInterval = 1000;
+    const moveMaxInterval = 900;
     this.moveInterval =
       Math.random() * (moveMaxInterval - moveMinInterval) + moveMinInterval;
     // 清理捕食与群体状态
@@ -84,11 +88,17 @@ export default class CellHerbiv extends Cell {
       return;
     }
     if (this.energy <= 0) {
-      const nearSameCells = this.findSpecifyClass(CellHerbiv, 2);
+      const nearSameCells = this.findSpecifyClass(
+        this.constructor as Ctor<Cell>,
+        2
+      );
       if (nearSameCells.length > 0) {
-        const nearPlantCells = this.findSpecifyClass(CellPlant, 2);
+        const nearPreyCells = [] as Cell[];
+        for (const cls of this.preyClasses) {
+          nearPreyCells.push(...this.findSpecifyClass(cls, 2));
+        }
         if (
-          nearPlantCells.length === 0 &&
+          nearPreyCells.length === 0 &&
           Math.random() < this.starvationToCarnivProb
         ) {
           // 转换为肉食细胞（对象池获取）
@@ -109,7 +119,7 @@ export default class CellHerbiv extends Cell {
       this.splitTimer > this.splitInterval
     ) {
       this.splitTimer = 0;
-      const child = this.split() as CellHerbiv;
+      const child = this.split() as Cell;
       const energy = this.energy / 2;
       if (child) {
         child.energy = energy;
@@ -278,10 +288,6 @@ export default class CellHerbiv extends Cell {
     acceleration.x += hunting.x;
     acceleration.y += hunting.y;
 
-    if (acceleration.x === 0 && acceleration.y === 0) {
-      return false;
-    }
-
     // 更新速度
     this.velocity.x += acceleration.x;
     this.velocity.y += acceleration.y;
@@ -309,6 +315,28 @@ export default class CellHerbiv extends Cell {
     }
     return false;
   }
+  /** 集群移动时，向前方细胞吸取能量 */
+  absorb() {
+    if (!this.pioneers.length || this.energy >= this.energyToSplit) return;
+
+    // 当前能量比例控制
+    const sourceRate = 1 - this.energy / this.energyToSplit;
+    let energyToAbsorb = 0;
+
+    // 从先代中吸取能量
+    this.pioneers.forEach(pioneer => {
+      if (pioneer.energy > pioneer.energyToSplit) {
+        const energyOver = pioneer.energy - pioneer.energyToSplit;
+        const rate = Math.min(energyOver / pioneer.energyToSplit, 1);
+        const delta = energyOver * sourceRate * rate;
+
+        energyToAbsorb += delta;
+        pioneer.energy -= delta;
+      }
+    });
+
+    this.energy += energyToAbsorb;
+  }
   /** 移动到相邻位置 */
   move() {
     this.moveTimer += this.deltaTime;
@@ -317,13 +345,30 @@ export default class CellHerbiv extends Cell {
       return;
     }
     this.moveTimer = 0;
-
-    this.mates = this.findSpecifyClass(CellHerbiv, this.senseRange);
-    let isGroupMove = false;
-    if (this.mates.length > 1) {
-      isGroupMove = this.groupMove();
+    if (
+      this.col < 0 ||
+      this.row < 0 ||
+      this.col >= viewport.cols ||
+      this.row >= viewport.rows
+    ) {
+      this.energy -= this.energyToMove;
+      return;
     }
-    if (isGroupMove === false) {
+
+    this.mates = this.findSpecifyClass(
+      this.constructor as Ctor<Cell>,
+      this.senseRange
+    );
+    const sum = this.senseRange * this.senseRange + 3;
+    if (this.mates.length > 1) {
+      this.groupMove();
+      this.absorb();
+      if (this.pioneers.length > 1) {
+        this.energy -= this.energyToMove * (1 - this.pioneers.length / sum);
+      } else {
+        this.energy -= this.energyToMove * (1 - this.mates.length / sum);
+      }
+    } else {
       this.velocity = { x: 0, y: 0 };
       if (this.prey && this.ocean.isExist(this.prey)) {
         this.moveToward(this.prey);
@@ -335,39 +380,41 @@ export default class CellHerbiv extends Cell {
           this.setPosition(next.row, next.col);
         }
       }
+      this.energy -= this.energyToMove * (1 - this.mates.length / sum);
     }
 
     // 移动后检查当前位置是否有植物细胞并吃掉它们
-    this.eatPlantsAtCurrentPosition();
-
-    this.energy -= this.energyToMove;
+    this.eatPreyAtCurrentPosition();
   }
 
   /** 吃掉当前位置的植物细胞 */
-  private eatPlantsAtCurrentPosition() {
+  eatPreyAtCurrentPosition() {
     // 用索引快速取出当前格子的植物（避免数组分配，先收集后处理）
     const set = this.ocean.getEntitySet(this.row, this.col);
     if (!set) return;
-    const plantsAtCurrentPosition: CellPlant[] = [];
+    const preysAtCurrentPosition: Cell[] = [];
     for (const e of set) {
-      if (e instanceof CellPlant) plantsAtCurrentPosition.push(e);
+      if (e === this) continue;
+      if (this.preyClasses.some(cls => e instanceof cls)) {
+        preysAtCurrentPosition.push(e as Cell);
+      }
     }
 
     // 吃掉所有找到的植物细胞
-    plantsAtCurrentPosition.forEach(plant => {
+    preysAtCurrentPosition.forEach(prey => {
       // 从海洋中移除植物
-      plant.die();
+      prey.die();
 
       // 增加能量
-      this.energy += plant.energy;
+      this.energy += prey.energy;
 
       // 如果吃掉的是当前目标，清除目标
-      if (plant === this.prey) {
+      if (prey === this.prey) {
         this.prey = undefined;
       }
     });
 
-    if (plantsAtCurrentPosition.length) {
+    if (preysAtCurrentPosition.length) {
       this.breath();
     }
   }
@@ -385,6 +432,7 @@ export default class CellHerbiv extends Cell {
       return;
     }
     this.prey = undefined;
+    this.pioneers = [];
     // 速度方向上，距离是senseRange+1的位置
     const velocityMagnitude = Math.sqrt(
       this.velocity.x * this.velocity.x + this.velocity.y * this.velocity.y
@@ -399,28 +447,30 @@ export default class CellHerbiv extends Cell {
       col: this.col + Math.round(normalizedVelocity.x * (this.senseRange + 1)),
     };
     // 先用索引收集候选植物集合
-    const preys = [] as CellPlant[];
-    let hasSame = false;
+    const preys = [] as Cell[];
+    const pioneers = [] as Cell[];
     this.scanNearPositions(range, center, posis => {
       for (const pos of posis) {
         const set = this.ocean.getEntitySet(pos.row, pos.col);
         if (!set) continue;
         for (const e of set) {
-          if (e instanceof CellHerbiv) {
-            hasSame = true;
-            return true;
+          if (e instanceof this.constructor) {
+            pioneers.push(e as Cell);
           }
-          if (e instanceof CellPlant) {
-            preys.push(e);
+          if (this.preyClasses.some(cls => e instanceof cls)) {
+            preys.push(e as Cell);
           }
         }
       }
-      return hasSame || !!preys.length;
+      return !!pioneers.length || !!preys.length;
     });
 
-    if (hasSame || preys.length === 0) return;
-
-    // 随机选择一个候选作为目标
-    this.prey = preys[Math.floor(Math.random() * preys.length)];
+    if (pioneers.length) {
+      this.pioneers = pioneers;
+    }
+    if (preys.length) {
+      // 随机选择一个候选作为目标
+      this.prey = preys[Math.floor(Math.random() * preys.length)];
+    }
   }
 }

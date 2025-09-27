@@ -1,4 +1,5 @@
 import { viewport } from '../../graph';
+import type { Ctor } from '../types';
 
 import Entity from './entity';
 import type { Ocean } from './ocean';
@@ -37,6 +38,8 @@ export default class Cell extends Entity {
   breathColor!: string; // 呼吸颜色
 
   direction!: Direction;
+  /** 速度向量 */
+  velocity = { x: 0, y: 0 };
 
   // 新增：方向改变概率相关参数
   directionChangeChance!: number; // 基础改变方向概率 5%
@@ -45,6 +48,8 @@ export default class Cell extends Entity {
   // 对象池复用初始化：重置公共Cell状态
   override init() {
     super.init();
+    // 设置name属性
+    this.name = '细胞';
     // 恢复颜色（子类会在各自init中覆盖）
     this.color = 'black';
     /** 能量 */
@@ -214,7 +219,7 @@ export default class Cell extends Entity {
 
     return positions;
   }
-  findSpecifyClass<T extends Cell>(Ctor: new () => T, range = 1) {
+  findSpecifyClass<T extends Cell>(Ctor: Ctor<T>, range = 1) {
     const positions = this.scanNearPositions(range);
     const result: T[] = [];
     positions.forEach(pos => {
@@ -233,7 +238,7 @@ export default class Cell extends Entity {
       adjacentPositions = this.scanNearPositions();
     }
     // 空闲位置定义：该格子中不存在与当前细胞同类的细胞（允许异类共址）
-    const SelfCtor = this.constructor as new () => Cell;
+    const SelfCtor = this.constructor as Ctor<Cell>;
     return adjacentPositions.filter(pos => {
       const set = this.ocean.getEntitySet(pos.row, pos.col);
       if (!set) return true;
@@ -331,7 +336,7 @@ export default class Cell extends Entity {
     const freePositions = this.findNotSameFreePosition(nearPositions);
 
     // 仅统计周围相邻格子中“同类”细胞的数量（每格按是否存在同类计数一次）
-    const SelfCtor = this.constructor as new () => Cell;
+    const SelfCtor = this.constructor as Ctor<Cell>;
     const sameTypeNeighbors = nearPositions.filter(pos => {
       const set = this.ocean.getEntitySet(pos.row, pos.col);
       if (!set) return false;
@@ -351,7 +356,7 @@ export default class Cell extends Entity {
         freePositions[Math.floor(Math.random() * freePositions.length)];
 
       // 创建与当前细胞相同类型的新细胞（对象池）
-      const NewCellClass = this.constructor as new () => Cell;
+      const NewCellClass = this.constructor as Ctor<Cell>;
       const child = this.ocean.acquire(NewCellClass) as Cell;
       child.ancestor = this;
       child.setPosition(randomPos.row, randomPos.col);

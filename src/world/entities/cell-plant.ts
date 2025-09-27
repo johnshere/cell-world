@@ -16,10 +16,11 @@ export default class CellPlant extends Cell {
   // 对象池复用初始化：重置字段，保持与构造器随机化一致
   override init() {
     super.init();
+    this.name = '植物'; // 设置name属性
     this.color = 'green';
     this.energy = 40;
-    this.energyToGrow = 2;
-    this.energyToSplit = 90;
+    this.energyToGrow = 1;
+    this.energyToSplit = 50;
     this.maxGeneration = 200;
     this.maxNearingCells = 2;
     this.splitInterval = 1000;
@@ -46,6 +47,9 @@ export default class CellPlant extends Cell {
       return;
     }
     this.energy += (this.energyToGrow * this.deltaTime) / 1000;
+    if (this.energy > this.energyToSplit * 2) {
+      this.energy = this.energyToSplit * 2;
+    }
     this.splitTimer += this.deltaTime;
 
     // 检查是否可以分裂
@@ -61,8 +65,7 @@ export default class CellPlant extends Cell {
         const halfEnergy = this.energy / 2;
         child.energy = halfEnergy;
         this.energy = halfEnergy;
-        child.generation = this.generation;
-        this.generation += 1;
+        child.generation = this.generation - 1;
       }
     }
   }
