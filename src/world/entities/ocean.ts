@@ -6,7 +6,6 @@ import type { Ctor } from '../types';
 import type { Positions } from './cell';
 import CellCarniv from './cell-carniv';
 import CellHerbiv from './cell-herbiv';
-import CellOmniv from './cell-omniv';
 import CellPlant from './cell-plant';
 import Entity from './entity';
 
@@ -120,7 +119,6 @@ const ocean = {
     const items: Array<{ ctor: typeof Entity; w: number }> = [
       { ctor: CellPlant, w: weights.plant ?? 0 },
       { ctor: CellHerbiv, w: weights.herbiv ?? 0 },
-      { ctor: CellOmniv, w: weights.omniv ?? 0 },
       { ctor: CellCarniv, w: weights.carniv ?? 0 },
     ];
     const total = items.reduce((sum, it) => sum + Math.max(0, it.w), 0);
@@ -186,7 +184,7 @@ const ocean = {
       }
     }
     let time = 0;
-    let unit = (viewport.cols * viewport.rows) / 100000;
+    let unit = (viewport.cols * viewport.rows) / 10000000;
     unit *= OceanConfig.SpawnNaturalPlantRate;
     const bornInterval = Math.ceil(1000 / unit);
     this.storm = function () {
@@ -202,10 +200,6 @@ const ocean = {
     this.storm();
     // 更新所有实体
     this.entities.forEach(entity => entity.update(deltaTime));
-
-    console.log(
-      Array.from(this.entities).filter(e => e instanceof CellOmniv).length
-    );
   },
   render() {
     // 仅渲染视窗范围内的实体

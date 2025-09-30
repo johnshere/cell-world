@@ -6,7 +6,7 @@ import CellCarniv from './cell-carniv';
 import CellPlant from './cell-plant';
 import type { Ocean } from './ocean';
 
-/** 植食细胞（以植物细胞为食） */
+/** 植食细胞（以植物细胞为食，可被子类扩展捕食目标） */
 export default class CellHerbiv extends Cell {
   declare color: string;
   declare maxGeneration: number; // 最大分裂次数
@@ -18,11 +18,17 @@ export default class CellHerbiv extends Cell {
   splitTimer = 0;
 
   energyToMove!: number; // 移动所需的能量
-  /** 能量对速度的加成 */
-  energyToSpeed!: number;
+
+  /** 能量比例 = energy/energyToSplit */
+  get energyRatio(): number {
+    return this.energy / this.energyToSplit;
+  }
+
   moveTimer = 0;
   moveInterval = 0;
-  preyClasses: Ctor<Cell>[] = [CellPlant];
+  preyClasses: Ctor<Cell>[] = [];
+  /** 捕食目标转换比例 */
+  preyConvertRatios: number[] = [];
   prey?: Cell; // 处于狩猎状态
   pioneers: Cell[] = []; // 先行细胞
 
@@ -49,26 +55,27 @@ export default class CellHerbiv extends Cell {
     this.color = 'sandybrown';
     this.maxGeneration = 2;
     this.maxNearingCells = 1;
-    this.energy = 60;
-    this.energyToSplit = 150;
-    this.energyToMove = 4;
-    this.energyToSpeed = 0.5;
+    this.energy = 100;
+    this.energyToSplit = 130;
+    this.energyToMove = 0.7;
     this.starvationToCarnivProb = 0.15;
-    this.senseRange = 4;
-    this.separationWeight = 0.3;
-    this.alignmentWeight = 30;
-    this.cohesionWeight = 9;
-    this.huntingWeight = 150;
+    this.senseRange = 5;
+    this.separationWeight = 0.4;
+    this.alignmentWeight = 50;
+    this.cohesionWeight = 15;
+    this.huntingWeight = 110;
     // 分裂计时与间隔
     this.splitTimer = 0;
     this.splitInterval = 400;
     this.splitInterval = (1.5 - Math.random()) * this.splitInterval;
     // 移动节奏与计时
     this.moveTimer = 0;
-    const moveMinInterval = 700;
-    const moveMaxInterval = 900;
-    this.moveInterval =
-      Math.random() * (moveMaxInterval - moveMinInterval) + moveMinInterval;
+    const moveInterval = 800;
+    this.moveInterval = (1.5 - Math.random()) * moveInterval;
+
+    this.preyClasses = [CellPlant];
+    /** 捕食目标转换比例 */
+    this.preyConvertRatios = [0.9];
     // 清理捕食与群体状态
     this.prey = undefined;
     this.velocity = { x: 0, y: 0 };
@@ -327,7 +334,7 @@ export default class CellHerbiv extends Cell {
     this.pioneers.forEach(pioneer => {
       if (pioneer.energy > pioneer.energyToSplit) {
         const energyOver = pioneer.energy - pioneer.energyToSplit;
-        const rate = Math.min(energyOver / pioneer.energyToSplit, 1);
+        const rate = Math.min(energyOver / pioneer.energyToSplit, 0.2);
         const delta = energyOver * sourceRate * rate;
 
         energyToAbsorb += delta;
@@ -340,33 +347,31 @@ export default class CellHerbiv extends Cell {
   /** 移动到相邻位置 */
   move() {
     this.moveTimer += this.deltaTime;
+
     // 检查是否可以移动
-    if (this.moveTimer < this.moveInterval - this.energy * this.energyToSpeed) {
+    if (this.moveTimer < this.moveInterval - this.energy) {
       return;
     }
     this.moveTimer = 0;
-    if (
-      this.col < 0 ||
-      this.row < 0 ||
-      this.col >= viewport.cols ||
-      this.row >= viewport.rows
-    ) {
-      this.energy -= this.energyToMove;
-      return;
-    }
 
-    this.mates = this.findSpecifyClass(
-      this.constructor as Ctor<Cell>,
-      this.senseRange
-    );
-    const sum = this.senseRange * this.senseRange + 3;
+    // 基于能量比例调整移动间隔：能量比例越高，移动越快
+    const energyRatio = Math.max(0.2, this.energyRatio);
+
+    // 基于能量比例调整感知范围
+    const range = Math.max(1, Math.round(this.senseRange * energyRatio));
+
+    this.mates = this.findSpecifyClass(this.constructor as Ctor<Cell>, range);
+
     if (this.mates.length > 1) {
       this.groupMove();
       this.absorb();
+      const sum = range * range + 1;
       if (this.pioneers.length > 1) {
-        this.energy -= this.energyToMove * (1 - this.pioneers.length / sum);
+        this.energy -=
+          this.energyToMove * energyRatio * (1 - this.pioneers.length / sum);
       } else {
-        this.energy -= this.energyToMove * (1 - this.mates.length / sum);
+        this.energy -=
+          this.energyToMove * energyRatio * (1 - this.mates.length / sum);
       }
     } else {
       this.velocity = { x: 0, y: 0 };
@@ -380,33 +385,52 @@ export default class CellHerbiv extends Cell {
           this.setPosition(next.row, next.col);
         }
       }
-      this.energy -= this.energyToMove * (1 - this.mates.length / sum);
+      this.energy -= Math.max(this.energyToMove, this.energy / 9);
     }
 
-    // 移动后检查当前位置是否有植物细胞并吃掉它们
+    if (
+      this.col <= viewport.col ||
+      this.row <= viewport.row ||
+      this.col >= viewport.cols ||
+      this.row >= viewport.rows
+    ) {
+      this.energy -= Math.max(this.energyToMove, this.energy / 191);
+      return;
+    }
+    // 移动后检查当前位置是否有猎物细胞并吃掉它们
     this.eatPreyAtCurrentPosition();
   }
 
-  /** 吃掉当前位置的植物细胞 */
+  /** 吃掉当前位置的猎物细胞 */
   eatPreyAtCurrentPosition() {
-    // 用索引快速取出当前格子的植物（避免数组分配，先收集后处理）
+    // 用索引快速取出当前格子的实体（避免数组分配，先收集后处理）
     const set = this.ocean.getEntitySet(this.row, this.col);
     if (!set) return;
     const preysAtCurrentPosition: Cell[] = [];
     for (const e of set) {
       if (e === this) continue;
+      // 避免同类相食：排除与当前细胞相同类型的实体
+      if (e.constructor === this.constructor) continue;
       if (this.preyClasses.some(cls => e instanceof cls)) {
         preysAtCurrentPosition.push(e as Cell);
       }
     }
 
-    // 吃掉所有找到的植物细胞
+    // 吃掉所有找到的猎物细胞
     preysAtCurrentPosition.forEach(prey => {
-      // 从海洋中移除植物
-      prey.die();
+      // 找到对应的猎物类型索引
+      const index = this.preyClasses.findIndex(cls => prey instanceof cls);
+      const convertRatio = this.preyConvertRatios[index] || 1;
 
-      // 增加能量
-      this.energy += prey.energy;
+      // 增加能量（根据猎物能量值和转换比例）
+      const energy = Math.max(prey.energy * convertRatio, 2);
+      this.energy += energy;
+      prey.energy -= energy;
+
+      if (prey.energy <= 0) {
+        // 从海洋中移除猎物
+        prey.die();
+      }
 
       // 如果吃掉的是当前目标，清除目标
       if (prey === this.prey) {
@@ -419,10 +443,13 @@ export default class CellHerbiv extends Cell {
     }
   }
 
-  /** 感知 - 在前方一定范围内寻找植物细胞作为目标 */
+  /** 感知 - 在前方一定范围内寻找猎物细胞作为目标 */
   sense() {
     const prey = this.prey;
-    const range = this.senseRange;
+
+    // 基于能量比例调整感知范围：能量比例越高，感知范围越大
+    const rangeMultiplier = this.energyRatio;
+    const range = Math.max(1, Math.round(this.senseRange * rangeMultiplier));
     const isExist = prey && this.ocean.isExist(prey);
     if (
       isExist &&
@@ -443,10 +470,10 @@ export default class CellHerbiv extends Cell {
     };
 
     const center = {
-      row: this.row + Math.round(normalizedVelocity.y * (this.senseRange + 1)),
-      col: this.col + Math.round(normalizedVelocity.x * (this.senseRange + 1)),
+      row: this.row + Math.round(normalizedVelocity.y * (range + 1)),
+      col: this.col + Math.round(normalizedVelocity.x * (range + 1)),
     };
-    // 先用索引收集候选植物集合
+    // 先用索引收集候选猎物集合
     const preys = [] as Cell[];
     const pioneers = [] as Cell[];
     this.scanNearPositions(range, center, posis => {
@@ -457,7 +484,11 @@ export default class CellHerbiv extends Cell {
           if (e instanceof this.constructor) {
             pioneers.push(e as Cell);
           }
-          if (this.preyClasses.some(cls => e instanceof cls)) {
+          // 避免同类相食：排除与当前细胞相同类型的实体
+          if (
+            e.constructor !== this.constructor &&
+            this.preyClasses.some(cls => e instanceof cls)
+          ) {
             preys.push(e as Cell);
           }
         }

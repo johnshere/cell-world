@@ -17,20 +17,17 @@ export default class CellCarniv extends Cell {
 
   /** 感知范围 */
   senseRange!: number;
-  /** 低能量感知范围 */
-  senseRangeLowEnergy!: number;
   /** 捕猎失败被反杀的概率（比目标能量低时） */
   huntFailedRatio!: number;
 
   declare energy: number;
   declare energyToSplit: number; // 分裂所需的能量
   energyToMove!: number; // 移动所需的能量
-  /** 能量对速度的加成 */
-  energyToSpeed!: number;
-  /** 低能量阈值（低于等于该值时进入待机：不移动不消耗能量） */
-  lowEnergyThreshold!: number;
-  /** 低能量状态下的能量消耗 */
-  lowEnergyConsumption!: number;
+
+  /** 能量比例 = energy/energyToSplit */
+  get energyRatio(): number {
+    return Math.max(0.1, this.energy / this.energyToSplit);
+  }
 
   // 对象池复用初始化：重置字段，保持与构造器随机化一致
   override init() {
@@ -40,20 +37,14 @@ export default class CellCarniv extends Cell {
     this.maxGeneration = 3;
     this.maxNearingCells = 1;
     this.moveMinInterval = 50;
-    this.moveMaxInterval = 800;
+    this.moveMaxInterval = 600;
     this.senseRange = 7;
-    this.senseRangeLowEnergy = 3;
     this.huntFailedRatio = 0.5;
-    this.energyToSplit = 1000;
-    this.energyToMove = 40;
-    this.energyToSpeed = 1;
-    this.lowEnergyConsumption = 1;
-    // 能量与阈值随机化
+    this.energyToSplit = 800;
+    this.energyToMove = 30;
+    // 能量随机化
     this.energy = 100;
     this.energy = this.energy * (Math.random() + 1);
-    this.lowEnergyThreshold = 0.1;
-    this.lowEnergyThreshold =
-      (1.5 - Math.random()) * this.lowEnergyThreshold * this.energyToSplit;
     // 移动节奏与计时
     this.moveTimer = 0;
     this.moveInterval =
@@ -96,10 +87,14 @@ export default class CellCarniv extends Cell {
 
   /** 移动到相邻位置 */
   move() {
-    // 所有状态下都先累积移动计时，便于低能量追击同样遵循节奏
+    // 累积移动计时
     this.moveTimer += this.deltaTime;
 
-    if (this.moveTimer < this.moveInterval - this.energy * this.energyToSpeed) {
+    // 基于能量比例调整移动间隔：能量比例越高，移动越快
+    const speedMultiplier = Math.max(0.3, this.energyRatio);
+    const adjustedMoveInterval = this.moveInterval * (1 - speedMultiplier);
+
+    if (this.moveTimer < adjustedMoveInterval - this.energy) {
       return;
     }
     this.moveTimer = 0;
@@ -115,10 +110,13 @@ export default class CellCarniv extends Cell {
         this.setPosition(next.row, next.col);
       }
     }
+
+    // 基于能量比例调整移动消耗：能量比例越高，消耗越多
+    const costMultiplier = this.energyRatio;
+    this.energy -= this.energyToMove * costMultiplier;
+
     // 移动后检查当前位置是否有植食细胞并吃掉它们
     this.attackAndEat();
-
-    this.energy -= this.energyToMove;
   }
   /** 吃掉当前位置的植食细胞 */
   private attackAndEat() {
@@ -133,7 +131,11 @@ export default class CellCarniv extends Cell {
     // 吃掉所有找到的植食细胞
     for (const prey of herbivsAtCurrentPosition) {
       if (this.energy < prey.energy) {
-        if (Math.random() < this.huntFailedRatio) {
+        // 基于能量比例调整攻击失败率：能量比例越高，失败率越低
+        const failureMultiplier = 1.0 - this.energyRatio;
+        const adjustedFailureRatio = this.huntFailedRatio * failureMultiplier;
+
+        if (Math.random() < adjustedFailureRatio) {
           this.die();
           return;
         }
@@ -150,7 +152,11 @@ export default class CellCarniv extends Cell {
   /** 感知 - 在前方一定范围内寻找植食细胞作为目标 */
   sense() {
     const prey = this.prey;
-    const range = this.senseRange;
+
+    // 基于能量比例调整感知范围：能量比例越高，感知范围越大
+    const rangeMultiplier = this.energyRatio;
+    const range = Math.max(1, Math.round(this.senseRange * rangeMultiplier));
+
     const isExist = prey && this.ocean.isExist(prey);
     if (
       isExist &&
@@ -159,17 +165,18 @@ export default class CellCarniv extends Cell {
     ) {
       return;
     }
+    this.prey = undefined;
 
     // 速度方向上，距离是senseRange+1的位置
     const dir = this.direction;
     const center = {
-      row: this.row + dir.row * (this.senseRange + 1),
-      col: this.col + dir.col * (this.senseRange + 1),
+      row: this.row + dir.row * (range + 1),
+      col: this.col + dir.col * (range + 1),
     };
 
     // 先用索引收集候选植食集合
     const preys = [] as CellHerbiv[];
-    this.scanNearPositions(this.senseRange, center, posis => {
+    this.scanNearPositions(range, center, posis => {
       for (const pos of posis) {
         const set = this.ocean.getEntitySet(pos.row, pos.col);
         if (!set) continue;

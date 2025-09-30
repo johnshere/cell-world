@@ -20,10 +20,10 @@ export default class CellPlant extends Cell {
     this.color = 'green';
     this.energy = 40;
     this.energyToGrow = 1;
-    this.energyToSplit = 50;
+    this.energyToSplit = 90;
     this.maxGeneration = 200;
     this.maxNearingCells = 2;
-    this.splitInterval = 1000;
+    this.splitInterval = 500;
     // 随机化能量、分裂能量和分裂间隔
     this.energy = (1.5 - Math.random()) * this.energy;
     this.energyToSplit = (1.5 - Math.random()) * this.energyToSplit;
@@ -46,9 +46,8 @@ export default class CellPlant extends Cell {
       this.die();
       return;
     }
-    this.energy += (this.energyToGrow * this.deltaTime) / 1000;
-    if (this.energy > this.energyToSplit * 2) {
-      this.energy = this.energyToSplit * 2;
+    if (this.energy < this.energyToSplit * 2) {
+      this.energy += (this.energyToGrow * this.deltaTime) / 1000;
     }
     this.splitTimer += this.deltaTime;
 

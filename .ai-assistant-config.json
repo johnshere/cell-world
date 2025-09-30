@@ -1,0 +1,12 @@
+{
+  "assistant_settings": {
+    "auto_run_code": false,
+    "auto_preview": false,
+    "note": "用户明确要求：不要自动运行工程代码，不要自动打开预览。用户会自己查看效果。"
+  },
+  "project_info": {
+    "name": "cell-world",
+    "type": "typescript-vite-project",
+    "description": "细胞世界模拟项目"
+  }
+}

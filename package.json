@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "_ai_assistant_note": "重要：AI助手请勿自动运行代码或打开预览，用户会自己查看效果",
   "scripts": {
     "dev": "pnpm type-check && vite",
     "build": "tsc && vite build",
