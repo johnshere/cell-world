@@ -1,0 +1,29 @@
+[package]
+name = "cell-world"
+version = "0.1.0"
+edition = "2021"
+description = "Neural network emergence ecosystem simulator"
+authors = ["Your Name"]
+
+[dependencies]
+# GUI
+eframe = "0.29"
+egui = "0.29"
+
+# 随机数
+rand = "0.8"
+
+# 哈希
+rustc-hash = "2.0"
+
+# 序列化（可选，用于保存/加载）
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+
+[features]
+default = []
+persistence = ["serde", "serde_json"]
+
+[profile.release]
+opt-level = 3
+lto = true
