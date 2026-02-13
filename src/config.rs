@@ -75,7 +75,7 @@ impl Default for Config {
             mutation_rate: 0.15,  // 提高变异率，加速结构探索
             initial_connections_min: 6,  // 更多初始连接，增加有用组合概率
             initial_connections_max: 12,
-            species_similarity_threshold: 0.6,  // 基因相似度 >= 60% 视为同一种族
+            species_similarity_threshold: 0.9,  // 基因相似度 >= 视为同一种族
             initial_scale: 0.6,  // 初始世界缩放比例
         }
     }
