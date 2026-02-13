@@ -28,3 +28,4 @@ dist-ssr
 .claude/temp/*.png
 nul
 src/config.rs
+docs/LOG.md
