@@ -6,6 +6,17 @@ use crate::store::{Store, CreatureTemplate};
 use crate::world::World;
 use crate::render::{WorldCanvas, StatsPanel, Selection, VisibleWorldBounds, PanelAction, RenderContext};
 
+/// 帧级性能统计
+#[derive(Default)]
+pub struct FramePerfStats {
+    pub world_update_ms: f64,
+    pub panel_update_ms: f64,
+    pub render_ctx_ms: f64,
+    pub render_ms: f64,
+    pub frame_total_ms: f64,
+    pub egui_overhead_ms: f64,  // egui 框架开销
+}
+
 /// 主应用
 pub struct CellWorldApp {
     world: World,
@@ -29,6 +40,8 @@ pub struct CellWorldApp {
     // 渲染上下文缓存
     render_ctx_cache: Option<RenderContext>,
     last_render_ctx_update: std::time::Instant,
+    // 帧级性能统计
+    frame_perf: FramePerfStats,
 }
 
 impl CellWorldApp {
@@ -75,6 +88,7 @@ impl CellWorldApp {
             last_visible_bounds: None,
             render_ctx_cache: None,
             last_render_ctx_update: now,
+            frame_perf: FramePerfStats::default(),
         }
     }
 }
@@ -95,6 +109,7 @@ impl CellWorldApp {
 
         // 首次写入时创建文件头
         if !self.log_initialized {
+            // 原有数据日志
             if let Ok(mut file) = OpenOptions::new()
                 .write(true)
                 .create(true)
@@ -105,10 +120,21 @@ impl CellWorldApp {
                 let _ = writeln!(file, "| 时间(s) | FPS | 生物 | 能量 | 存活 | 灭绝 | 最大族 | 最大代 | 均能 | 种族 | 最多种 | 释放 | 转移 |");
                 let _ = writeln!(file, "|---------|-----|------|------|------|------|--------|--------|------|------|--------|------|------|");
             }
+            // 性能分析日志
+            if let Ok(mut file) = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("docs/run.log")
+            {
+                let _ = writeln!(file, "# Cell World 性能分析日志\n");
+                let _ = writeln!(file, "| 时间 | FPS | 生物 | 世界ms | 面板ms | 聚类ms | 渲染ms | egui | 帧总ms | 感知ms | 网络ms |");
+                let _ = writeln!(file, "|------|-----|------|--------|--------|--------|--------|------|--------|--------|--------|");
+            }
             self.log_initialized = true;
         }
 
-        // 追加数据行
+        // 追加原有数据日志
         if let Ok(mut file) = OpenOptions::new()
             .write(true)
             .append(true)
@@ -132,6 +158,31 @@ impl CellWorldApp {
                 stats.transfer_unlocked
             );
         }
+
+        // 追加性能分析日志
+        let perf = &self.world.perf_stats;
+        let fperf = &self.frame_perf;
+        if let Ok(mut file) = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open("docs/run.log")
+        {
+            let _ = writeln!(
+                file,
+                "| {:.0} | {:.0} | {} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} |",
+                stats.time,
+                stats.fps,
+                perf.creature_count,
+                fperf.world_update_ms,
+                fperf.panel_update_ms,
+                fperf.render_ctx_ms,
+                fperf.render_ms,
+                fperf.egui_overhead_ms,
+                fperf.frame_total_ms,
+                perf.perceive_ms,
+                perf.forward_ms
+            );
+        }
     }
 }
 
@@ -153,6 +204,7 @@ impl eframe::App for CellWorldApp {
 
         // 使用上一帧的可见范围更新视窗
         // 第一帧时 last_visible_bounds 为 None，跳过更新，等待渲染获取视窗大小
+        let t_world = std::time::Instant::now();
         if let Some(bounds) = self.last_visible_bounds {
             self.world.set_viewport(bounds.min_x, bounds.min_y, bounds.max_x, bounds.max_y);
 
@@ -161,9 +213,12 @@ impl eframe::App for CellWorldApp {
                 self.world.update(dt * self.speed, &self.config);
             }
         }
+        self.frame_perf.world_update_ms = t_world.elapsed().as_secs_f64() * 1000.0;
 
         // 更新面板缓存
+        let t_panel = std::time::Instant::now();
         self.panel.update(&self.world, self.config.species_similarity_threshold, self.fps, now);
+        self.frame_perf.panel_update_ms = t_panel.elapsed().as_secs_f64() * 1000.0;
 
         // 每10秒记录一次日志
         self.log_stats();
@@ -224,20 +279,35 @@ impl eframe::App for CellWorldApp {
         }
 
         // 主画布
+        let t_central_panel = std::time::Instant::now();
+        let mut render_ctx_time = 0.0;
+        let mut render_time = 0.0;
         egui::CentralPanel::default().show(ctx, |ui| {
-            // 每0.5秒（真实时间）更新一次渲染上下文（避免频繁计算O(n²)的种族聚类）
-            if self.render_ctx_cache.is_none() || now.duration_since(self.last_render_ctx_update).as_secs_f64() >= 0.5 {
+            // 每1秒（真实时间）更新一次渲染上下文（避免频繁计算O(n²)的种族聚类）
+            if self.render_ctx_cache.is_none() || now.duration_since(self.last_render_ctx_update).as_secs_f64() >= 1.0 {
+                let t_ctx = std::time::Instant::now();
                 let (creature_species, top_family_ids) = self.world.get_render_data(self.config.species_similarity_threshold);
                 self.render_ctx_cache = Some(RenderContext {
                     creature_species,
                     top_family_ids,
                 });
                 self.last_render_ctx_update = now;
+                render_ctx_time = t_ctx.elapsed().as_secs_f64() * 1000.0;
             }
             let render_ctx = self.render_ctx_cache.as_ref().unwrap();
+            let t_render = std::time::Instant::now();
             let bounds = self.canvas.render(ui, &self.world, &mut self.selection, render_ctx);
+            render_time = t_render.elapsed().as_secs_f64() * 1000.0;
             self.last_visible_bounds = Some(bounds);
         });
+        let central_panel_time = t_central_panel.elapsed().as_secs_f64() * 1000.0;
+        self.frame_perf.render_ctx_ms = render_ctx_time;
+        self.frame_perf.render_ms = render_time;
+        // egui 开销 = CentralPanel 总时间 - 我们测量的代码时间
+        self.frame_perf.egui_overhead_ms = central_panel_time - render_ctx_time - render_time;
+        self.frame_perf.frame_total_ms = self.frame_perf.world_update_ms
+            + self.frame_perf.panel_update_ms
+            + central_panel_time;
 
         // 持续刷新
         ctx.request_repaint();

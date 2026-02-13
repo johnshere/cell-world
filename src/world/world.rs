@@ -1,8 +1,21 @@
 use rand::Rng;
 use rustc_hash::FxHashMap;
+use std::cell::RefCell;
+use std::time::Instant;
 
 use crate::config::Config;
 use super::{Creature, EnergyParticle, SpatialGrid};
+
+/// 性能统计（单帧）
+#[derive(Default, Clone)]
+pub struct PerfStats {
+    pub perceive_ms: f64,
+    pub forward_ms: f64,
+    pub actions_ms: f64,
+    pub spatial_ms: f64,
+    pub total_ms: f64,
+    pub creature_count: usize,
+}
 
 /// 世界
 pub struct World {
@@ -31,6 +44,15 @@ pub struct World {
     viewport_min_y: f64,
     viewport_max_x: f64,
     viewport_max_y: f64,
+
+    // 性能统计
+    pub perf_stats: PerfStats,
+
+    // 相似度缓存：(min_hash, max_hash) -> similarity（使用 RefCell 允许 &self 时修改）
+    similarity_cache: RefCell<FxHashMap<(u64, u64), f64>>,
+
+    // 缓存清理计时器
+    cache_cleanup_timer: f64,
 }
 
 impl World {
@@ -52,7 +74,23 @@ impl World {
             viewport_min_y: 0.0,
             viewport_max_x: 800.0,
             viewport_max_y: 600.0,
+            perf_stats: PerfStats::default(),
+            similarity_cache: RefCell::new(FxHashMap::default()),
+            cache_cleanup_timer: 0.0,
         }
+    }
+
+    /// 获取缓存的相似度（或计算并缓存）
+    fn get_similarity(&self, creature_a: &Creature, creature_b: &Creature) -> f64 {
+        let hash_a = creature_a.genome_hash;
+        let hash_b = creature_b.genome_hash;
+        // 规范化 key：小的在前
+        let key = if hash_a <= hash_b { (hash_a, hash_b) } else { (hash_b, hash_a) };
+
+        let mut cache = self.similarity_cache.borrow_mut();
+        *cache.entry(key).or_insert_with(|| {
+            creature_a.genome.similarity(&creature_b.genome)
+        })
     }
 
     /// 设置视窗范围（世界坐标）
@@ -73,8 +111,10 @@ impl World {
         // 自动补充生物
         self.replenish_creatures(config);
 
-        // 重建空间索引
+        // 重建空间索引（计时）
+        let spatial_start = Instant::now();
         self.rebuild_spatial_index();
+        self.perf_stats.spatial_ms = spatial_start.elapsed().as_secs_f64() * 1000.0;
 
         // 更新生物
         self.update_creatures(dt, config);
@@ -191,11 +231,18 @@ impl World {
     /// 更新生物
     fn update_creatures(&mut self, dt: f64, config: &Config) {
         let creature_count = self.creatures.len();
+        let mut alive_count = 0;
+        let mut perceive_time = 0.0;
+        let mut forward_time = 0.0;
+        let mut actions_time = 0.0;
+
+        let total_start = Instant::now();
 
         for i in 0..creature_count {
             if !self.creatures[i].alive {
                 continue;
             }
+            alive_count += 1;
 
             // 基础代谢 = 固定消耗 + 百分比消耗
             let base_cost = config.base_metabolism * dt;
@@ -210,14 +257,29 @@ impl World {
             }
 
             // 收集感知数据
+            let t0 = Instant::now();
             let perception = self.perceive(i, config);
+            perceive_time += t0.elapsed().as_secs_f64() * 1000.0;
 
             // 神经网络决策
+            let t1 = Instant::now();
             let outputs = self.creatures[i].brain.forward(&perception);
+            forward_time += t1.elapsed().as_secs_f64() * 1000.0;
 
             // 执行动作
+            let t2 = Instant::now();
             self.execute_actions(i, &outputs, dt, config);
+            actions_time += t2.elapsed().as_secs_f64() * 1000.0;
         }
+
+        let total_time = total_start.elapsed().as_secs_f64() * 1000.0;
+
+        // 更新性能统计
+        self.perf_stats.perceive_ms = perceive_time;
+        self.perf_stats.forward_ms = forward_time;
+        self.perf_stats.actions_ms = actions_time;
+        self.perf_stats.total_ms = total_time;
+        self.perf_stats.creature_count = alive_count;
     }
 
     /// 感知环境 (17维输入)
@@ -267,7 +329,7 @@ impl World {
                     // 检查是否在这个方向
                     let dot = (ox * dx + oy * dy) / dist;
                     if dot > 0.5 {
-                        dir_similarity += creature.similarity(other);
+                        dir_similarity += self.get_similarity(creature, other);
                         neighbor_count += 1;
                     }
                 }
@@ -396,6 +458,12 @@ impl World {
             return;
         }
 
+        // 检查是否超过最大生物数量
+        let alive_count = self.creatures.iter().filter(|c| c.alive).count();
+        if alive_count >= config.max_creatures {
+            return;
+        }
+
         if self.creatures[idx].energy < config.reproduce_threshold {
             return;
         }
@@ -486,6 +554,21 @@ impl World {
 
         // 清理空家族
         self.family_stats.retain(|_, &mut count| count > 0);
+
+        // 每10秒清理一次相似度缓存（避免每帧都清理的开销）
+        if self.time - self.cache_cleanup_timer >= 10.0 {
+            self.cache_cleanup_timer = self.time;
+            // 收集当前活着生物的 genome_hash
+            let alive_hashes: rustc_hash::FxHashSet<u64> = self.creatures.iter()
+                .filter(|c| c.alive)
+                .map(|c| c.genome_hash)
+                .collect();
+            // 只保留两端都是活着生物的缓存条目
+            let mut cache = self.similarity_cache.borrow_mut();
+            cache.retain(|(h1, h2), _| {
+                alive_hashes.contains(h1) && alive_hashes.contains(h2)
+            });
+        }
     }
 
     /// 获取统计信息
@@ -542,11 +625,14 @@ impl World {
     /// 获取渲染上下文数据（种族映射和前三家族ID）
     /// 返回 (creature_index -> 种族最小基因哈希, 前三家族ID)
     pub fn get_render_data(&self, threshold: f64) -> (FxHashMap<usize, u64>, Vec<usize>) {
-        let alive_indices: Vec<usize> = self.creatures.iter()
-            .enumerate()
-            .filter(|(_, c)| c.alive)
-            .map(|(i, _)| i)
-            .collect();
+        // 预分配 Vec 容量以减少重新分配
+        let alive_count = self.creatures.iter().filter(|c| c.alive).count();
+        let mut alive_indices: Vec<usize> = Vec::with_capacity(alive_count);
+        for (i, c) in self.creatures.iter().enumerate() {
+            if c.alive {
+                alive_indices.push(i);
+            }
+        }
 
         if alive_indices.is_empty() {
             return (FxHashMap::default(), Vec::new());
@@ -584,14 +670,15 @@ impl World {
             for j in (i + 1)..n {
                 let ci = &self.creatures[alive_indices[i]];
                 let cj = &self.creatures[alive_indices[j]];
-                if ci.genome.similarity(&cj.genome) >= threshold {
+                if self.get_similarity(ci, cj) >= threshold {
                     union(&mut parent, &mut rank, i, j);
                 }
             }
         }
 
         // 计算每个种族的最小基因哈希（用于稳定的颜色标识）
-        let mut species_min_hash: FxHashMap<usize, u64> = FxHashMap::default();
+        // 预分配容量以减少重新分配
+        let mut species_min_hash: FxHashMap<usize, u64> = FxHashMap::with_capacity_and_hasher(n, Default::default());
         for (i, &idx) in alive_indices.iter().enumerate() {
             let root = find(&mut parent, i);
             let hash = self.creatures[idx].genome_hash;
@@ -602,7 +689,7 @@ impl World {
         }
 
         // 构建 creature_index -> 种族最小基因哈希 映射
-        let mut creature_species: FxHashMap<usize, u64> = FxHashMap::default();
+        let mut creature_species: FxHashMap<usize, u64> = FxHashMap::with_capacity_and_hasher(n, Default::default());
         for (i, &idx) in alive_indices.iter().enumerate() {
             let root = find(&mut parent, i);
             let min_hash = species_min_hash[&root];
@@ -655,10 +742,10 @@ impl World {
             }
         }
 
-        // 聚类：将相似的生物归为同一种族
+        // 聚类：将相似的生物归为同一种族（使用缓存）
         for i in 0..n {
             for j in (i + 1)..n {
-                if alive_creatures[i].genome.similarity(&alive_creatures[j].genome) >= threshold {
+                if self.get_similarity(alive_creatures[i], alive_creatures[j]) >= threshold {
                     union(&mut parent, &mut rank, i, j);
                 }
             }

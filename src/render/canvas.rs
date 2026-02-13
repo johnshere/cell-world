@@ -338,8 +338,16 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color32 {
 
 /// 根据种族基因哈希生成颜色
 fn species_to_color(species_hash: u64) -> Color32 {
+    // 使用混合哈希函数使低位哈希值也能产生分散的色相
+    // 基于 splitmix64 的快速混合
+    let mut h = species_hash;
+    h = h.wrapping_add(0x9e3779b97f4a7c15);
+    h = (h ^ (h >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    h = (h ^ (h >> 27)).wrapping_mul(0x94d049bb133111eb);
+    h = h ^ (h >> 31);
+
     // 使用黄金角分布生成均匀分布的色相
     let golden_ratio = 0.618033988749895;
-    let hue = ((species_hash as f64 * golden_ratio) % 1.0 * 360.0) as f32;
+    let hue = ((h as f64 * golden_ratio) % 1.0 * 360.0) as f32;
     hsl_to_rgb(hue, 0.7, 0.5)
 }

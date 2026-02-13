@@ -5,6 +5,8 @@ pub struct Config {
 
     /// 最小生物数量（低于此值自动补充）
     pub min_creatures: usize,
+    /// 最大生物数量（超过此值停止繁殖）
+    pub max_creatures: usize,
 
     /// 初始能量
     pub initial_energy: f64,
@@ -52,6 +54,7 @@ impl Default for Config {
             initial_speed: 3.5,  // 初始倍速，加速演化
 
             min_creatures: 40,  // 更大种群，增加有用变异概率
+            max_creatures: 150, // 限制最大数量以保证性能（O(n²)聚类）
 
             initial_energy: 70.0,  // 更多初始能量，延长生存时间
 
