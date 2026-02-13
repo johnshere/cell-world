@@ -630,6 +630,14 @@ impl World {
         family_vec.sort_by(|a, b| b.count.cmp(&a.count));
         let top_families: Vec<_> = family_vec.into_iter().take(3).collect();
 
+        // 构建生物ID -> 种族ID映射
+        let mut id_species_map: FxHashMap<u64, usize> = FxHashMap::default();
+        for (i, creature) in alive_creatures.iter().enumerate() {
+            if let Some(&species_id) = creature_species_map.get(&i) {
+                id_species_map.insert(creature.id, species_id);
+            }
+        }
+
         WorldStats {
             time: self.time,
             creature_count: alive_creatures.len(),
@@ -645,6 +653,7 @@ impl World {
             largest_species,
             top_families,
             top_species,
+            creature_species_map: id_species_map,
         }
     }
 
@@ -846,4 +855,5 @@ pub struct WorldStats {
     pub largest_species: usize,    // 最大种族数量
     pub top_families: Vec<RankedEntry>,   // 前三家族
     pub top_species: Vec<RankedEntry>,    // 前三种族
+    pub creature_species_map: FxHashMap<u64, usize>,  // 生物ID -> 种族ID
 }

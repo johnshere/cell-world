@@ -1,4 +1,5 @@
 use egui::Ui;
+use rustc_hash::FxHashMap;
 use std::time::Instant;
 
 use crate::store::Store;
@@ -60,6 +61,8 @@ pub struct CachedStats {
     pub largest_species: usize,
     pub top_families: Vec<RankedEntry>,
     pub top_species: Vec<RankedEntry>,
+    // 生物ID -> 种族ID 映射
+    pub creature_species_map: FxHashMap<u64, usize>,
 }
 
 impl StatsPanel {
@@ -113,6 +116,7 @@ impl StatsPanel {
                         species_id: e.species_id,
                     })
                     .collect(),
+                creature_species_map: stats.creature_species_map.clone(),
             };
         }
     }
@@ -216,7 +220,7 @@ impl StatsPanel {
             ui.vertical(|ui| {
                 ui.label("家族前三:");
                 for (i, entry) in self.cached_stats.top_families.iter().enumerate() {
-                    ui.label(format!("{}. {}[#{},${}]", i + 1, entry.count, entry.family_id, entry.species_id));
+                    ui.label(format!("{}. {}[#{}]", i + 1, entry.count, entry.family_id));
                 }
             });
             ui.separator();
@@ -224,7 +228,7 @@ impl StatsPanel {
             ui.vertical(|ui| {
                 ui.label("种族前三:");
                 for (i, entry) in self.cached_stats.top_species.iter().enumerate() {
-                    ui.label(format!("{}. {}[#{},${}]", i + 1, entry.count, entry.family_id, entry.species_id));
+                    ui.label(format!("{}. {}[${}]", i + 1, entry.count, entry.species_id));
                 }
             });
         });
@@ -234,6 +238,7 @@ impl StatsPanel {
 
     /// 渲染选中信息，返回操作
     pub fn render_selection(&mut self, ui: &mut Ui, selection: &Selection, world: &World) -> PanelAction {
+        let creature_species_map = &self.cached_stats.creature_species_map;
         let mut action = PanelAction::default();
 
         match selection {
@@ -291,6 +296,12 @@ impl StatsPanel {
                         ui.horizontal(|ui| {
                             ui.label("家族ID:");
                             ui.label(format!("{}", creature.family_id));
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("种族ID:");
+                            let species_id = creature_species_map.get(&creature.id).copied().unwrap_or(0);
+                            ui.label(format!("{}", species_id));
                         });
 
                         ui.horizontal(|ui| {
