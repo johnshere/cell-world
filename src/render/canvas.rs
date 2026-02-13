@@ -1,6 +1,7 @@
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 
 use crate::world::World;
+use super::Selection;
 
 /// 世界画布渲染器
 pub struct WorldCanvas {
@@ -12,6 +13,17 @@ pub struct WorldCanvas {
     dragging: bool,
     /// 上一帧鼠标位置
     last_mouse_pos: Option<Pos2>,
+    /// 是否已初始化缩放
+    initialized: bool,
+}
+
+/// 可见世界范围
+#[derive(Clone, Copy, Debug)]
+pub struct VisibleWorldBounds {
+    pub min_x: f64,
+    pub min_y: f64,
+    pub max_x: f64,
+    pub max_y: f64,
 }
 
 impl WorldCanvas {
@@ -21,18 +33,49 @@ impl WorldCanvas {
             scale: 1.0,
             dragging: false,
             last_mouse_pos: None,
+            initialized: false,
         }
     }
 
-    /// 渲染世界
-    pub fn render(&mut self, ui: &mut Ui, world: &World, world_width: f64, world_height: f64) {
+    /// 计算当前可见的世界坐标范围
+    pub fn get_visible_world_bounds(&self, screen_rect: Rect) -> VisibleWorldBounds {
+        // 屏幕左上角对应的世界坐标
+        let min_x = (-self.offset.x / self.scale) as f64;
+        let min_y = (-self.offset.y / self.scale) as f64;
+        // 屏幕右下角对应的世界坐标
+        let max_x = ((screen_rect.width() - self.offset.x) / self.scale) as f64;
+        let max_y = ((screen_rect.height() - self.offset.y) / self.scale) as f64;
+
+        VisibleWorldBounds { min_x, min_y, max_x, max_y }
+    }
+
+    /// 渲染世界，返回当前可见的世界坐标范围
+    pub fn render(&mut self, ui: &mut Ui, world: &World, world_width: f64, world_height: f64, selection: &mut Selection) -> VisibleWorldBounds {
         let available_size = ui.available_size();
         let (response, painter) =
             ui.allocate_painter(available_size, Sense::click_and_drag());
         let rect = response.rect;
 
+        // 首次渲染时自动计算缩放以适应画布
+        if !self.initialized {
+            let scale_x = rect.width() / world_width as f32;
+            let scale_y = rect.height() / world_height as f32;
+            self.scale = scale_x.min(scale_y) * 0.95; // 留一点边距
+            self.initialized = true;
+        }
+
         // 处理交互
         self.handle_interaction(&response, ui);
+
+        // 处理点击选中
+        if response.clicked() {
+            if let Some(click_pos) = response.interact_pointer_pos() {
+                *selection = self.find_clicked_entity(click_pos, rect, world);
+            }
+        }
+
+        // 验证选中是否仍有效
+        self.validate_selection(selection, world);
 
         // 绘制背景
         painter.rect_filled(rect, 0.0, Color32::from_rgb(10, 10, 20));
@@ -47,6 +90,9 @@ impl WorldCanvas {
         // 绘制网格
         self.draw_grid(&painter, rect, world_width, world_height);
 
+        // 选中描边颜色
+        let selection_stroke = Stroke::new(1.5, Color32::from_rgba_unmultiplied(255, 255, 255, 180));
+
         // 绘制能量粒子
         for particle in &world.energy_particles {
             if !particle.alive {
@@ -56,8 +102,13 @@ impl WorldCanvas {
             if rect.contains(pos) {
                 let alpha = (1.0 - particle.age / particle.lifetime) as f32;
                 let color = Color32::from_rgba_unmultiplied(255, 220, 100, (alpha * 200.0) as u8);
-                let radius = 2.0 * self.scale;
+                let radius = 1.33 * self.scale;
                 painter.circle_filled(pos, radius, color);
+
+                // 选中描边
+                if *selection == Selection::Energy(particle.id) {
+                    painter.circle_stroke(pos, radius + 2.0, selection_stroke);
+                }
             }
         }
 
@@ -72,7 +123,65 @@ impl WorldCanvas {
                 let color = hsl_to_rgb(h, s, l);
                 let radius = (3.0 + (creature.energy / 50.0) as f32).min(8.0) * self.scale;
                 painter.circle_filled(pos, radius, color);
+
+                // 选中描边
+                if *selection == Selection::Creature(creature.id) {
+                    painter.circle_stroke(pos, radius + 2.0, selection_stroke);
+                }
             }
+        }
+
+        // 返回可见的世界坐标范围
+        self.get_visible_world_bounds(rect)
+    }
+
+    /// 查找点击位置的实体
+    fn find_clicked_entity(&self, click_pos: Pos2, rect: Rect, world: &World) -> Selection {
+        // 优先检测生物（因为生物更大更重要）
+        for creature in &world.creatures {
+            if !creature.alive {
+                continue;
+            }
+            let pos = self.world_to_screen(Pos2::new(creature.x as f32, creature.y as f32), rect);
+            let radius = (3.0 + (creature.energy / 50.0) as f32).min(8.0) * self.scale;
+            let dist = click_pos.distance(pos);
+            if dist <= radius + 5.0 {
+                return Selection::Creature(creature.id);
+            }
+        }
+
+        // 检测能量粒子
+        for particle in &world.energy_particles {
+            if !particle.alive {
+                continue;
+            }
+            let pos = self.world_to_screen(Pos2::new(particle.x as f32, particle.y as f32), rect);
+            let radius = 1.33 * self.scale;
+            let dist = click_pos.distance(pos);
+            if dist <= radius + 5.0 {
+                return Selection::Energy(particle.id);
+            }
+        }
+
+        Selection::None
+    }
+
+    /// 验证选中是否仍有效
+    fn validate_selection(&self, selection: &mut Selection, world: &World) {
+        match *selection {
+            Selection::Creature(id) => {
+                let found = world.creatures.iter().any(|c| c.id == id && c.alive);
+                if !found {
+                    *selection = Selection::None;
+                }
+            }
+            Selection::Energy(id) => {
+                let found = world.energy_particles.iter().any(|e| e.id == id && e.alive);
+                if !found {
+                    *selection = Selection::None;
+                }
+            }
+            Selection::None => {}
         }
     }
 

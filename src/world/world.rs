@@ -21,6 +21,16 @@ pub struct World {
     // 内部状态
     next_family_id: usize,
     energy_spawn_timer: f64,
+
+    // ID 计数器
+    next_creature_id: u64,
+    next_energy_id: u64,
+
+    // 视窗范围（世界坐标）
+    viewport_min_x: f64,
+    viewport_min_y: f64,
+    viewport_max_x: f64,
+    viewport_max_y: f64,
 }
 
 impl World {
@@ -35,6 +45,13 @@ impl World {
             extinct_families: 0,
             next_family_id: 0,
             energy_spawn_timer: 0.0,
+            next_creature_id: 0,
+            next_energy_id: 0,
+            // 初始视窗使用配置中的默认值
+            viewport_min_x: 0.0,
+            viewport_min_y: 0.0,
+            viewport_max_x: config.world_width,
+            viewport_max_y: config.world_height,
         };
 
         // 初始化生物
@@ -46,12 +63,22 @@ impl World {
             let family_id = world.next_family_id;
             world.next_family_id += 1;
 
-            let creature = Creature::random(x, y, energy, family_id);
+            let creature_id = world.next_creature_id;
+            world.next_creature_id += 1;
+            let creature = Creature::random(creature_id, x, y, energy, family_id);
             world.creatures.push(creature);
             *world.family_stats.entry(family_id).or_insert(0) += 1;
         }
 
         world
+    }
+
+    /// 设置视窗范围（世界坐标）
+    pub fn set_viewport(&mut self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) {
+        self.viewport_min_x = min_x;
+        self.viewport_min_y = min_y;
+        self.viewport_max_x = max_x;
+        self.viewport_max_y = max_y;
     }
 
     /// 更新世界
@@ -72,9 +99,40 @@ impl World {
 
         // 清理死亡实体
         self.cleanup();
+
+        // 数量过少时补充新生命
+        self.replenish_creatures(config);
     }
 
-    /// 生成能量粒子
+    /// 当生物数量低于阈值时补充新生命（在视窗范围内生成）
+    fn replenish_creatures(&mut self, config: &Config) {
+        const MIN_POPULATION: usize = 20;
+
+        let alive_count = self.creatures.iter().filter(|c| c.alive).count();
+        if alive_count >= MIN_POPULATION {
+            return;
+        }
+
+        let mut rng = rand::thread_rng();
+        let spawn_count = MIN_POPULATION - alive_count;
+
+        for _ in 0..spawn_count {
+            // 在当前视窗范围内生成新生物
+            let x = rng.gen_range(self.viewport_min_x..self.viewport_max_x);
+            let y = rng.gen_range(self.viewport_min_y..self.viewport_max_y);
+            let energy = config.initial_energy * rng.gen_range(0.8..1.2);
+            let family_id = self.next_family_id;
+            self.next_family_id += 1;
+
+            let creature_id = self.next_creature_id;
+            self.next_creature_id += 1;
+            let creature = Creature::random(creature_id, x, y, energy, family_id);
+            self.creatures.push(creature);
+            *self.family_stats.entry(family_id).or_insert(0) += 1;
+        }
+    }
+
+    /// 生成能量粒子（只在视窗范围内生成）
     fn spawn_energy(&mut self, dt: f64, config: &Config) {
         self.energy_spawn_timer += dt;
 
@@ -83,9 +141,13 @@ impl World {
 
             let mut rng = rand::thread_rng();
             for _ in 0..config.energy_spawn_count {
-                let x = rng.gen_range(0.0..config.world_width);
-                let y = rng.gen_range(0.0..config.world_height);
+                // 在当前视窗范围内生成能量粒子
+                let x = rng.gen_range(self.viewport_min_x..self.viewport_max_x);
+                let y = rng.gen_range(self.viewport_min_y..self.viewport_max_y);
+                let energy_id = self.next_energy_id;
+                self.next_energy_id += 1;
                 let particle = EnergyParticle::new(
+                    energy_id,
                     x,
                     y,
                     config.energy_particle_value,
@@ -144,20 +206,23 @@ impl World {
         }
     }
 
-    /// 感知环境
+    /// 感知环境 (17维输入)
+    /// 0-7: 8方向能量感知
+    /// 8-15: 8方向邻居相似度 (0=无邻居, >0=有邻居且为相似度)
+    /// 16: 自身能量
     fn perceive(&self, creature_idx: usize, config: &Config) -> Vec<f64> {
         let creature = &self.creatures[creature_idx];
-        let mut input = vec![0.0; 25];
+        let mut input = vec![0.0; 17];
 
         // 8方向
         let directions: [(f64, f64); 8] = [
-            (0.0, -1.0),   // N
+            (0.0, -1.0),     // N
             (0.707, -0.707), // NE
-            (1.0, 0.0),    // E
+            (1.0, 0.0),      // E
             (0.707, 0.707),  // SE
-            (0.0, 1.0),    // S
+            (0.0, 1.0),      // S
             (-0.707, 0.707), // SW
-            (-1.0, 0.0),   // W
+            (-1.0, 0.0),     // W
             (-0.707, -0.707), // NW
         ];
 
@@ -167,7 +232,6 @@ impl World {
 
         for (dir_idx, (dx, dy)) in directions.iter().enumerate() {
             let mut dir_energy = 0.0;
-            let mut dir_has_neighbor = 0.0;
             let mut dir_similarity = 0.0;
             let mut neighbor_count = 0;
 
@@ -189,8 +253,6 @@ impl World {
                     // 检查是否在这个方向
                     let dot = (ox * dx + oy * dy) / dist;
                     if dot > 0.5 {
-                        dir_energy += other.energy;
-                        dir_has_neighbor = 1.0;
                         dir_similarity += creature.similarity(other);
                         neighbor_count += 1;
                     }
@@ -217,17 +279,18 @@ impl World {
             }
 
             // 归一化
+            // 0-7: 能量感知
             input[dir_idx] = (dir_energy / 200.0).min(1.0);
-            input[8 + dir_idx] = dir_has_neighbor;
-            input[16 + dir_idx] = if neighbor_count > 0 {
+            // 8-15: 邻居相似度 (0=无邻居, >0=平均相似度)
+            input[8 + dir_idx] = if neighbor_count > 0 {
                 dir_similarity / neighbor_count as f64
             } else {
                 0.0
             };
         }
 
-        // 自身能量
-        input[24] = (creature.energy / 200.0).min(1.0);
+        // 16: 自身能量
+        input[16] = (creature.energy / 200.0).min(1.0);
 
         input
     }
@@ -254,28 +317,24 @@ impl World {
         }
     }
 
-    // 功能 0: 移动 X
+    // 功能 0: 移动 X（无边界限制）
     fn action_move_x(&mut self, idx: usize, value: f64, dt: f64, config: &Config) {
         let dx = value * dt * 50.0;
         self.creatures[idx].x += dx;
-        self.creatures[idx].x = self.creatures[idx].x.clamp(0.0, config.world_width);
+        // 世界无限大，不限制移动范围
         self.creatures[idx].energy -= dx.abs() * config.move_cost;
     }
 
-    // 功能 1: 移动 Y
+    // 功能 1: 移动 Y（无边界限制）
     fn action_move_y(&mut self, idx: usize, value: f64, dt: f64, config: &Config) {
         let dy = value * dt * 50.0;
         self.creatures[idx].y += dy;
-        self.creatures[idx].y = self.creatures[idx].y.clamp(0.0, config.world_height);
+        // 世界无限大，不限制移动范围
         self.creatures[idx].energy -= dy.abs() * config.move_cost;
     }
 
-    // 功能 2: 吸收
-    fn action_absorb(&mut self, idx: usize, value: f64, config: &Config) {
-        if value <= 0.5 {
-            return;
-        }
-
+    // 功能 2: 吸收（自动触发，接触即吸收）
+    fn action_absorb(&mut self, idx: usize, _value: f64, config: &Config) {
         let creature = &self.creatures[idx];
         let nearby = self.energy_grid.query(creature.x, creature.y, config.contact_range);
 
@@ -303,7 +362,10 @@ impl World {
         let release_amount = value * 10.0;
         if self.creatures[idx].energy > release_amount {
             self.creatures[idx].energy -= release_amount;
+            let energy_id = self.next_energy_id;
+            self.next_energy_id += 1;
             let particle = EnergyParticle::new(
+                energy_id,
                 self.creatures[idx].x,
                 self.creatures[idx].y,
                 release_amount,
@@ -315,7 +377,8 @@ impl World {
 
     // 功能 4: 繁殖
     fn action_reproduce(&mut self, idx: usize, value: f64, config: &Config) {
-        if value <= 0.5 {
+        // 降低阈值使繁殖更容易触发
+        if value <= 0.2 {
             return;
         }
 
@@ -330,9 +393,12 @@ impl World {
         let offset_x = rng.gen_range(-10.0..10.0);
         let offset_y = rng.gen_range(-10.0..10.0);
 
+        let creature_id = self.next_creature_id;
+        self.next_creature_id += 1;
         let child = self.creatures[idx].reproduce(
-            (self.creatures[idx].x + offset_x).clamp(0.0, config.world_width),
-            (self.creatures[idx].y + offset_y).clamp(0.0, config.world_height),
+            creature_id,
+            self.creatures[idx].x + offset_x,
+            self.creatures[idx].y + offset_y,
             child_energy,
             config.mutation_rate,
         );

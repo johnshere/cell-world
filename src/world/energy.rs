@@ -1,5 +1,6 @@
 /// 能量粒子（阳光）
 pub struct EnergyParticle {
+    pub id: u64,
     pub x: f64,
     pub y: f64,
     pub energy: f64,
@@ -9,8 +10,9 @@ pub struct EnergyParticle {
 }
 
 impl EnergyParticle {
-    pub fn new(x: f64, y: f64, energy: f64, lifetime: f64) -> Self {
+    pub fn new(id: u64, x: f64, y: f64, energy: f64, lifetime: f64) -> Self {
         Self {
+            id,
             x,
             y,
             energy,

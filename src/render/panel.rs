@@ -1,6 +1,7 @@
 use egui::Ui;
 
 use crate::world::World;
+use super::Selection;
 
 /// 统计面板
 pub struct StatsPanel {
@@ -12,14 +13,14 @@ pub struct StatsPanel {
     cached_stats: CachedStats,
 }
 
-#[derive(Default)]
-struct CachedStats {
-    time: f64,
-    creature_count: usize,
-    energy_particle_count: usize,
-    alive_families: usize,
-    extinct_families: usize,
-    largest_family: usize,
+#[derive(Default, Clone)]
+pub struct CachedStats {
+    pub time: f64,
+    pub creature_count: usize,
+    pub energy_particle_count: usize,
+    pub alive_families: usize,
+    pub extinct_families: usize,
+    pub largest_family: usize,
 }
 
 impl StatsPanel {
@@ -46,6 +47,11 @@ impl StatsPanel {
                 largest_family: stats.largest_family,
             };
         }
+    }
+
+    /// 获取缓存的统计数据
+    pub fn stats(&self) -> &CachedStats {
+        &self.cached_stats
     }
 
     /// 渲染面板
@@ -90,6 +96,102 @@ impl StatsPanel {
             ui.label("最大家族:");
             ui.label(format!("{}", self.cached_stats.largest_family));
         });
+    }
+
+    /// 渲染选中信息
+    pub fn render_selection(&self, ui: &mut Ui, selection: &Selection, world: &World) {
+        match selection {
+            Selection::None => {}
+            Selection::Creature(id) => {
+                if let Some(creature) = world.creatures.iter().find(|c| c.id == *id && c.alive) {
+                        ui.separator();
+                        ui.label("选中生物");
+                        ui.separator();
+
+                        ui.horizontal(|ui| {
+                            ui.label("位置:");
+                            ui.label(format!("({:.1}, {:.1})", creature.x, creature.y));
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("能量:");
+                            ui.label(format!("{:.1}", creature.energy));
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("年龄:");
+                            ui.label(format!("{:.1}s", creature.age));
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("家族ID:");
+                            ui.label(format!("{}", creature.family_id));
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("基因哈希:");
+                            ui.label(format!("{:08X}", creature.genome_hash));
+                        });
+
+                        // 神经网络信息
+                        ui.separator();
+                        ui.label("神经网络");
+
+                        ui.horizontal(|ui| {
+                            ui.label("节点数:");
+                            ui.label(format!("{}", creature.genome.nodes.len()));
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("连接数:");
+                            ui.label(format!("{}", creature.genome.connections.len()));
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.label("输出维度:");
+                            ui.label(format!("{}", creature.genome.output_map.len()));
+                        });
+
+                        // 功能映射
+                        let func_names = ["移动X", "移动Y", "吸收", "释放", "繁殖", "转移"];
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("功能:");
+                            for &func_id in &creature.genome.output_map {
+                                if func_id < func_names.len() {
+                                    ui.label(func_names[func_id]);
+                                }
+                            }
+                        });
+                }
+            }
+            Selection::Energy(id) => {
+                if let Some(particle) = world.energy_particles.iter().find(|e| e.id == *id && e.alive) {
+                    ui.separator();
+                    ui.label("选中能量粒子");
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        ui.label("位置:");
+                        ui.label(format!("({:.1}, {:.1})", particle.x, particle.y));
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("能量值:");
+                        ui.label(format!("{:.1}", particle.energy));
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("存在时间:");
+                        ui.label(format!("{:.1}s", particle.age));
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("剩余时间:");
+                        ui.label(format!("{:.1}s", particle.lifetime - particle.age));
+                    });
+                }
+            }
+        }
     }
 }
 

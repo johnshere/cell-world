@@ -38,18 +38,19 @@ pub struct Genome {
 }
 
 impl Genome {
-    /// 输入维度
-    pub const INPUT_SIZE: usize = 25;
+    /// 输入维度 (8方向能量 + 8方向邻居相似度 + 自身能量)
+    pub const INPUT_SIZE: usize = 17;
     /// 功能池大小
     pub const FUNCTION_POOL_SIZE: usize = 6;
 
     /// 创建最小基因组（只有输入输出，无隐藏层）
+    /// 必须包含：移动X(0)、移动Y(1)、吸收(2)
     pub fn random_minimal() -> Self {
         let mut rng = rand::thread_rng();
         let mut nodes = Vec::new();
         let mut connections = Vec::new();
 
-        // 创建输入节点 (0-24)
+        // 创建输入节点
         for i in 0..Self::INPUT_SIZE {
             nodes.push(NodeGene {
                 id: i,
@@ -57,17 +58,11 @@ impl Genome {
             });
         }
 
-        // 随机选择初始输出数量 (2-4个)
-        let initial_outputs = rng.gen_range(2..=4);
-        let mut output_map = Vec::new();
+        // 必须包含的核心功能：移动X(0)、移动Y(1)、吸收(2)、繁殖(4)
+        let mut output_map = vec![0, 1, 2, 4];
 
-        // 从功能池中随机选择功能
-        let mut available_functions: Vec<usize> = (0..Self::FUNCTION_POOL_SIZE).collect();
-        for i in 0..initial_outputs {
-            let func_idx = rng.gen_range(0..available_functions.len());
-            let func_id = available_functions.remove(func_idx);
-            output_map.push(func_id);
-
+        // 为每个输出创建节点和连接
+        for (i, &_func_id) in output_map.iter().enumerate() {
             let output_id = Self::INPUT_SIZE + i;
             nodes.push(NodeGene {
                 id: output_id,
@@ -91,8 +86,8 @@ impl Genome {
         Self {
             nodes,
             connections,
-            output_map,
-            next_node_id: Self::INPUT_SIZE + initial_outputs,
+            output_map: output_map.clone(),
+            next_node_id: Self::INPUT_SIZE + output_map.len(),
         }
     }
 

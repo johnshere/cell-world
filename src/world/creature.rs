@@ -3,6 +3,9 @@ use crate::neural::Network;
 
 /// 生物
 pub struct Creature {
+    // 唯一标识
+    pub id: u64,
+
     // 位置
     pub x: f64,
     pub y: f64,
@@ -22,11 +25,12 @@ pub struct Creature {
 }
 
 impl Creature {
-    pub fn new(x: f64, y: f64, energy: f64, genome: Genome, family_id: usize) -> Self {
+    pub fn new(id: u64, x: f64, y: f64, energy: f64, genome: Genome, family_id: usize) -> Self {
         let brain = Network::from_genome(&genome);
         let genome_hash = genome.hash();
 
         Self {
+            id,
             x,
             y,
             energy,
@@ -40,15 +44,15 @@ impl Creature {
     }
 
     /// 创建随机生物
-    pub fn random(x: f64, y: f64, energy: f64, family_id: usize) -> Self {
+    pub fn random(id: u64, x: f64, y: f64, energy: f64, family_id: usize) -> Self {
         let genome = Genome::random_minimal();
-        Self::new(x, y, energy, genome, family_id)
+        Self::new(id, x, y, energy, genome, family_id)
     }
 
     /// 繁殖产生子代
-    pub fn reproduce(&self, x: f64, y: f64, energy: f64, mutation_rate: f64) -> Self {
+    pub fn reproduce(&self, id: u64, x: f64, y: f64, energy: f64, mutation_rate: f64) -> Self {
         let child_genome = self.genome.mutate(mutation_rate);
-        Self::new(x, y, energy, child_genome, self.family_id)
+        Self::new(id, x, y, energy, child_genome, self.family_id)
     }
 
     /// 计算与另一个生物的基因相似度

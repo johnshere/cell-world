@@ -27,3 +27,4 @@ dist-ssr
 *.sw?
 .claude/temp/*.png
 nul
+src/config.rs
