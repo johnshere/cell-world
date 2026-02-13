@@ -595,11 +595,37 @@ impl World {
             .count();
 
         // 计算种族分组（使用并查集思想）
-        let (species_count, largest_species, top_species) = self.calculate_species(&alive_creatures, species_threshold);
+        let (species_count, largest_species, top_species, creature_species_map) =
+            self.calculate_species(&alive_creatures, species_threshold);
 
-        // 计算家族前三
+        // 统计每个家族的种族分布
+        // family_id -> (species_id -> count)
+        let mut family_species_counts: FxHashMap<usize, FxHashMap<usize, usize>> = FxHashMap::default();
+        for (i, creature) in alive_creatures.iter().enumerate() {
+            if let Some(&species_id) = creature_species_map.get(&i) {
+                *family_species_counts
+                    .entry(creature.family_id)
+                    .or_default()
+                    .entry(species_id)
+                    .or_insert(0) += 1;
+            }
+        }
+
+        // 计算家族前三，找出每个家族的主导种族
         let mut family_vec: Vec<_> = self.family_stats.iter()
-            .map(|(&id, &count)| RankedEntry { id, count })
+            .map(|(&family_id, &count)| {
+                // 找出该家族中数量最多的种族
+                let dominant_species = family_species_counts.get(&family_id)
+                    .and_then(|species| species.iter().max_by_key(|(_, &c)| c))
+                    .map(|(&sid, _)| sid)
+                    .unwrap_or(0);
+                RankedEntry {
+                    id: family_id,
+                    count,
+                    family_id,
+                    species_id: dominant_species,
+                }
+            })
             .collect();
         family_vec.sort_by(|a, b| b.count.cmp(&a.count));
         let top_families: Vec<_> = family_vec.into_iter().take(3).collect();
@@ -623,7 +649,7 @@ impl World {
     }
 
     /// 获取渲染上下文数据（种族映射和前三家族ID）
-    /// 返回 (creature_index -> 种族最小基因哈希, 前三家族ID)
+    /// 返回 (creature_index -> 种族XOR基因哈希, 前三家族ID)
     pub fn get_render_data(&self, threshold: f64) -> (FxHashMap<usize, u64>, Vec<usize>) {
         // 预分配 Vec 容量以减少重新分配
         let alive_count = self.creatures.iter().filter(|c| c.alive).count();
@@ -676,24 +702,24 @@ impl World {
             }
         }
 
-        // 计算每个种族的最小基因哈希（用于稳定的颜色标识）
-        // 预分配容量以减少重新分配
-        let mut species_min_hash: FxHashMap<usize, u64> = FxHashMap::with_capacity_and_hasher(n, Default::default());
+        // 计算每个种族的基因哈希 XOR（用于稳定且分散的颜色标识）
+        // XOR 比 min 更能产生分散的值，同时保持相对稳定
+        let mut species_xor_hash: FxHashMap<usize, u64> = FxHashMap::with_capacity_and_hasher(n, Default::default());
         for (i, &idx) in alive_indices.iter().enumerate() {
             let root = find(&mut parent, i);
             let hash = self.creatures[idx].genome_hash;
-            species_min_hash
+            species_xor_hash
                 .entry(root)
-                .and_modify(|min| *min = (*min).min(hash))
+                .and_modify(|xor| *xor ^= hash)
                 .or_insert(hash);
         }
 
-        // 构建 creature_index -> 种族最小基因哈希 映射
+        // 构建 creature_index -> 种族 XOR 基因哈希 映射
         let mut creature_species: FxHashMap<usize, u64> = FxHashMap::with_capacity_and_hasher(n, Default::default());
         for (i, &idx) in alive_indices.iter().enumerate() {
             let root = find(&mut parent, i);
-            let min_hash = species_min_hash[&root];
-            creature_species.insert(idx, min_hash);
+            let xor_hash = species_xor_hash[&root];
+            creature_species.insert(idx, xor_hash);
         }
 
         // 获取前三家族ID
@@ -707,9 +733,10 @@ impl World {
     }
 
     /// 计算种族分组（使用并查集优化，O(n²·α(n)) 代替 O(n³)）
-    fn calculate_species(&self, alive_creatures: &[&Creature], threshold: f64) -> (usize, usize, Vec<RankedEntry>) {
+    /// 返回: (种族数, 最大种族数, 种族前三, 生物索引->种族根索引映射)
+    fn calculate_species(&self, alive_creatures: &[&Creature], threshold: f64) -> (usize, usize, Vec<RankedEntry>, FxHashMap<usize, usize>) {
         if alive_creatures.is_empty() {
-            return (0, 0, Vec::new());
+            return (0, 0, Vec::new(), FxHashMap::default());
         }
 
         let n = alive_creatures.len();
@@ -751,24 +778,44 @@ impl World {
             }
         }
 
-        // 统计各种族数量
+        // 统计各种族数量和家族分布
         let mut species_counts: FxHashMap<usize, usize> = FxHashMap::default();
+        // species_root -> (family_id -> count)
+        let mut species_family_counts: FxHashMap<usize, FxHashMap<usize, usize>> = FxHashMap::default();
+        // creature_index -> species_root
+        let mut creature_species_map: FxHashMap<usize, usize> = FxHashMap::default();
+
         for i in 0..n {
             let root = find(&mut parent, i);
+            let family_id = alive_creatures[i].family_id;
             *species_counts.entry(root).or_insert(0) += 1;
+            *species_family_counts.entry(root).or_default().entry(family_id).or_insert(0) += 1;
+            creature_species_map.insert(i, root);
         }
 
         let species_count = species_counts.len();
         let largest_species = species_counts.values().max().copied().unwrap_or(0);
 
-        // 计算种族前三
+        // 计算种族前三，找出每个种族的主导家族
         let mut species_vec: Vec<_> = species_counts.into_iter()
-            .map(|(id, count)| RankedEntry { id, count })
+            .map(|(species_id, count)| {
+                // 找出该种族中数量最多的家族
+                let dominant_family = species_family_counts.get(&species_id)
+                    .and_then(|families| families.iter().max_by_key(|(_, &c)| c))
+                    .map(|(&fid, _)| fid)
+                    .unwrap_or(0);
+                RankedEntry {
+                    id: species_id,
+                    count,
+                    family_id: dominant_family,
+                    species_id,
+                }
+            })
             .collect();
         species_vec.sort_by(|a, b| b.count.cmp(&a.count));
         let top_species: Vec<_> = species_vec.into_iter().take(3).collect();
 
-        (species_count, largest_species, top_species)
+        (species_count, largest_species, top_species, creature_species_map)
     }
 }
 
@@ -777,6 +824,8 @@ impl World {
 pub struct RankedEntry {
     pub id: usize,
     pub count: usize,
+    pub family_id: usize,   // 关联的家族ID（种族排行用）
+    pub species_id: usize,  // 关联的种族ID（家族排行用）
 }
 
 /// 世界统计

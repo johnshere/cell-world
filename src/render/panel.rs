@@ -37,6 +37,8 @@ pub struct StatsPanel {
 pub struct RankedEntry {
     pub id: usize,
     pub count: usize,
+    pub family_id: usize,   // 关联的家族ID
+    pub species_id: usize,  // 关联的种族ID
 }
 
 #[derive(Default, Clone)]
@@ -96,10 +98,20 @@ impl StatsPanel {
                 species_count: stats.species_count,
                 largest_species: stats.largest_species,
                 top_families: stats.top_families.iter()
-                    .map(|e| RankedEntry { id: e.id, count: e.count })
+                    .map(|e| RankedEntry {
+                        id: e.id,
+                        count: e.count,
+                        family_id: e.family_id,
+                        species_id: e.species_id,
+                    })
                     .collect(),
                 top_species: stats.top_species.iter()
-                    .map(|e| RankedEntry { id: e.id, count: e.count })
+                    .map(|e| RankedEntry {
+                        id: e.id,
+                        count: e.count,
+                        family_id: e.family_id,
+                        species_id: e.species_id,
+                    })
                     .collect(),
             };
         }
@@ -204,7 +216,7 @@ impl StatsPanel {
             ui.vertical(|ui| {
                 ui.label("家族前三:");
                 for (i, entry) in self.cached_stats.top_families.iter().enumerate() {
-                    ui.label(format!("{}. #{}: {}", i + 1, entry.id, entry.count));
+                    ui.label(format!("{}. {}[#{},${}]", i + 1, entry.count, entry.family_id, entry.species_id));
                 }
             });
             ui.separator();
@@ -212,7 +224,7 @@ impl StatsPanel {
             ui.vertical(|ui| {
                 ui.label("种族前三:");
                 for (i, entry) in self.cached_stats.top_species.iter().enumerate() {
-                    ui.label(format!("{}. #{}: {}", i + 1, entry.id, entry.count));
+                    ui.label(format!("{}. {}[#{},${}]", i + 1, entry.count, entry.family_id, entry.species_id));
                 }
             });
         });

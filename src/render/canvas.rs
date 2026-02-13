@@ -6,7 +6,7 @@ use super::Selection;
 
 /// 渲染上下文（种族颜色、家族排名等）
 pub struct RenderContext {
-    /// 生物索引 -> 种族最小基因哈希（用于稳定颜色）
+    /// 生物索引 -> 种族XOR基因哈希（用于分散且稳定的颜色）
     pub creature_species: FxHashMap<usize, u64>,
     /// 前三家族ID
     pub top_family_ids: Vec<usize>,
@@ -338,7 +338,7 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color32 {
 
 /// 根据种族基因哈希生成颜色
 fn species_to_color(species_hash: u64) -> Color32 {
-    // 使用混合哈希函数使低位哈希值也能产生分散的色相
+    // 使用混合哈希函数使任意哈希值都能产生分散的色相
     // 基于 splitmix64 的快速混合
     let mut h = species_hash;
     h = h.wrapping_add(0x9e3779b97f4a7c15);
@@ -346,8 +346,9 @@ fn species_to_color(species_hash: u64) -> Color32 {
     h = (h ^ (h >> 27)).wrapping_mul(0x94d049bb133111eb);
     h = h ^ (h >> 31);
 
-    // 使用黄金角分布生成均匀分布的色相
-    let golden_ratio = 0.618033988749895;
-    let hue = ((h as f64 * golden_ratio) % 1.0 * 360.0) as f32;
+    // 直接使用低位计算色相（避免 f64 精度丢失）
+    // 使用黄金角（137.5°）乘数来分散相邻值
+    let golden_angle = 137.5_f32;
+    let hue = ((h as u32) as f32 * golden_angle) % 360.0;
     hsl_to_rgb(hue, 0.7, 0.5)
 }
