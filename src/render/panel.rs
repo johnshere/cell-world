@@ -1,7 +1,19 @@
 use egui::Ui;
 
+use crate::store::Store;
 use crate::world::World;
 use super::Selection;
+
+/// 面板操作结果
+#[derive(Default)]
+pub struct PanelAction {
+    /// 添加生物（None=不添加，Some(None)=随机，Some(Some(name))=使用模板）
+    pub spawn: Option<Option<String>>,
+    /// 删除选中的生物
+    pub delete_selected: bool,
+    /// 保存选中的生物（带名称）
+    pub save_selected: Option<String>,
+}
 
 /// 统计面板
 pub struct StatsPanel {
@@ -11,6 +23,12 @@ pub struct StatsPanel {
     last_update: f64,
     /// 缓存的统计数据
     cached_stats: CachedStats,
+    /// 当前选择的模板索引（0=随机）
+    selected_template: usize,
+    /// 保存对话框状态
+    save_dialog_open: bool,
+    /// 保存名称输入
+    save_name: String,
 }
 
 #[derive(Default, Clone)]
@@ -29,6 +47,9 @@ impl StatsPanel {
             update_interval: 0.5, // 500ms
             last_update: 0.0,
             cached_stats: CachedStats::default(),
+            selected_template: 0,
+            save_dialog_open: false,
+            save_name: String::new(),
         }
     }
 
@@ -54,8 +75,10 @@ impl StatsPanel {
         &self.cached_stats
     }
 
-    /// 渲染面板，返回是否点击了添加生物按钮
-    pub fn render(&self, ui: &mut Ui, fps: f64) -> bool {
+    /// 渲染面板，返回面板操作
+    pub fn render(&mut self, ui: &mut Ui, fps: f64, store: &Store) -> PanelAction {
+        let mut action = PanelAction::default();
+
         ui.heading("Cell World");
         ui.separator();
 
@@ -72,12 +95,33 @@ impl StatsPanel {
         ui.separator();
         ui.label("种群统计");
 
-        let mut add_clicked = false;
+        // 生物数量 + 添加按钮 + 下拉选择
         ui.horizontal(|ui| {
             ui.label("生物数量:");
             ui.label(format!("{}", self.cached_stats.creature_count));
+        });
+
+        ui.horizontal(|ui| {
+            // 下拉选择模板
+            let template_names = store.names();
+            let options: Vec<&str> = std::iter::once("随机")
+                .chain(template_names.iter().copied())
+                .collect();
+
+            egui::ComboBox::from_id_salt("template_select")
+                .selected_text(*options.get(self.selected_template).unwrap_or(&"随机"))
+                .show_ui(ui, |ui| {
+                    for (i, name) in options.iter().enumerate() {
+                        ui.selectable_value(&mut self.selected_template, i, *name);
+                    }
+                });
+
             if ui.button("+").clicked() {
-                add_clicked = true;
+                if self.selected_template == 0 {
+                    action.spawn = Some(None); // 随机
+                } else if let Some(name) = template_names.get(self.selected_template - 1) {
+                    action.spawn = Some(Some(name.to_string())); // 使用模板
+                }
             }
         });
 
@@ -101,17 +145,48 @@ impl StatsPanel {
             ui.label(format!("{}", self.cached_stats.largest_family));
         });
 
-        add_clicked
+        action
     }
 
-    /// 渲染选中信息
-    pub fn render_selection(&self, ui: &mut Ui, selection: &Selection, world: &World) {
+    /// 渲染选中信息，返回操作
+    pub fn render_selection(&mut self, ui: &mut Ui, selection: &Selection, world: &World) -> PanelAction {
+        let mut action = PanelAction::default();
+
         match selection {
             Selection::None => {}
             Selection::Creature(id) => {
                 if let Some(creature) = world.creatures.iter().find(|c| c.id == *id && c.alive) {
                         ui.separator();
                         ui.label("选中生物");
+
+                        // 删除和保存按钮
+                        ui.horizontal(|ui| {
+                            if ui.button("🗑 删除").clicked() {
+                                action.delete_selected = true;
+                            }
+                            if ui.button("💾 保存").clicked() {
+                                self.save_dialog_open = true;
+                                self.save_name = format!("生物_{:08X}", creature.genome_hash);
+                            }
+                        });
+
+                        // 保存对话框
+                        if self.save_dialog_open {
+                            ui.horizontal(|ui| {
+                                ui.label("名称:");
+                                ui.text_edit_singleline(&mut self.save_name);
+                            });
+                            ui.horizontal(|ui| {
+                                if ui.button("确认保存").clicked() {
+                                    action.save_selected = Some(self.save_name.clone());
+                                    self.save_dialog_open = false;
+                                }
+                                if ui.button("取消").clicked() {
+                                    self.save_dialog_open = false;
+                                }
+                            });
+                        }
+
                         ui.separator();
 
                         ui.horizontal(|ui| {
@@ -198,6 +273,8 @@ impl StatsPanel {
                 }
             }
         }
+
+        action
     }
 }
 

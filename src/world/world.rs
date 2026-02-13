@@ -107,6 +107,29 @@ impl World {
         *self.family_stats.entry(family_id).or_insert(0) += 1;
     }
 
+    /// 从模板生成生物
+    pub fn spawn_from_template(&mut self, config: &Config, genome: &crate::neural::Genome, initial_energy: f64) {
+        let mut rng = rand::thread_rng();
+        let x = rng.gen_range(self.viewport_min_x..self.viewport_max_x);
+        let y = rng.gen_range(self.viewport_min_y..self.viewport_max_y);
+        let energy = initial_energy.max(config.initial_energy * 0.5);
+        let family_id = self.next_family_id;
+        self.next_family_id += 1;
+
+        let creature_id = self.next_creature_id;
+        self.next_creature_id += 1;
+        let creature = Creature::new(creature_id, x, y, energy, genome.clone(), family_id);
+        self.creatures.push(creature);
+        *self.family_stats.entry(family_id).or_insert(0) += 1;
+    }
+
+    /// 杀死指定生物
+    pub fn kill_creature(&mut self, id: u64) {
+        if let Some(creature) = self.creatures.iter_mut().find(|c| c.id == id) {
+            creature.alive = false;
+        }
+    }
+
     /// 生成能量粒子（只在视窗范围内生成）
     fn spawn_energy(&mut self, dt: f64, config: &Config) {
         self.energy_spawn_timer += dt;

@@ -50,9 +50,9 @@ impl WorldCanvas {
             ui.allocate_painter(available_size, Sense::click_and_drag());
         let rect = response.rect;
 
-        // 首次渲染时设置默认缩放
+        // 首次渲染时设置默认缩放（0.5 可以看到更大的世界）
         if !self.initialized {
-            self.scale = 1.0;
+            self.scale = 0.5;
             self.initialized = true;
         }
 
@@ -208,7 +208,7 @@ impl WorldCanvas {
             return; // 太密集不绘制
         }
 
-        let grid_color = Color32::from_rgba_unmultiplied(255, 255, 255, 15);
+        let grid_color = Color32::from_rgba_unmultiplied(255, 255, 255, 8);
 
         // 计算可见范围
         let start_x = (-self.offset.x / grid_size).floor() as i32;
@@ -221,7 +221,7 @@ impl WorldCanvas {
             if x >= rect.left() && x <= rect.right() {
                 painter.line_segment(
                     [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-                    Stroke::new(0.5, grid_color),
+                    Stroke::new(0.3, grid_color),
                 );
             }
         }
@@ -231,7 +231,7 @@ impl WorldCanvas {
             if y >= rect.top() && y <= rect.bottom() {
                 painter.line_segment(
                     [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
-                    Stroke::new(0.5, grid_color),
+                    Stroke::new(0.3, grid_color),
                 );
             }
         }

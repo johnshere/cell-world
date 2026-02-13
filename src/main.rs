@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod neural;
 mod render;
+mod store;
 mod world;
 
 use app::CellWorldApp;

@@ -21,7 +21,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
 
 [features]
-default = []
+default = ["persistence"]
 persistence = ["serde", "serde_json"]
 
 [profile.release]

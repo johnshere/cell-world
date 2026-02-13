@@ -2,8 +2,9 @@ use eframe::egui;
 use std::fs::OpenOptions;
 use std::io::Write;
 use crate::config::Config;
+use crate::store::{Store, CreatureTemplate};
 use crate::world::World;
-use crate::render::{WorldCanvas, StatsPanel, Selection, VisibleWorldBounds};
+use crate::render::{WorldCanvas, StatsPanel, Selection, VisibleWorldBounds, PanelAction};
 
 /// 主应用
 pub struct CellWorldApp {
@@ -11,6 +12,7 @@ pub struct CellWorldApp {
     config: Config,
     canvas: WorldCanvas,
     panel: StatsPanel,
+    store: Store,
     paused: bool,
     speed: f64,
     last_update: std::time::Instant,
@@ -46,6 +48,7 @@ impl CellWorldApp {
 
         let config = Config::default();
         let world = World::new(&config);
+        let store = Store::new();
         let now = std::time::Instant::now();
 
         Self {
@@ -53,6 +56,7 @@ impl CellWorldApp {
             config,
             canvas: WorldCanvas::new(),
             panel: StatsPanel::new(),
+            store,
             paused: false,
             speed: 1.0,
             last_update: now,
@@ -150,13 +154,13 @@ impl eframe::App for CellWorldApp {
         self.log_stats();
 
         // 侧边栏面板
-        let mut should_spawn = false;
+        let mut panel_action = PanelAction::default();
+        let mut selection_action = PanelAction::default();
+
         egui::SidePanel::right("panel")
             .min_width(250.0)
             .show(ctx, |ui| {
-                if self.panel.render(ui, self.fps) {
-                    should_spawn = true;
-                }
+                panel_action = self.panel.render(ui, self.fps, &self.store);
                 ui.separator();
 
                 ui.horizontal(|ui| {
@@ -167,17 +171,58 @@ impl eframe::App for CellWorldApp {
 
                 ui.horizontal(|ui| {
                     ui.label("速度:");
+                    if ui.button("⏪").clicked() {
+                        self.speed = (self.speed - 0.2).max(0.1);
+                    }
                     ui.add(egui::Slider::new(&mut self.speed, 0.1..=10.0).logarithmic(true));
+                    if ui.button("⏩").clicked() {
+                        self.speed = (self.speed + 0.2).min(10.0);
+                    }
                 });
 
                 // 显示选中信息
-                self.panel.render_selection(ui, &self.selection, &self.world);
+                selection_action = self.panel.render_selection(ui, &self.selection, &self.world);
             });
 
         // 处理添加生物按钮（每次添加5个）
-        if should_spawn {
+        if let Some(template_name) = panel_action.spawn {
             for _ in 0..5 {
-                self.world.spawn_creature(&self.config);
+                match &template_name {
+                    None => {
+                        // 随机生成
+                        self.world.spawn_creature(&self.config);
+                    }
+                    Some(name) => {
+                        // 从模板生成
+                        if let Some(template) = self.store.get(name) {
+                            self.world.spawn_from_template(&self.config, &template.genome, template.initial_energy);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 处理删除选中
+        if selection_action.delete_selected {
+            if let Selection::Creature(id) = self.selection {
+                self.world.kill_creature(id);
+                self.selection = Selection::None;
+            }
+        }
+
+        // 处理保存选中
+        if let Some(name) = selection_action.save_selected {
+            if let Selection::Creature(id) = self.selection {
+                if let Some(creature) = self.world.creatures.iter().find(|c| c.id == id && c.alive) {
+                    let template = CreatureTemplate {
+                        name,
+                        genome: creature.genome.clone(),
+                        initial_energy: creature.energy,
+                    };
+                    if let Err(e) = self.store.save(template) {
+                        eprintln!("保存失败: {}", e);
+                    }
+                }
             }
         }
 

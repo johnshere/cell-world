@@ -3,8 +3,12 @@ use rand::Rng;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+#[cfg(feature = "persistence")]
+use serde::{Deserialize, Serialize};
+
 /// 节点类型
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
 pub enum NodeType {
     Input,
     Hidden,
@@ -13,6 +17,7 @@ pub enum NodeType {
 
 /// 节点基因
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
 pub struct NodeGene {
     pub id: usize,
     pub node_type: NodeType,
@@ -20,6 +25,7 @@ pub struct NodeGene {
 
 /// 连接基因
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
 pub struct ConnectionGene {
     pub in_node: usize,
     pub out_node: usize,
@@ -29,6 +35,7 @@ pub struct ConnectionGene {
 
 /// 基因组
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
 pub struct Genome {
     pub nodes: Vec<NodeGene>,
     pub connections: Vec<ConnectionGene>,
