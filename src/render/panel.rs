@@ -54,8 +54,8 @@ impl StatsPanel {
         &self.cached_stats
     }
 
-    /// 渲染面板
-    pub fn render(&self, ui: &mut Ui, fps: f64) {
+    /// 渲染面板，返回是否点击了添加生物按钮
+    pub fn render(&self, ui: &mut Ui, fps: f64) -> bool {
         ui.heading("Cell World");
         ui.separator();
 
@@ -72,9 +72,13 @@ impl StatsPanel {
         ui.separator();
         ui.label("种群统计");
 
+        let mut add_clicked = false;
         ui.horizontal(|ui| {
             ui.label("生物数量:");
             ui.label(format!("{}", self.cached_stats.creature_count));
+            if ui.button("+").clicked() {
+                add_clicked = true;
+            }
         });
 
         ui.horizontal(|ui| {
@@ -96,6 +100,8 @@ impl StatsPanel {
             ui.label("最大家族:");
             ui.label(format!("{}", self.cached_stats.largest_family));
         });
+
+        add_clicked
     }
 
     /// 渲染选中信息

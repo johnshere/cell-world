@@ -35,7 +35,7 @@ pub struct World {
 
 impl World {
     pub fn new(config: &Config) -> Self {
-        let mut world = Self {
+        Self {
             creatures: Vec::new(),
             energy_particles: Vec::new(),
             creature_grid: SpatialGrid::new(config.sense_range),
@@ -47,30 +47,12 @@ impl World {
             energy_spawn_timer: 0.0,
             next_creature_id: 0,
             next_energy_id: 0,
-            // 初始视窗使用配置中的默认值
+            // 初始视窗（会在第一帧被实际视窗覆盖）
             viewport_min_x: 0.0,
             viewport_min_y: 0.0,
-            viewport_max_x: config.world_width,
-            viewport_max_y: config.world_height,
-        };
-
-        // 初始化生物
-        let mut rng = rand::thread_rng();
-        for _ in 0..config.initial_creatures {
-            let x = rng.gen_range(0.0..config.world_width);
-            let y = rng.gen_range(0.0..config.world_height);
-            let energy = config.initial_energy * rng.gen_range(0.8..1.2);
-            let family_id = world.next_family_id;
-            world.next_family_id += 1;
-
-            let creature_id = world.next_creature_id;
-            world.next_creature_id += 1;
-            let creature = Creature::random(creature_id, x, y, energy, family_id);
-            world.creatures.push(creature);
-            *world.family_stats.entry(family_id).or_insert(0) += 1;
+            viewport_max_x: 800.0,
+            viewport_max_y: 600.0,
         }
-
-        world
     }
 
     /// 设置视窗范围（世界坐标）
@@ -99,37 +81,30 @@ impl World {
 
         // 清理死亡实体
         self.cleanup();
-
-        // 数量过少时补充新生命
-        self.replenish_creatures(config);
     }
 
-    /// 当生物数量低于阈值时补充新生命（在视窗范围内生成）
-    fn replenish_creatures(&mut self, config: &Config) {
-        const MIN_POPULATION: usize = 20;
-
-        let alive_count = self.creatures.iter().filter(|c| c.alive).count();
-        if alive_count >= MIN_POPULATION {
-            return;
-        }
-
+    /// 在视窗范围内生成一个新生物
+    pub fn spawn_creature(&mut self, config: &Config) {
         let mut rng = rand::thread_rng();
-        let spawn_count = MIN_POPULATION - alive_count;
+        let x = rng.gen_range(self.viewport_min_x..self.viewport_max_x);
+        let y = rng.gen_range(self.viewport_min_y..self.viewport_max_y);
+        let energy = config.initial_energy * rng.gen_range(0.8..1.2);
+        let family_id = self.next_family_id;
+        self.next_family_id += 1;
 
-        for _ in 0..spawn_count {
-            // 在当前视窗范围内生成新生物
-            let x = rng.gen_range(self.viewport_min_x..self.viewport_max_x);
-            let y = rng.gen_range(self.viewport_min_y..self.viewport_max_y);
-            let energy = config.initial_energy * rng.gen_range(0.8..1.2);
-            let family_id = self.next_family_id;
-            self.next_family_id += 1;
-
-            let creature_id = self.next_creature_id;
-            self.next_creature_id += 1;
-            let creature = Creature::random(creature_id, x, y, energy, family_id);
-            self.creatures.push(creature);
-            *self.family_stats.entry(family_id).or_insert(0) += 1;
-        }
+        let creature_id = self.next_creature_id;
+        self.next_creature_id += 1;
+        let creature = Creature::random(
+            creature_id,
+            x,
+            y,
+            energy,
+            family_id,
+            config.initial_connections_min,
+            config.initial_connections_max,
+        );
+        self.creatures.push(creature);
+        *self.family_stats.entry(family_id).or_insert(0) += 1;
     }
 
     /// 生成能量粒子（只在视窗范围内生成）
@@ -185,8 +160,10 @@ impl World {
                 continue;
             }
 
-            // 基础代谢
-            self.creatures[i].energy -= config.base_metabolism * dt;
+            // 基础代谢 = 固定消耗 + 百分比消耗
+            let base_cost = config.base_metabolism * dt;
+            let percent_cost = self.creatures[i].energy * config.percent_metabolism * dt;
+            self.creatures[i].energy -= base_cost + percent_cost;
             self.creatures[i].age += dt;
 
             // 能量耗尽则死亡

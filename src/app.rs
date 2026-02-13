@@ -133,13 +133,14 @@ impl eframe::App for CellWorldApp {
         }
 
         // 使用上一帧的可见范围更新视窗
+        // 第一帧时 last_visible_bounds 为 None，跳过更新，等待渲染获取视窗大小
         if let Some(bounds) = self.last_visible_bounds {
             self.world.set_viewport(bounds.min_x, bounds.min_y, bounds.max_x, bounds.max_y);
-        }
 
-        // 更新世界（如果未暂停）
-        if !self.paused {
-            self.world.update(dt * self.speed, &self.config);
+            // 更新世界（如果未暂停）
+            if !self.paused {
+                self.world.update(dt * self.speed, &self.config);
+            }
         }
 
         // 更新面板缓存
@@ -149,10 +150,13 @@ impl eframe::App for CellWorldApp {
         self.log_stats();
 
         // 侧边栏面板
+        let mut should_spawn = false;
         egui::SidePanel::right("panel")
             .min_width(250.0)
             .show(ctx, |ui| {
-                self.panel.render(ui, self.fps);
+                if self.panel.render(ui, self.fps) {
+                    should_spawn = true;
+                }
                 ui.separator();
 
                 ui.horizontal(|ui| {
@@ -170,11 +174,16 @@ impl eframe::App for CellWorldApp {
                 self.panel.render_selection(ui, &self.selection, &self.world);
             });
 
+        // 处理添加生物按钮（每次添加5个）
+        if should_spawn {
+            for _ in 0..5 {
+                self.world.spawn_creature(&self.config);
+            }
+        }
+
         // 主画布
-        let world_width = self.config.world_width;
-        let world_height = self.config.world_height;
         egui::CentralPanel::default().show(ctx, |ui| {
-            let bounds = self.canvas.render(ui, &self.world, world_width, world_height, &mut self.selection);
+            let bounds = self.canvas.render(ui, &self.world, &mut self.selection);
             self.last_visible_bounds = Some(bounds);
         });
 

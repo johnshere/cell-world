@@ -9,10 +9,6 @@ pub struct WorldCanvas {
     pub offset: Vec2,
     /// 缩放比例
     pub scale: f32,
-    /// 是否正在拖拽
-    dragging: bool,
-    /// 上一帧鼠标位置
-    last_mouse_pos: Option<Pos2>,
     /// 是否已初始化缩放
     initialized: bool,
 }
@@ -31,8 +27,6 @@ impl WorldCanvas {
         Self {
             offset: Vec2::ZERO,
             scale: 1.0,
-            dragging: false,
-            last_mouse_pos: None,
             initialized: false,
         }
     }
@@ -50,22 +44,20 @@ impl WorldCanvas {
     }
 
     /// 渲染世界，返回当前可见的世界坐标范围
-    pub fn render(&mut self, ui: &mut Ui, world: &World, world_width: f64, world_height: f64, selection: &mut Selection) -> VisibleWorldBounds {
+    pub fn render(&mut self, ui: &mut Ui, world: &World, selection: &mut Selection) -> VisibleWorldBounds {
         let available_size = ui.available_size();
         let (response, painter) =
             ui.allocate_painter(available_size, Sense::click_and_drag());
         let rect = response.rect;
 
-        // 首次渲染时自动计算缩放以适应画布
+        // 首次渲染时设置默认缩放
         if !self.initialized {
-            let scale_x = rect.width() / world_width as f32;
-            let scale_y = rect.height() / world_height as f32;
-            self.scale = scale_x.min(scale_y) * 0.95; // 留一点边距
+            self.scale = 1.0;
             self.initialized = true;
         }
 
         // 处理交互
-        self.handle_interaction(&response, ui);
+        self.handle_interaction(&response, ui, rect);
 
         // 处理点击选中
         if response.clicked() {
@@ -80,15 +72,8 @@ impl WorldCanvas {
         // 绘制背景
         painter.rect_filled(rect, 0.0, Color32::from_rgb(10, 10, 20));
 
-        // 绘制世界边界
-        let world_rect = self.world_to_screen_rect(
-            Rect::from_min_size(Pos2::ZERO, Vec2::new(world_width as f32, world_height as f32)),
-            rect,
-        );
-        painter.rect_stroke(world_rect, 0.0, Stroke::new(1.0, Color32::from_rgb(40, 40, 60)));
-
         // 绘制网格
-        self.draw_grid(&painter, rect, world_width, world_height);
+        self.draw_grid(&painter, rect);
 
         // 选中描边颜色
         let selection_stroke = Stroke::new(1.5, Color32::from_rgba_unmultiplied(255, 255, 255, 180));
@@ -186,23 +171,38 @@ impl WorldCanvas {
     }
 
     /// 处理交互
-    fn handle_interaction(&mut self, response: &egui::Response, ui: &Ui) {
+    fn handle_interaction(&mut self, response: &egui::Response, ui: &Ui, rect: Rect) {
         // 拖拽平移
         if response.dragged() {
             let delta = response.drag_delta();
             self.offset += delta;
         }
 
-        // 滚轮缩放
+        // 滚轮缩放（以鼠标位置为中心）
         let scroll_delta = ui.input(|i| i.raw_scroll_delta.y);
         if scroll_delta != 0.0 {
-            let zoom_factor = if scroll_delta > 0.0 { 1.1 } else { 0.9 };
-            self.scale = (self.scale * zoom_factor).clamp(0.1, 10.0);
+            if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                // 鼠标相对于画布的位置
+                let mouse_in_canvas = mouse_pos - rect.min;
+
+                // 鼠标对应的世界坐标
+                let world_x = (mouse_in_canvas.x - self.offset.x) / self.scale;
+                let world_y = (mouse_in_canvas.y - self.offset.y) / self.scale;
+
+                // 缩放
+                let zoom_factor = if scroll_delta > 0.0 { 1.1 } else { 0.9 };
+                let new_scale = (self.scale * zoom_factor).clamp(0.1, 10.0);
+
+                // 调整偏移，使鼠标位置对应的世界坐标不变
+                self.offset.x = mouse_in_canvas.x - world_x * new_scale;
+                self.offset.y = mouse_in_canvas.y - world_y * new_scale;
+                self.scale = new_scale;
+            }
         }
     }
 
     /// 绘制网格
-    fn draw_grid(&self, painter: &egui::Painter, rect: Rect, world_width: f64, world_height: f64) {
+    fn draw_grid(&self, painter: &egui::Painter, rect: Rect) {
         let grid_size = 50.0 * self.scale;
         if grid_size < 10.0 {
             return; // 太密集不绘制
@@ -245,13 +245,6 @@ impl WorldCanvas {
         )
     }
 
-    /// 世界矩形转屏幕矩形
-    fn world_to_screen_rect(&self, world_rect: Rect, screen_rect: Rect) -> Rect {
-        Rect::from_min_max(
-            self.world_to_screen(world_rect.min, screen_rect),
-            self.world_to_screen(world_rect.max, screen_rect),
-        )
-    }
 }
 
 impl Default for WorldCanvas {

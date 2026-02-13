@@ -25,7 +25,6 @@ pub struct ConnectionGene {
     pub out_node: usize,
     pub weight: f64,
     pub enabled: bool,
-    pub innovation: usize,
 }
 
 /// 基因组
@@ -44,8 +43,8 @@ impl Genome {
     pub const FUNCTION_POOL_SIZE: usize = 6;
 
     /// 创建最小基因组（只有输入输出，无隐藏层）
-    /// 必须包含：移动X(0)、移动Y(1)、吸收(2)
-    pub fn random_minimal() -> Self {
+    /// 必须包含：移动X(0)、移动Y(1)、吸收(2)、繁殖(4)
+    pub fn random_minimal(min_connections: usize, max_connections: usize) -> Self {
         let mut rng = rand::thread_rng();
         let mut nodes = Vec::new();
         let mut connections = Vec::new();
@@ -59,7 +58,7 @@ impl Genome {
         }
 
         // 必须包含的核心功能：移动X(0)、移动Y(1)、吸收(2)、繁殖(4)
-        let mut output_map = vec![0, 1, 2, 4];
+        let output_map = vec![0, 1, 2, 4];
 
         // 为每个输出创建节点和连接
         for (i, &_func_id) in output_map.iter().enumerate() {
@@ -70,7 +69,7 @@ impl Genome {
             });
 
             // 随机连接一些输入到这个输出
-            let connect_count = rng.gen_range(2..=5);
+            let connect_count = rng.gen_range(min_connections..=max_connections);
             for _ in 0..connect_count {
                 let in_node = rng.gen_range(0..Self::INPUT_SIZE);
                 connections.push(ConnectionGene {
@@ -78,7 +77,6 @@ impl Genome {
                     out_node: output_id,
                     weight: rng.gen_range(-1.0..1.0),
                     enabled: true,
-                    innovation: connections.len(),
                 });
             }
         }
@@ -86,12 +84,12 @@ impl Genome {
         Self {
             nodes,
             connections,
-            output_map: output_map.clone(),
-            next_node_id: Self::INPUT_SIZE + output_map.len(),
+            output_map,
+            next_node_id: Self::INPUT_SIZE + 4,
         }
     }
 
-    /// 变异
+    /// 变异（所有变异逻辑使用同一个概率）
     pub fn mutate(&self, rate: f64) -> Self {
         let mut rng = rand::thread_rng();
         let mut child = self.clone();
@@ -111,22 +109,22 @@ impl Genome {
         }
 
         // 添加连接变异
-        if rng.gen::<f64>() < rate * 0.3 {
+        if rng.gen::<f64>() < rate {
             child.mutate_add_connection();
         }
 
         // 添加节点变异
-        if rng.gen::<f64>() < rate * 0.1 {
+        if rng.gen::<f64>() < rate {
             child.mutate_add_node();
         }
 
         // 添加输出变异（解锁新功能）
-        if rng.gen::<f64>() < rate * 0.05 {
+        if rng.gen::<f64>() < rate {
             child.mutate_add_output();
         }
 
         // 禁用/启用连接变异
-        if rng.gen::<f64>() < rate * 0.1 {
+        if rng.gen::<f64>() < rate {
             if let Some(conn) = child.connections.choose_mut(&mut rng) {
                 conn.enabled = !conn.enabled;
             }
@@ -176,7 +174,6 @@ impl Genome {
                     out_node,
                     weight: rng.gen_range(-1.0..1.0),
                     enabled: true,
-                    innovation: self.connections.len(),
                 });
                 break;
             }
@@ -220,7 +217,6 @@ impl Genome {
             out_node: new_node_id,
             weight: 1.0, // 保持原信号
             enabled: true,
-            innovation: self.connections.len(),
         });
 
         self.connections.push(ConnectionGene {
@@ -228,7 +224,6 @@ impl Genome {
             out_node: old_conn.out_node,
             weight: old_conn.weight,
             enabled: true,
-            innovation: self.connections.len(),
         });
     }
 
@@ -267,7 +262,6 @@ impl Genome {
                 out_node: new_node_id,
                 weight: rng.gen_range(-1.0..1.0),
                 enabled: true,
-                innovation: self.connections.len(),
             });
         }
     }
@@ -313,8 +307,4 @@ impl Genome {
         }
     }
 
-    /// 获取输出节点数量
-    pub fn output_count(&self) -> usize {
-        self.output_map.len()
-    }
 }

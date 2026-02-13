@@ -8,7 +8,12 @@
 
 - **语言**：Rust
 - **渲染**：egui + eframe
-- **并行**：rayon（可选）
+
+### 世界特性
+
+- **无限世界**：没有边界，生物可自由移动
+- **动态视窗**：支持拖拽平移、鼠标滚轮缩放（以鼠标位置为中心）
+- **视窗内生成**：能量粒子仅在当前可见视窗范围内生成
 
 ---
 
@@ -33,8 +38,8 @@
 ## 三、物理约束（仅此三条）
 
 ```
-1. 存在消耗：活着每秒消耗能量
-2. 繁殖成本：繁殖时分走能量给子代
+1. 存在消耗：活着每秒消耗能量（基础消耗 + 百分比消耗）
+2. 繁殖成本：繁殖时分走 45% 能量给子代
 3. 死亡条件：能量 ≤ 0 → 死亡
 ```
 
@@ -55,11 +60,13 @@
 
 ### 初始状态
 
-所有生物只有：
+所有生物初始拥有：
 - 输出[0] → 移动X
 - 输出[1] → 移动Y
+- 输出[2] → 吸收
+- 输出[3] → 繁殖
 
-其他功能需要通过变异获得。
+释放(3)和能量转移(5)需要通过变异解锁。
 
 ---
 
@@ -122,20 +129,20 @@ struct ConnectionGene {
     out_node: usize,
     weight: f64,
     enabled: bool,
-    innovation: usize,  // 创新编号，用于交叉对齐
 }
 ```
 
 ### 变异类型
 
-| 变异 | 概率 | 说明 |
-|------|------|------|
-| 权重微调 | 80% | weight ± 0.2 |
-| 权重重置 | 10% | 随机新值 |
-| 新增连接 | 5% | 两个现有节点间 |
-| 新增节点 | 3% | 在现有连接中插入 |
-| 新增输出 | 1% | 扩展输出维度 |
-| 改变映射 | 1% | 某输出改为其他功能 |
+所有变异使用统一的 `mutation_rate`（默认 5%）：
+
+| 变异 | 触发概率 | 说明 |
+|------|----------|------|
+| 权重变异 | 5% 每条连接 | 90% 微调 ±0.5，10% 重置 |
+| 新增连接 | 5% | 随机连接两个节点 |
+| 新增节点 | 5% | 拆分现有连接，插入隐藏节点 |
+| 新增输出 | 5% | 解锁新功能（从功能池选择） |
+| 开关连接 | 5% | 启用/禁用随机连接 |
 
 ---
 
@@ -168,27 +175,34 @@ struct Creature {
 
 ```rust
 struct World {
-    // 尺寸
-    width: f64,
-    height: f64,
-
     // 实体
     creatures: Vec<Creature>,
     energy_particles: Vec<EnergyParticle>,
 
     // 空间索引（加速邻居查询）
-    grid: SpatialGrid,
+    creature_grid: SpatialGrid,
+    energy_grid: SpatialGrid,
+
+    // 视窗范围（世界坐标，用于能量生成）
+    viewport_min_x: f64,
+    viewport_min_y: f64,
+    viewport_max_x: f64,
+    viewport_max_y: f64,
 
     // 统计
     time: f64,
     family_stats: HashMap<usize, usize>,
+    extinct_families: usize,
 }
 
 struct EnergyParticle {
+    id: u64,
     x: f64,
     y: f64,
     energy: f64,
     lifetime: f64,
+    age: f64,
+    alive: bool,
 }
 ```
 
@@ -226,11 +240,11 @@ struct EnergyParticle {
 ### 繁殖
 
 ```
-条件：输出"繁殖" > 0.5 且 能量 > 繁殖阈值
+条件：输出"繁殖" > 0.2 且 能量 > 繁殖阈值(35)
 效果：
-  - 创建子代，位置在父代附近
-  - 子代继承父代基因组（带变异）
-  - 子代获得父代 50% 能量
+  - 创建子代，位置在父代附近 ±10 像素
+  - 子代继承父代基因组（带变异，变异率 5%）
+  - 子代获得父代 45% 能量
   - 子代继承父代 family_id
 ```
 
@@ -243,13 +257,16 @@ struct EnergyParticle {
 | 行为 | 消耗 |
 |------|------|
 | 存在（基础代谢） | 0.1 / 秒 |
-| 移动 | 0.5 × 距离 |
-| 繁殖 | 分 50% 给子代 |
+| 存在（百分比代谢） | 0.5% × 当前能量 / 秒 |
+| 移动 | 0.2 × 距离 |
+| 繁殖 | 分 45% 给子代 |
 | 吸收/释放/转移 | 无额外消耗 |
+
+> 百分比代谢防止高能量个体过于懒惰
 
 ### 来源
 
-- 阳光：世界定期生成能量粒子
+- 阳光：视窗内定期生成能量粒子（每 0.3 秒生成 3 个，每个 30 能量）
 - 掠夺：从其他生物获取
 
 ---
@@ -314,12 +331,13 @@ fn creature_color(creature: &Creature) -> Color32 {
 ```
 cell-world/
 ├── Cargo.toml
-├── README.md
+├── CLAUDE.md              # Claude Code 开发指南
 ├── docs/
 │   └── DESIGN.md          # 本文档
 └── src/
     ├── main.rs            # 入口
     ├── app.rs             # egui 应用
+    ├── config.rs          # 配置参数
     ├── world/
     │   ├── mod.rs
     │   ├── world.rs       # 世界管理
@@ -329,13 +347,11 @@ cell-world/
     ├── neural/
     │   ├── mod.rs
     │   ├── network.rs     # 神经网络
-    │   ├── genome.rs      # 基因组
-    │   └── neat.rs        # NEAT 算法
-    ├── render/
-    │   ├── mod.rs
-    │   ├── canvas.rs      # 主画布
-    │   └── panel.rs       # 信息面板
-    └── config.rs          # 配置参数
+    │   └── genome.rs      # 基因组 + NEAT 变异
+    └── render/
+        ├── mod.rs
+        ├── canvas.rs      # 主画布（拖拽缩放）
+        └── panel.rs       # 信息面板
 ```
 
 ---
@@ -344,33 +360,32 @@ cell-world/
 
 ```rust
 pub struct Config {
-    // 世界
-    pub world_width: f64,
-    pub world_height: f64,
-
     // 初始化
-    pub initial_creatures: usize,
-    pub initial_energy: f64,
+    pub initial_energy: f64,           // 60.0
 
-    // 能量
-    pub energy_spawn_interval: f64,
-    pub energy_spawn_count: usize,
-    pub energy_particle_value: f64,
-    pub energy_particle_lifetime: f64,
+    // 能量生成
+    pub energy_spawn_interval: f64,    // 0.3 秒
+    pub energy_spawn_count: usize,     // 3 个
+    pub energy_particle_value: f64,    // 30.0
+    pub energy_particle_lifetime: f64, // 25.0 秒
 
-    // 生物
-    pub base_metabolism: f64,
-    pub move_cost: f64,
-    pub reproduce_threshold: f64,
-    pub reproduce_energy_ratio: f64,
+    // 代谢
+    pub base_metabolism: f64,          // 0.1 / 秒
+    pub percent_metabolism: f64,       // 0.005 (0.5% / 秒)
+    pub move_cost: f64,                // 0.2 / 距离
+
+    // 繁殖
+    pub reproduce_threshold: f64,      // 35.0
+    pub reproduce_energy_ratio: f64,   // 0.45 (45%)
 
     // 感知
-    pub sense_range: f64,
-    pub contact_range: f64,
+    pub sense_range: f64,              // 50.0
+    pub contact_range: f64,            // 8.0
 
-    // 进化
-    pub mutation_rate: f64,
-    pub weight_mutation_range: f64,
+    // 进化（统一变异率）
+    pub mutation_rate: f64,            // 0.05 (5%)
+    pub initial_connections_min: usize, // 3
+    pub initial_connections_max: usize, // 6
 }
 ```
 
@@ -399,27 +414,29 @@ pub struct Config {
 
 ## 十六、里程碑
 
-### v0.1 - 基础框架
-- [ ] Rust 项目结构
-- [ ] egui 窗口和基本渲染
-- [ ] 世界、生物、能量粒子基础类
+### v0.1 - 基础框架 ✅
+- [x] Rust 项目结构
+- [x] egui 窗口和基本渲染
+- [x] 世界、生物、能量粒子基础类
 
-### v0.2 - 简单神经网络
-- [ ] 固定结构神经网络（17→8→2）
-- [ ] 基因组 = 权重
-- [ ] 基础进化（权重变异）
+### v0.2 - 简单神经网络 ✅
+- [x] 固定结构神经网络（17→隐藏→输出）
+- [x] 基因组 = 节点 + 连接
+- [x] 基础进化（权重变异）
 
-### v0.3 - NEAT
-- [ ] 结构进化（新增节点、连接）
-- [ ] 输出维度扩展
-- [ ] 功能池映射
+### v0.3 - NEAT ✅
+- [x] 结构进化（新增节点、连接）
+- [x] 输出维度扩展
+- [x] 功能池映射
 
-### v0.4 - 完整系统
-- [ ] 所有功能池实现
-- [ ] 交互规则完善
-- [ ] 统计和可视化
+### v0.4 - 完整系统 ✅
+- [x] 所有功能池实现（6 个功能）
+- [x] 交互规则完善
+- [x] 统计和可视化
+- [x] 无限世界 + 视窗缩放
 
 ### v1.0 - 优化
-- [ ] 性能优化（空间索引、并行）
+- [x] 空间索引（FxHashMap）
+- [ ] 并行计算（rayon）
 - [ ] 参数调优
 - [ ] 长时间运行稳定性
