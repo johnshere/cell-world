@@ -1,4 +1,4 @@
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::genome::{Genome, NodeType};
 
@@ -8,12 +8,14 @@ pub struct Network {
     node_values: FxHashMap<usize, f64>,
     /// 拓扑排序后的节点顺序
     eval_order: Vec<usize>,
-    /// 连接列表 (in_node, out_node, weight)
-    connections: Vec<(usize, usize, f64)>,
-    /// 输入节点 ID
+    /// 输入节点 ID（用于输出收集）
     input_ids: Vec<usize>,
+    /// 输入节点 ID 集合（用于 O(1) 查询）
+    input_ids_set: FxHashSet<usize>,
     /// 输出节点 ID
     output_ids: Vec<usize>,
+    /// 节点的输入连接：node_id -> [(from_node, weight), ...]
+    node_inputs: FxHashMap<usize, Vec<(usize, f64)>>,
 }
 
 impl Network {
@@ -21,25 +23,32 @@ impl Network {
     pub fn from_genome(genome: &Genome) -> Self {
         let mut node_values = FxHashMap::default();
         let mut input_ids = Vec::new();
+        let mut input_ids_set = FxHashSet::default();
         let mut output_ids = Vec::new();
 
         // 收集节点
         for node in &genome.nodes {
             node_values.insert(node.id, 0.0);
             match node.node_type {
-                NodeType::Input => input_ids.push(node.id),
+                NodeType::Input => {
+                    input_ids.push(node.id);
+                    input_ids_set.insert(node.id);
+                }
                 NodeType::Output => output_ids.push(node.id),
                 NodeType::Hidden => {}
             }
         }
 
-        // 收集启用的连接
-        let connections: Vec<(usize, usize, f64)> = genome
-            .connections
-            .iter()
-            .filter(|c| c.enabled)
-            .map(|c| (c.in_node, c.out_node, c.weight))
-            .collect();
+        // 构建节点输入连接映射（邻接表）
+        let mut node_inputs: FxHashMap<usize, Vec<(usize, f64)>> = FxHashMap::default();
+        for conn in &genome.connections {
+            if conn.enabled {
+                node_inputs
+                    .entry(conn.out_node)
+                    .or_default()
+                    .push((conn.in_node, conn.weight));
+            }
+        }
 
         // 拓扑排序
         let eval_order = Self::topological_sort(genome);
@@ -47,9 +56,10 @@ impl Network {
         Self {
             node_values,
             eval_order,
-            connections,
             input_ids,
+            input_ids_set,
             output_ids,
+            node_inputs,
         }
     }
 
@@ -117,15 +127,15 @@ impl Network {
 
         // 按拓扑顺序计算
         for &node_id in &self.eval_order {
-            // 跳过输入节点
-            if self.input_ids.contains(&node_id) {
+            // 跳过输入节点（O(1) 查询）
+            if self.input_ids_set.contains(&node_id) {
                 continue;
             }
 
-            // 计算输入和
+            // 计算输入和（直接从邻接表获取，无需遍历所有连接）
             let mut sum = 0.0;
-            for &(in_node, out_node, weight) in &self.connections {
-                if out_node == node_id {
+            if let Some(inputs_list) = self.node_inputs.get(&node_id) {
+                for &(in_node, weight) in inputs_list {
                     let in_value = self.node_values.get(&in_node).copied().unwrap_or(0.0);
                     sum += in_value * weight;
                 }

@@ -1,5 +1,11 @@
 /// 世界配置
 pub struct Config {
+    /// 初始模拟速度
+    pub initial_speed: f64,
+
+    /// 最小生物数量（低于此值自动补充）
+    pub min_creatures: usize,
+
     /// 初始能量
     pub initial_energy: f64,
 
@@ -34,30 +40,40 @@ pub struct Config {
     pub initial_connections_min: usize,
     /// 初始连接数最大值
     pub initial_connections_max: usize,
+    /// 种族相似度阈值（高于此值视为同一种族）
+    pub species_similarity_threshold: f64,
+    /// 初始世界缩放比例
+    pub initial_scale: f32,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            initial_energy: 60.0,
+            initial_speed: 3.5,  // 初始倍速，加速演化
 
-            energy_spawn_interval: 0.2,
-            energy_spawn_count: 1,
-            energy_particle_value: 45.0,
-            energy_particle_lifetime: 30.0,
+            min_creatures: 40,  // 更大种群，增加有用变异概率
 
-            base_metabolism: 0.1,
-            percent_metabolism: 0.005,  // 每秒消耗0.5%的能量
+            initial_energy: 70.0,  // 更多初始能量，延长生存时间
+
+            energy_spawn_interval: 0.15,  // 更频繁生成
+            energy_spawn_count: 2,  // 每次生成更多
+            energy_particle_value: 50.0,  // 每个粒子更多能量
+            energy_particle_lifetime: 40.0,  // 能量存在更久
+
+            base_metabolism: 0.05,  // 降低基础代谢
+            percent_metabolism: 0.002,  // 降低百分比代谢
             move_cost: 0.1,
-            reproduce_threshold: 35.0,
-            reproduce_energy_ratio: 0.35,
+            reproduce_threshold: 28.0,  // 降低繁殖阈值，让更多生物能繁殖
+            reproduce_energy_ratio: 0.4,  // 子代获得40%能量
 
             sense_range: 50.0,
             contact_range: 8.0,
 
-            mutation_rate: 0.05,
-            initial_connections_min: 3,
-            initial_connections_max: 6,
+            mutation_rate: 0.15,  // 提高变异率，加速结构探索
+            initial_connections_min: 6,  // 更多初始连接，增加有用组合概率
+            initial_connections_max: 12,
+            species_similarity_threshold: 0.6,  // 基因相似度 >= 60% 视为同一种族
+            initial_scale: 0.6,  // 初始世界缩放比例
         }
     }
 }

@@ -51,6 +51,7 @@ impl Genome {
 
     /// 创建最小基因组（只有输入输出，无隐藏层）
     /// 必须包含：移动X(0)、移动Y(1)、吸收(2)、繁殖(4)
+    /// 所有连接完全随机，让行为通过进化自然涌现
     pub fn random_minimal(min_connections: usize, max_connections: usize) -> Self {
         let mut rng = rand::thread_rng();
         let mut nodes = Vec::new();
@@ -67,7 +68,7 @@ impl Genome {
         // 必须包含的核心功能：移动X(0)、移动Y(1)、吸收(2)、繁殖(4)
         let output_map = vec![0, 1, 2, 4];
 
-        // 为每个输出创建节点和连接
+        // 为每个输出创建节点和随机连接
         for (i, &_func_id) in output_map.iter().enumerate() {
             let output_id = Self::INPUT_SIZE + i;
             nodes.push(NodeGene {

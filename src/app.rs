@@ -4,7 +4,7 @@ use std::io::Write;
 use crate::config::Config;
 use crate::store::{Store, CreatureTemplate};
 use crate::world::World;
-use crate::render::{WorldCanvas, StatsPanel, Selection, VisibleWorldBounds, PanelAction};
+use crate::render::{WorldCanvas, StatsPanel, Selection, VisibleWorldBounds, PanelAction, RenderContext};
 
 /// 主应用
 pub struct CellWorldApp {
@@ -26,6 +26,9 @@ pub struct CellWorldApp {
     selection: Selection,
     // 上一帧的可见范围
     last_visible_bounds: Option<VisibleWorldBounds>,
+    // 渲染上下文缓存
+    render_ctx_cache: Option<RenderContext>,
+    last_render_ctx_update: std::time::Instant,
 }
 
 impl CellWorldApp {
@@ -51,14 +54,17 @@ impl CellWorldApp {
         let store = Store::new();
         let now = std::time::Instant::now();
 
+        let initial_speed = config.initial_speed;
+        let initial_scale = config.initial_scale;
+
         Self {
             world,
             config,
-            canvas: WorldCanvas::new(),
+            canvas: WorldCanvas::new(initial_scale),
             panel: StatsPanel::new(),
             store,
             paused: false,
-            speed: 1.0,
+            speed: initial_speed,
             last_update: now,
             fps: 0.0,
             frame_count: 0,
@@ -67,6 +73,8 @@ impl CellWorldApp {
             log_initialized: false,
             selection: Selection::None,
             last_visible_bounds: None,
+            render_ctx_cache: None,
+            last_render_ctx_update: now,
         }
     }
 }
@@ -94,8 +102,8 @@ impl CellWorldApp {
                 .open(log_path)
             {
                 let _ = writeln!(file, "# Cell World 运行日志\n");
-                let _ = writeln!(file, "| 时间(s) | 生物数 | 能量粒子 | 存活家族 | 灭绝家族 | 最大族 | 最大代 |");
-                let _ = writeln!(file, "|---------|--------|----------|----------|----------|--------|--------|");
+                let _ = writeln!(file, "| 时间(s) | FPS | 生物 | 能量 | 存活 | 灭绝 | 最大族 | 最大代 | 均能 | 种族 | 最多种 | 释放 | 转移 |");
+                let _ = writeln!(file, "|---------|-----|------|------|------|------|--------|--------|------|------|--------|------|------|");
             }
             self.log_initialized = true;
         }
@@ -108,14 +116,20 @@ impl CellWorldApp {
         {
             let _ = writeln!(
                 file,
-                "| {:.0} | {} | {} | {} | {} | {} | {} |",
+                "| {:.0} | {:.0} | {} | {} | {} | {} | {} | {} | {:.0} | {} | {} | {} | {} |",
                 stats.time,
+                stats.fps,
                 stats.creature_count,
                 stats.energy_particle_count,
                 stats.alive_families,
                 stats.extinct_families,
                 stats.largest_family,
-                stats.max_generation
+                stats.max_generation,
+                stats.avg_energy,
+                stats.species_count,
+                stats.largest_species,
+                stats.release_unlocked,
+                stats.transfer_unlocked
             );
         }
     }
@@ -149,7 +163,7 @@ impl eframe::App for CellWorldApp {
         }
 
         // 更新面板缓存
-        self.panel.update(&self.world);
+        self.panel.update(&self.world, self.config.species_similarity_threshold, self.fps, now);
 
         // 每10秒记录一次日志
         self.log_stats();
@@ -211,7 +225,17 @@ impl eframe::App for CellWorldApp {
 
         // 主画布
         egui::CentralPanel::default().show(ctx, |ui| {
-            let bounds = self.canvas.render(ui, &self.world, &mut self.selection);
+            // 每0.5秒（真实时间）更新一次渲染上下文（避免频繁计算O(n²)的种族聚类）
+            if self.render_ctx_cache.is_none() || now.duration_since(self.last_render_ctx_update).as_secs_f64() >= 0.5 {
+                let (creature_species, top_family_ids) = self.world.get_render_data(self.config.species_similarity_threshold);
+                self.render_ctx_cache = Some(RenderContext {
+                    creature_species,
+                    top_family_ids,
+                });
+                self.last_render_ctx_update = now;
+            }
+            let render_ctx = self.render_ctx_cache.as_ref().unwrap();
+            let bounds = self.canvas.render(ui, &self.world, &mut self.selection, render_ctx);
             self.last_visible_bounds = Some(bounds);
         });
 

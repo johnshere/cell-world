@@ -70,6 +70,9 @@ impl World {
         // 生成能量粒子
         self.spawn_energy(dt, config);
 
+        // 自动补充生物
+        self.replenish_creatures(config);
+
         // 重建空间索引
         self.rebuild_spatial_index();
 
@@ -81,6 +84,17 @@ impl World {
 
         // 清理死亡实体
         self.cleanup();
+    }
+
+    /// 当生物数量低于最小值时自动补充
+    fn replenish_creatures(&mut self, config: &Config) {
+        let alive_count = self.creatures.iter().filter(|c| c.alive).count();
+        while alive_count < config.min_creatures {
+            self.spawn_creature(config);
+            if self.creatures.iter().filter(|c| c.alive).count() >= config.min_creatures {
+                break;
+            }
+        }
     }
 
     /// 在视窗范围内生成一个新生物
@@ -210,9 +224,9 @@ impl World {
     /// 0-7: 8方向能量感知
     /// 8-15: 8方向邻居相似度 (0=无邻居, >0=有邻居且为相似度)
     /// 16: 自身能量
-    fn perceive(&self, creature_idx: usize, config: &Config) -> Vec<f64> {
+    fn perceive(&self, creature_idx: usize, config: &Config) -> [f64; 17] {
         let creature = &self.creatures[creature_idx];
-        let mut input = vec![0.0; 17];
+        let mut input = [0.0; 17];  // 栈分配，避免堆分配开销
 
         // 8方向
         let directions: [(f64, f64); 8] = [
@@ -475,25 +489,207 @@ impl World {
     }
 
     /// 获取统计信息
-    pub fn stats(&self) -> WorldStats {
+    pub fn stats(&self, species_threshold: f64) -> WorldStats {
+        let alive_creatures: Vec<_> = self.creatures.iter().filter(|c| c.alive).collect();
         let alive_families = self.family_stats.len();
         let largest_family = self.family_stats.values().max().copied().unwrap_or(0);
-        let max_generation = self.creatures.iter()
-            .filter(|c| c.alive)
+        let max_generation = alive_creatures.iter()
             .map(|c| c.generation)
             .max()
             .unwrap_or(0);
+        let avg_energy = if alive_creatures.is_empty() {
+            0.0
+        } else {
+            alive_creatures.iter().map(|c| c.energy).sum::<f64>() / alive_creatures.len() as f64
+        };
+
+        // 统计解锁高级功能的生物数
+        let transfer_unlocked = alive_creatures.iter()
+            .filter(|c| c.genome.output_map.contains(&5))
+            .count();
+        let release_unlocked = alive_creatures.iter()
+            .filter(|c| c.genome.output_map.contains(&3))
+            .count();
+
+        // 计算种族分组（使用并查集思想）
+        let (species_count, largest_species, top_species) = self.calculate_species(&alive_creatures, species_threshold);
+
+        // 计算家族前三
+        let mut family_vec: Vec<_> = self.family_stats.iter()
+            .map(|(&id, &count)| RankedEntry { id, count })
+            .collect();
+        family_vec.sort_by(|a, b| b.count.cmp(&a.count));
+        let top_families: Vec<_> = family_vec.into_iter().take(3).collect();
 
         WorldStats {
             time: self.time,
-            creature_count: self.creatures.len(),
+            creature_count: alive_creatures.len(),
             energy_particle_count: self.energy_particles.len(),
             alive_families,
             extinct_families: self.extinct_families,
             largest_family,
             max_generation,
+            avg_energy,
+            transfer_unlocked,
+            release_unlocked,
+            species_count,
+            largest_species,
+            top_families,
+            top_species,
         }
     }
+
+    /// 获取渲染上下文数据（种族映射和前三家族ID）
+    /// 返回 (creature_index -> 种族最小基因哈希, 前三家族ID)
+    pub fn get_render_data(&self, threshold: f64) -> (FxHashMap<usize, u64>, Vec<usize>) {
+        let alive_indices: Vec<usize> = self.creatures.iter()
+            .enumerate()
+            .filter(|(_, c)| c.alive)
+            .map(|(i, _)| i)
+            .collect();
+
+        if alive_indices.is_empty() {
+            return (FxHashMap::default(), Vec::new());
+        }
+
+        let n = alive_indices.len();
+
+        // 并查集优化聚类（O(n²·α(n)) 代替 O(n³)）
+        let mut parent: Vec<usize> = (0..n).collect();
+        let mut rank: Vec<usize> = vec![0; n];
+
+        fn find(parent: &mut [usize], x: usize) -> usize {
+            if parent[x] != x {
+                parent[x] = find(parent, parent[x]);
+            }
+            parent[x]
+        }
+
+        fn union(parent: &mut [usize], rank: &mut [usize], x: usize, y: usize) {
+            let root_x = find(parent, x);
+            let root_y = find(parent, y);
+            if root_x != root_y {
+                if rank[root_x] < rank[root_y] {
+                    parent[root_x] = root_y;
+                } else if rank[root_x] > rank[root_y] {
+                    parent[root_y] = root_x;
+                } else {
+                    parent[root_y] = root_x;
+                    rank[root_x] += 1;
+                }
+            }
+        }
+
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let ci = &self.creatures[alive_indices[i]];
+                let cj = &self.creatures[alive_indices[j]];
+                if ci.genome.similarity(&cj.genome) >= threshold {
+                    union(&mut parent, &mut rank, i, j);
+                }
+            }
+        }
+
+        // 计算每个种族的最小基因哈希（用于稳定的颜色标识）
+        let mut species_min_hash: FxHashMap<usize, u64> = FxHashMap::default();
+        for (i, &idx) in alive_indices.iter().enumerate() {
+            let root = find(&mut parent, i);
+            let hash = self.creatures[idx].genome_hash;
+            species_min_hash
+                .entry(root)
+                .and_modify(|min| *min = (*min).min(hash))
+                .or_insert(hash);
+        }
+
+        // 构建 creature_index -> 种族最小基因哈希 映射
+        let mut creature_species: FxHashMap<usize, u64> = FxHashMap::default();
+        for (i, &idx) in alive_indices.iter().enumerate() {
+            let root = find(&mut parent, i);
+            let min_hash = species_min_hash[&root];
+            creature_species.insert(idx, min_hash);
+        }
+
+        // 获取前三家族ID
+        let mut family_vec: Vec<_> = self.family_stats.iter()
+            .map(|(&id, &count)| (id, count))
+            .collect();
+        family_vec.sort_by(|a, b| b.1.cmp(&a.1));
+        let top_family_ids: Vec<usize> = family_vec.into_iter().take(3).map(|(id, _)| id).collect();
+
+        (creature_species, top_family_ids)
+    }
+
+    /// 计算种族分组（使用并查集优化，O(n²·α(n)) 代替 O(n³)）
+    fn calculate_species(&self, alive_creatures: &[&Creature], threshold: f64) -> (usize, usize, Vec<RankedEntry>) {
+        if alive_creatures.is_empty() {
+            return (0, 0, Vec::new());
+        }
+
+        let n = alive_creatures.len();
+
+        // 并查集：parent[i] 指向父节点，rank[i] 用于优化合并
+        let mut parent: Vec<usize> = (0..n).collect();
+        let mut rank: Vec<usize> = vec![0; n];
+
+        // 查找根节点（带路径压缩）
+        fn find(parent: &mut [usize], x: usize) -> usize {
+            if parent[x] != x {
+                parent[x] = find(parent, parent[x]);
+            }
+            parent[x]
+        }
+
+        // 合并两个集合（按秩合并）
+        fn union(parent: &mut [usize], rank: &mut [usize], x: usize, y: usize) {
+            let root_x = find(parent, x);
+            let root_y = find(parent, y);
+            if root_x != root_y {
+                if rank[root_x] < rank[root_y] {
+                    parent[root_x] = root_y;
+                } else if rank[root_x] > rank[root_y] {
+                    parent[root_y] = root_x;
+                } else {
+                    parent[root_y] = root_x;
+                    rank[root_x] += 1;
+                }
+            }
+        }
+
+        // 聚类：将相似的生物归为同一种族
+        for i in 0..n {
+            for j in (i + 1)..n {
+                if alive_creatures[i].genome.similarity(&alive_creatures[j].genome) >= threshold {
+                    union(&mut parent, &mut rank, i, j);
+                }
+            }
+        }
+
+        // 统计各种族数量
+        let mut species_counts: FxHashMap<usize, usize> = FxHashMap::default();
+        for i in 0..n {
+            let root = find(&mut parent, i);
+            *species_counts.entry(root).or_insert(0) += 1;
+        }
+
+        let species_count = species_counts.len();
+        let largest_species = species_counts.values().max().copied().unwrap_or(0);
+
+        // 计算种族前三
+        let mut species_vec: Vec<_> = species_counts.into_iter()
+            .map(|(id, count)| RankedEntry { id, count })
+            .collect();
+        species_vec.sort_by(|a, b| b.count.cmp(&a.count));
+        let top_species: Vec<_> = species_vec.into_iter().take(3).collect();
+
+        (species_count, largest_species, top_species)
+    }
+}
+
+/// 排名数据
+#[derive(Clone, Default)]
+pub struct RankedEntry {
+    pub id: usize,
+    pub count: usize,
 }
 
 /// 世界统计
@@ -505,4 +701,13 @@ pub struct WorldStats {
     pub extinct_families: usize,
     pub largest_family: usize,
     pub max_generation: usize,
+    pub avg_energy: f64,
+    // 行为统计
+    pub transfer_unlocked: usize,  // 解锁转移功能的生物数
+    pub release_unlocked: usize,   // 解锁释放功能的生物数
+    // 种族统计
+    pub species_count: usize,      // 种族数量
+    pub largest_species: usize,    // 最大种族数量
+    pub top_families: Vec<RankedEntry>,   // 前三家族
+    pub top_species: Vec<RankedEntry>,    // 前三种族
 }

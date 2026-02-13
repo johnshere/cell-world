@@ -1,7 +1,16 @@
-use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2, epaint::PathShape};
+use rustc_hash::FxHashMap;
 
 use crate::world::World;
 use super::Selection;
+
+/// 渲染上下文（种族颜色、家族排名等）
+pub struct RenderContext {
+    /// 生物索引 -> 种族最小基因哈希（用于稳定颜色）
+    pub creature_species: FxHashMap<usize, u64>,
+    /// 前三家族ID
+    pub top_family_ids: Vec<usize>,
+}
 
 /// 世界画布渲染器
 pub struct WorldCanvas {
@@ -11,6 +20,8 @@ pub struct WorldCanvas {
     pub scale: f32,
     /// 是否已初始化缩放
     initialized: bool,
+    /// 初始缩放比例
+    initial_scale: f32,
 }
 
 /// 可见世界范围
@@ -23,11 +34,12 @@ pub struct VisibleWorldBounds {
 }
 
 impl WorldCanvas {
-    pub fn new() -> Self {
+    pub fn new(initial_scale: f32) -> Self {
         Self {
             offset: Vec2::ZERO,
             scale: 1.0,
             initialized: false,
+            initial_scale,
         }
     }
 
@@ -44,15 +56,15 @@ impl WorldCanvas {
     }
 
     /// 渲染世界，返回当前可见的世界坐标范围
-    pub fn render(&mut self, ui: &mut Ui, world: &World, selection: &mut Selection) -> VisibleWorldBounds {
+    pub fn render(&mut self, ui: &mut Ui, world: &World, selection: &mut Selection, ctx: &RenderContext) -> VisibleWorldBounds {
         let available_size = ui.available_size();
         let (response, painter) =
             ui.allocate_painter(available_size, Sense::click_and_drag());
         let rect = response.rect;
 
-        // 首次渲染时设置默认缩放（0.5 可以看到更大的世界）
+        // 首次渲染时设置默认缩放
         if !self.initialized {
-            self.scale = 0.5;
+            self.scale = self.initial_scale;
             self.initialized = true;
         }
 
@@ -98,20 +110,34 @@ impl WorldCanvas {
         }
 
         // 绘制生物
-        for creature in &world.creatures {
+        for (idx, creature) in world.creatures.iter().enumerate() {
             if !creature.alive {
                 continue;
             }
             let pos = self.world_to_screen(Pos2::new(creature.x as f32, creature.y as f32), rect);
             if rect.contains(pos) {
-                let (h, s, l) = creature.color();
-                let color = hsl_to_rgb(h, s, l);
+                // 根据种族最小基因哈希确定颜色（稳定标识）
+                let species_hash = ctx.creature_species.get(&idx).copied().unwrap_or(0);
+                let color = species_to_color(species_hash);
+
                 let radius = (3.0 + (creature.energy / 50.0) as f32).min(8.0) * self.scale;
                 painter.circle_filled(pos, radius, color);
 
-                // 选中描边
+                // 家族排名四分之一圆弧（金上/银左/铜下）
+                let family_rank = ctx.top_family_ids.iter().position(|&id| id == creature.family_id);
+                if let Some(rank) = family_rank {
+                    let (rank_color, direction) = match rank {
+                        0 => (Color32::from_rgb(255, 215, 0), ArcDirection::Top),      // 金色-上
+                        1 => (Color32::from_rgb(192, 192, 192), ArcDirection::Left),   // 银色-左
+                        2 => (Color32::from_rgb(205, 127, 50), ArcDirection::Bottom),  // 铜色-下
+                        _ => (Color32::WHITE, ArcDirection::Top),
+                    };
+                    draw_quarter_arc(&painter, pos, radius + 2.0, direction, Stroke::new(0.5, rank_color));
+                }
+
+                // 选中五分之一圆弧（白色-右）
                 if *selection == Selection::Creature(creature.id) {
-                    painter.circle_stroke(pos, radius + 2.0, selection_stroke);
+                    draw_quarter_arc(&painter, pos, radius + 2.0, ArcDirection::Right, Stroke::new(0.5, Color32::WHITE));
                 }
             }
         }
@@ -249,8 +275,43 @@ impl WorldCanvas {
 
 impl Default for WorldCanvas {
     fn default() -> Self {
-        Self::new()
+        Self::new(0.6)
     }
+}
+
+/// 圆弧方向
+enum ArcDirection {
+    Top,
+    Left,
+    Bottom,
+    Right,
+}
+
+/// 绘制五分之一圆弧
+fn draw_quarter_arc(painter: &egui::Painter, center: Pos2, radius: f32, direction: ArcDirection, stroke: Stroke) {
+    // 根据方向确定起始和结束角度（弧度），五分之一圆 = 72° = 0.4π
+    let half_arc = std::f32::consts::PI * 0.2;  // 36° 半角
+    let (start_angle, end_angle) = match direction {
+        ArcDirection::Top => (-std::f32::consts::PI * 0.5 - half_arc, -std::f32::consts::PI * 0.5 + half_arc),    // 上: -126° 到 -54°
+        ArcDirection::Left => (std::f32::consts::PI - half_arc, std::f32::consts::PI + half_arc),                  // 左: 144° 到 216°
+        ArcDirection::Bottom => (std::f32::consts::PI * 0.5 - half_arc, std::f32::consts::PI * 0.5 + half_arc),   // 下: 54° 到 126°
+        ArcDirection::Right => (-half_arc, half_arc),                                                              // 右: -36° 到 36°
+    };
+
+    // 用多个点近似圆弧
+    let segments = 12;
+    let points: Vec<Pos2> = (0..=segments)
+        .map(|i| {
+            let t = i as f32 / segments as f32;
+            let angle = start_angle + t * (end_angle - start_angle);
+            Pos2::new(
+                center.x + radius * angle.cos(),
+                center.y + radius * angle.sin(),
+            )
+        })
+        .collect();
+
+    painter.add(PathShape::line(points, stroke));
 }
 
 /// HSL 转 RGB
@@ -273,4 +334,12 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color32 {
         ((g + m) * 255.0) as u8,
         ((b + m) * 255.0) as u8,
     )
+}
+
+/// 根据种族基因哈希生成颜色
+fn species_to_color(species_hash: u64) -> Color32 {
+    // 使用黄金角分布生成均匀分布的色相
+    let golden_ratio = 0.618033988749895;
+    let hue = ((species_hash as f64 * golden_ratio) % 1.0 * 360.0) as f32;
+    hsl_to_rgb(hue, 0.7, 0.5)
 }

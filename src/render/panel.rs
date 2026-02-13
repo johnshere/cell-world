@@ -1,4 +1,5 @@
 use egui::Ui;
+use std::time::Instant;
 
 use crate::store::Store;
 use crate::world::World;
@@ -17,10 +18,10 @@ pub struct PanelAction {
 
 /// 统计面板
 pub struct StatsPanel {
-    /// 更新间隔
+    /// 更新间隔（秒）
     update_interval: f64,
-    /// 上次更新时间
-    last_update: f64,
+    /// 上次更新时间（真实时间）
+    last_update: Instant,
     /// 缓存的统计数据
     cached_stats: CachedStats,
     /// 当前选择的模板索引（0=随机）
@@ -31,22 +32,39 @@ pub struct StatsPanel {
     save_name: String,
 }
 
+/// 排名数据（用于显示）
+#[derive(Clone, Default)]
+pub struct RankedEntry {
+    pub id: usize,
+    pub count: usize,
+}
+
 #[derive(Default, Clone)]
 pub struct CachedStats {
     pub time: f64,
+    pub fps: f64,
     pub creature_count: usize,
     pub energy_particle_count: usize,
     pub alive_families: usize,
     pub extinct_families: usize,
     pub largest_family: usize,
     pub max_generation: usize,
+    pub avg_energy: f64,
+    // 行为统计
+    pub transfer_unlocked: usize,
+    pub release_unlocked: usize,
+    // 种族统计
+    pub species_count: usize,
+    pub largest_species: usize,
+    pub top_families: Vec<RankedEntry>,
+    pub top_species: Vec<RankedEntry>,
 }
 
 impl StatsPanel {
     pub fn new() -> Self {
         Self {
             update_interval: 0.5, // 500ms
-            last_update: 0.0,
+            last_update: Instant::now(),
             cached_stats: CachedStats::default(),
             selected_template: 0,
             save_dialog_open: false,
@@ -55,19 +73,34 @@ impl StatsPanel {
     }
 
     /// 更新缓存的统计数据
-    pub fn update(&mut self, world: &World) {
-        let current_time = world.time;
-        if current_time - self.last_update >= self.update_interval {
-            self.last_update = current_time;
-            let stats = world.stats();
+    pub fn update(&mut self, world: &World, species_threshold: f64, fps: f64, now: Instant) {
+        // fps 每帧都更新
+        self.cached_stats.fps = fps;
+
+        // 使用真实时间进行缓存检查，避免速度倍率影响
+        if now.duration_since(self.last_update).as_secs_f64() >= self.update_interval {
+            self.last_update = now;
+            let stats = world.stats(species_threshold);
             self.cached_stats = CachedStats {
                 time: stats.time,
+                fps,
                 creature_count: stats.creature_count,
                 energy_particle_count: stats.energy_particle_count,
                 alive_families: stats.alive_families,
                 extinct_families: stats.extinct_families,
                 largest_family: stats.largest_family,
                 max_generation: stats.max_generation,
+                avg_energy: stats.avg_energy,
+                transfer_unlocked: stats.transfer_unlocked,
+                release_unlocked: stats.release_unlocked,
+                species_count: stats.species_count,
+                largest_species: stats.largest_species,
+                top_families: stats.top_families.iter()
+                    .map(|e| RankedEntry { id: e.id, count: e.count })
+                    .collect(),
+                top_species: stats.top_species.iter()
+                    .map(|e| RankedEntry { id: e.id, count: e.count })
+                    .collect(),
             };
         }
     }
@@ -135,19 +168,53 @@ impl StatsPanel {
             }
         });
 
-        // 自动换行显示所有统计数据
+        // 数量统计
         ui.horizontal_wrapped(|ui| {
             ui.label(format!("生物: {}", self.cached_stats.creature_count));
-            ui.label("│");
+            ui.label(" │ ");
             ui.label(format!("能量: {}", self.cached_stats.energy_particle_count));
-            ui.label("│");
-            ui.label(format!("存活: {}", self.cached_stats.alive_families));
-            ui.label("│");
-            ui.label(format!("灭绝: {}", self.cached_stats.extinct_families));
-            ui.label("│");
+            ui.label(" │ ");
+            ui.label(format!("均能: {:.0}", self.cached_stats.avg_energy));
+        });
+
+        // 家族统计
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!("家族: {} | 灭绝: {}", self.cached_stats.alive_families, self.cached_stats.extinct_families));
+            ui.label(" │ ");
             ui.label(format!("最大族: {}", self.cached_stats.largest_family));
-            ui.label("│");
+            ui.label(" │ ");
             ui.label(format!("最大代: {}", self.cached_stats.max_generation));
+        });
+
+        // 种族统计
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!("种族: {}", self.cached_stats.species_count));
+            ui.label(" │ ");
+            ui.label(format!("最多种: {}", self.cached_stats.largest_species));
+            ui.label(" │ ");
+            ui.label(format!("释放: {}", self.cached_stats.release_unlocked));
+            ui.label(" │ ");
+            ui.label(format!("转移: {}", self.cached_stats.transfer_unlocked));
+        });
+
+        // 排行榜
+        ui.separator();
+        ui.horizontal(|ui| {
+            // 家族前三（金/银/铜描边）
+            ui.vertical(|ui| {
+                ui.label("家族前三:");
+                for (i, entry) in self.cached_stats.top_families.iter().enumerate() {
+                    ui.label(format!("{}. #{}: {}", i + 1, entry.id, entry.count));
+                }
+            });
+            ui.separator();
+            // 种族前三
+            ui.vertical(|ui| {
+                ui.label("种族前三:");
+                for (i, entry) in self.cached_stats.top_species.iter().enumerate() {
+                    ui.label(format!("{}. #{}: {}", i + 1, entry.id, entry.count));
+                }
+            });
         });
 
         action
