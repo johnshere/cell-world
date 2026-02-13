@@ -118,7 +118,7 @@ impl World {
 
         let creature_id = self.next_creature_id;
         self.next_creature_id += 1;
-        let creature = Creature::new(creature_id, x, y, energy, genome.clone(), family_id);
+        let creature = Creature::new(creature_id, x, y, energy, genome.clone(), family_id, 0);
         self.creatures.push(creature);
         *self.family_stats.entry(family_id).or_insert(0) += 1;
     }
@@ -478,6 +478,11 @@ impl World {
     pub fn stats(&self) -> WorldStats {
         let alive_families = self.family_stats.len();
         let largest_family = self.family_stats.values().max().copied().unwrap_or(0);
+        let max_generation = self.creatures.iter()
+            .filter(|c| c.alive)
+            .map(|c| c.generation)
+            .max()
+            .unwrap_or(0);
 
         WorldStats {
             time: self.time,
@@ -486,6 +491,7 @@ impl World {
             alive_families,
             extinct_families: self.extinct_families,
             largest_family,
+            max_generation,
         }
     }
 }
@@ -498,4 +504,5 @@ pub struct WorldStats {
     pub alive_families: usize,
     pub extinct_families: usize,
     pub largest_family: usize,
+    pub max_generation: usize,
 }

@@ -19,13 +19,14 @@ pub struct Creature {
     pub genome: Genome,
     pub brain: Network,
     pub family_id: usize,
+    pub generation: usize,
 
     // 缓存
     pub genome_hash: u64,
 }
 
 impl Creature {
-    pub fn new(id: u64, x: f64, y: f64, energy: f64, genome: Genome, family_id: usize) -> Self {
+    pub fn new(id: u64, x: f64, y: f64, energy: f64, genome: Genome, family_id: usize, generation: usize) -> Self {
         let brain = Network::from_genome(&genome);
         let genome_hash = genome.hash();
 
@@ -39,11 +40,12 @@ impl Creature {
             genome,
             brain,
             family_id,
+            generation,
             genome_hash,
         }
     }
 
-    /// 创建随机生物
+    /// 创建随机生物（第0代）
     pub fn random(
         id: u64,
         x: f64,
@@ -54,13 +56,13 @@ impl Creature {
         max_connections: usize,
     ) -> Self {
         let genome = Genome::random_minimal(min_connections, max_connections);
-        Self::new(id, x, y, energy, genome, family_id)
+        Self::new(id, x, y, energy, genome, family_id, 0)
     }
 
-    /// 繁殖产生子代
+    /// 繁殖产生子代（代数+1）
     pub fn reproduce(&self, id: u64, x: f64, y: f64, energy: f64, mutation_rate: f64) -> Self {
         let child_genome = self.genome.mutate(mutation_rate);
-        Self::new(id, x, y, energy, child_genome, self.family_id)
+        Self::new(id, x, y, energy, child_genome, self.family_id, self.generation + 1)
     }
 
     /// 计算与另一个生物的基因相似度

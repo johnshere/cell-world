@@ -94,8 +94,8 @@ impl CellWorldApp {
                 .open(log_path)
             {
                 let _ = writeln!(file, "# Cell World 运行日志\n");
-                let _ = writeln!(file, "| 时间(s) | 生物数 | 能量粒子 | 存活家族 | 灭绝家族 | 最大家族 |");
-                let _ = writeln!(file, "|---------|--------|----------|----------|----------|----------|");
+                let _ = writeln!(file, "| 时间(s) | 生物数 | 能量粒子 | 存活家族 | 灭绝家族 | 最大族 | 最大代 |");
+                let _ = writeln!(file, "|---------|--------|----------|----------|----------|--------|--------|");
             }
             self.log_initialized = true;
         }
@@ -108,13 +108,14 @@ impl CellWorldApp {
         {
             let _ = writeln!(
                 file,
-                "| {:.0} | {} | {} | {} | {} | {} |",
+                "| {:.0} | {} | {} | {} | {} | {} | {} |",
                 stats.time,
                 stats.creature_count,
                 stats.energy_particle_count,
                 stats.alive_families,
                 stats.extinct_families,
-                stats.largest_family
+                stats.largest_family,
+                stats.max_generation
             );
         }
     }
@@ -160,25 +161,7 @@ impl eframe::App for CellWorldApp {
         egui::SidePanel::right("panel")
             .min_width(250.0)
             .show(ctx, |ui| {
-                panel_action = self.panel.render(ui, self.fps, &self.store);
-                ui.separator();
-
-                ui.horizontal(|ui| {
-                    if ui.button(if self.paused { "▶ 继续" } else { "⏸ 暂停" }).clicked() {
-                        self.paused = !self.paused;
-                    }
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("速度:");
-                    if ui.button("⏪").clicked() {
-                        self.speed = (self.speed - 0.2).max(0.1);
-                    }
-                    ui.add(egui::Slider::new(&mut self.speed, 0.1..=10.0).logarithmic(true));
-                    if ui.button("⏩").clicked() {
-                        self.speed = (self.speed + 0.2).min(10.0);
-                    }
-                });
+                panel_action = self.panel.render(ui, self.fps, &mut self.speed, &mut self.paused, &self.store);
 
                 // 显示选中信息
                 selection_action = self.panel.render_selection(ui, &self.selection, &self.world);

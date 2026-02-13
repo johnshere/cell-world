@@ -41,16 +41,16 @@ impl Default for Config {
         Self {
             initial_energy: 60.0,
 
-            energy_spawn_interval: 0.3,
-            energy_spawn_count: 2,
-            energy_particle_value: 35.0,
-            energy_particle_lifetime: 25.0,
+            energy_spawn_interval: 0.2,
+            energy_spawn_count: 1,
+            energy_particle_value: 45.0,
+            energy_particle_lifetime: 30.0,
 
             base_metabolism: 0.1,
             percent_metabolism: 0.005,  // 每秒消耗0.5%的能量
-            move_cost: 0.2,
+            move_cost: 0.1,
             reproduce_threshold: 35.0,
-            reproduce_energy_ratio: 0.45,
+            reproduce_energy_ratio: 0.35,
 
             sense_range: 50.0,
             contact_range: 8.0,

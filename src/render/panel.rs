@@ -39,6 +39,7 @@ pub struct CachedStats {
     pub alive_families: usize,
     pub extinct_families: usize,
     pub largest_family: usize,
+    pub max_generation: usize,
 }
 
 impl StatsPanel {
@@ -66,6 +67,7 @@ impl StatsPanel {
                 alive_families: stats.alive_families,
                 extinct_families: stats.extinct_families,
                 largest_family: stats.largest_family,
+                max_generation: stats.max_generation,
             };
         }
     }
@@ -76,32 +78,40 @@ impl StatsPanel {
     }
 
     /// 渲染面板，返回面板操作
-    pub fn render(&mut self, ui: &mut Ui, fps: f64, store: &Store) -> PanelAction {
+    pub fn render(&mut self, ui: &mut Ui, fps: f64, speed: &mut f64, paused: &mut bool, store: &Store) -> PanelAction {
         let mut action = PanelAction::default();
 
         ui.heading("Cell World");
         ui.separator();
 
+        // FPS 和 时间 一行
         ui.horizontal(|ui| {
-            ui.label("FPS:");
-            ui.label(format!("{:.1}", fps));
+            ui.label(format!("FPS: {:.0}", fps));
+            ui.separator();
+            ui.label(format!("时间: {:.0}s", self.cached_stats.time));
         });
 
+        // 速度控制
         ui.horizontal(|ui| {
-            ui.label("时间:");
-            ui.label(format!("{:.1}s", self.cached_stats.time));
+            if ui.button("⏪").clicked() {
+                *speed = (*speed - 0.2).max(0.1);
+            }
+            ui.add(egui::Slider::new(speed, 0.1..=10.0).logarithmic(true));
+            if ui.button("⏩").clicked() {
+                *speed = (*speed + 0.2).min(10.0);
+            }
+            if ui.button(if *paused { "▶" } else { "⏸" }).clicked() {
+                *paused = !*paused;
+            }
         });
 
         ui.separator();
-        ui.label("种群统计");
 
-        // 生物数量 + 添加按钮 + 下拉选择
+        // 种群统计 + 下拉选 + 添加按钮
         ui.horizontal(|ui| {
-            ui.label("生物数量:");
-            ui.label(format!("{}", self.cached_stats.creature_count));
-        });
+            ui.label("种群统计");
+            ui.separator();
 
-        ui.horizontal(|ui| {
             // 下拉选择模板
             let template_names = store.names();
             let options: Vec<&str> = std::iter::once("随机")
@@ -125,24 +135,19 @@ impl StatsPanel {
             }
         });
 
-        ui.horizontal(|ui| {
-            ui.label("能量粒子:");
-            ui.label(format!("{}", self.cached_stats.energy_particle_count));
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("存活家族:");
-            ui.label(format!("{}", self.cached_stats.alive_families));
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("灭绝家族:");
-            ui.label(format!("{}", self.cached_stats.extinct_families));
-        });
-
-        ui.horizontal(|ui| {
-            ui.label("最大家族:");
-            ui.label(format!("{}", self.cached_stats.largest_family));
+        // 自动换行显示所有统计数据
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!("生物: {}", self.cached_stats.creature_count));
+            ui.label("│");
+            ui.label(format!("能量: {}", self.cached_stats.energy_particle_count));
+            ui.label("│");
+            ui.label(format!("存活: {}", self.cached_stats.alive_families));
+            ui.label("│");
+            ui.label(format!("灭绝: {}", self.cached_stats.extinct_families));
+            ui.label("│");
+            ui.label(format!("最大族: {}", self.cached_stats.largest_family));
+            ui.label("│");
+            ui.label(format!("最大代: {}", self.cached_stats.max_generation));
         });
 
         action
