@@ -232,6 +232,8 @@ impl World {
 
             // 能量值也受强度影响（波动更明显）
             let energy_value = config.energy_particle_value * intensity;
+            // 粒子存活时间也受强度影响
+            let lifetime = config.energy_particle_lifetime * intensity;
 
             for _ in 0..total_count {
                 // 在当前视窗范围内生成能量粒子
@@ -244,7 +246,7 @@ impl World {
                     x,
                     y,
                     energy_value,
-                    config.energy_particle_lifetime,
+                    lifetime,
                 );
                 self.energy_particles.push(particle);
             }
