@@ -112,8 +112,8 @@ impl World {
         // 生成能量粒子
         self.spawn_energy(dt, config);
 
-        // 自动补充生物
-        self.replenish_creatures(config);
+        // 自动补充生物（已禁用，让演化自然进行）
+        // self.replenish_creatures(config);
 
         // 重建空间索引（计时）
         let spatial_start = Instant::now();
@@ -728,19 +728,22 @@ impl World {
             let dist = ((other.x - creature.x).powi(2) + (other.y - creature.y).powi(2)).sqrt();
 
             if dist < config.contact_range {
-                // 正值 = 掠夺，负值 = 给予
-                let transfer_amount = value * 5.0;
+                // 正值 = 掠夺（按目标能量百分比），负值 = 给予
+                let target_energy = self.creatures[other_idx].energy;
 
-                if transfer_amount > 0.0 {
-                    // 掠夺
-                    let actual = transfer_amount.min(self.creatures[other_idx].energy);
-                    self.creatures[other_idx].energy -= actual;
-                    self.creatures[idx].energy += actual;
+                if value > 0.0 {
+                    // 掠夺：转移目标能量的 value*20%（最高20%）
+                    let transfer_ratio = value * 0.2;
+                    let transfer_amount = target_energy * transfer_ratio;
+                    self.creatures[other_idx].energy -= transfer_amount;
+                    self.creatures[idx].energy += transfer_amount;
                 } else {
-                    // 给予
-                    let actual = (-transfer_amount).min(self.creatures[idx].energy);
-                    self.creatures[idx].energy -= actual;
-                    self.creatures[other_idx].energy += actual;
+                    // 给予：转移自身能量的 |value|*20%
+                    let transfer_ratio = (-value) * 0.2;
+                    let my_energy = self.creatures[idx].energy;
+                    let transfer_amount = my_energy * transfer_ratio;
+                    self.creatures[idx].energy -= transfer_amount;
+                    self.creatures[other_idx].energy += transfer_amount;
                 }
                 return true; // 转移成功
             }

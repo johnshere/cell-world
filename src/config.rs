@@ -73,9 +73,9 @@ impl Default for Config {
 
             initial_energy: 45.0,  // 初始能量略高于繁殖阈值
 
-            energy_spawn_interval: 0.5,  // 较快生成频率，增加能量供给
+            energy_spawn_interval: 0.6,  // 适中生成频率
             energy_spawn_count: 2,  // 每次生成2个
-            energy_particle_value: 30.0,  // 单个粒子价值降低，总量增加
+            energy_particle_value: 25.0,  // 单个粒子价值适中，促进竞争
             energy_particle_lifetime: 40.0,  // 能量存在更久
 
             energy_wave_enabled: true,  // 启用能量波动
