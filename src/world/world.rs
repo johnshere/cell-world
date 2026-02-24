@@ -502,9 +502,13 @@ impl World {
             if r.distance > 0.0 { r.energy / r.distance } else { r.energy * 1000.0 }
         };
 
+        // 角度编码: -1~1（与输出方向编码一致）
+        // 0°=-1, 180°=0, 360°=1
+        // 这样追逐只需权重≈+1，躲避只需权重≈-1
+
         // 最近最大同类（评分最高）
         if let Some(best_ally) = allies.iter().max_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
-            input[0] = best_ally.angle / 360.0;
+            input[0] = best_ally.angle / 180.0 - 1.0;
             input[1] = (best_ally.distance / config.scan_max_radius).min(1.0);
             input[2] = best_ally.similarity;
             input[3] = (best_ally.energy / 200.0).min(1.0);
@@ -512,7 +516,7 @@ impl World {
 
         // 最近最小同类（评分最低）
         if let Some(worst_ally) = allies.iter().min_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
-            input[4] = worst_ally.angle / 360.0;
+            input[4] = worst_ally.angle / 180.0 - 1.0;
             input[5] = (worst_ally.distance / config.scan_max_radius).min(1.0);
             input[6] = worst_ally.similarity;
             input[7] = (worst_ally.energy / 200.0).min(1.0);
@@ -520,7 +524,7 @@ impl World {
 
         // 最近最大异类（评分最高）
         if let Some(best_enemy) = enemies.iter().max_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
-            input[8] = best_enemy.angle / 360.0;
+            input[8] = best_enemy.angle / 180.0 - 1.0;
             input[9] = (best_enemy.distance / config.scan_max_radius).min(1.0);
             input[10] = best_enemy.similarity;
             input[11] = (best_enemy.energy / 200.0).min(1.0);
@@ -528,7 +532,7 @@ impl World {
 
         // 最近最小异类（评分最低）
         if let Some(worst_enemy) = enemies.iter().min_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
-            input[12] = worst_enemy.angle / 360.0;
+            input[12] = worst_enemy.angle / 180.0 - 1.0;
             input[13] = (worst_enemy.distance / config.scan_max_radius).min(1.0);
             input[14] = worst_enemy.similarity;
             input[15] = (worst_enemy.energy / 200.0).min(1.0);

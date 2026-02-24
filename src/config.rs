@@ -73,9 +73,9 @@ impl Default for Config {
 
             initial_energy: 70.0,  // 更多初始能量，延长生存时间
 
-            energy_spawn_interval: 0.6,  // 更频繁生成
-            energy_spawn_count: 2,  // 每次生成更多
-            energy_particle_value: 40.0,  // 每个粒子更多能量
+            energy_spawn_interval: 1.2,  // 生成间隔加大，粒子更稀缺
+            energy_spawn_count: 1,  // 每次只生成1个
+            energy_particle_value: 60.0,  // 单个粒子价值更高，追逐更有价值
             energy_particle_lifetime: 40.0,  // 能量存在更久
 
             energy_wave_enabled: true,  // 启用能量波动
@@ -87,7 +87,7 @@ impl Default for Config {
             base_metabolism: 0.15,  // 待机消耗高，鼓励活动
             percent_metabolism: 0.004,  // 百分比代谢翻倍
             move_cost: 0.002,  // 移动消耗极低，让移动比待机更划算
-            reproduce_threshold: 28.0,  // 繁殖阈值
+            reproduce_threshold: 50.0,  // 繁殖阈值提高，需要积累更多能量
             reproduce_energy_ratio: 0.2,  // 子代获得20%能量（五分之一），保留更多给父代
 
             scan_free_radius: 50.0,      // 免费扫描半径
