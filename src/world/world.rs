@@ -562,37 +562,47 @@ impl World {
                 0 => move_direction = Some(value),  // 移动方向
                 1 => move_speed = Some(value),      // 移动速度
                 2 => {
-                    self.action_absorb(creature_idx, value, config);
-                    self.action_counts[2] += 1;
+                    if self.action_absorb(creature_idx, value, config) {
+                        self.action_counts[2] += 1;  // 只统计实际吸收成功
+                    }
                 }
                 3 => {
-                    self.action_release(creature_idx, value, config);
-                    self.action_counts[3] += 1;
+                    if self.action_release(creature_idx, value, config) {
+                        self.action_counts[3] += 1;  // 只统计实际释放成功
+                    }
                 }
                 4 => {
-                    self.action_reproduce(creature_idx, value, config);
-                    self.action_counts[4] += 1;
+                    if self.action_reproduce(creature_idx, value, config) {
+                        self.action_counts[4] += 1;  // 只统计实际繁殖成功
+                    }
                 }
                 5 => {
-                    self.action_transfer(creature_idx, value, config);
-                    self.action_counts[5] += 1;
+                    if self.action_transfer(creature_idx, value, config) {
+                        self.action_counts[5] += 1;  // 只统计实际转移成功
+                    }
                 }
                 6 => {
-                    self.action_set_scan_radius(creature_idx, value, config);
-                    self.action_counts[6] += 1;
+                    // 扫描半径调整：只在值变化超过阈值时统计
+                    if self.action_set_scan_radius(creature_idx, value, config) {
+                        self.action_counts[6] += 1;
+                    }
                 }
                 7 => {
-                    self.action_set_scan_velocity(creature_idx, value, config);
-                    self.action_counts[7] += 1;
+                    // 扫描角速度调整：只在值变化超过阈值时统计
+                    if self.action_set_scan_velocity(creature_idx, value, config) {
+                        self.action_counts[7] += 1;
+                    }
                 }
                 _ => {}
             }
         }
 
-        // 执行移动（需要方向和速度都有值）
+        // 执行移动（需要方向和速度都有值，且速度>0.1才统计）
         if let (Some(dir), Some(spd)) = (move_direction, move_speed) {
-            self.action_move(creature_idx, dir, spd, dt, config);
-            self.action_counts[0] += 1;  // 移动算一次
+            if spd.abs() > 0.1 {
+                self.action_move(creature_idx, dir, spd, dt, config);
+                self.action_counts[0] += 1;
+            }
         }
     }
 
@@ -616,7 +626,8 @@ impl World {
     }
 
     // 功能 2: 吸收（自动触发，接触即吸收）
-    fn action_absorb(&mut self, idx: usize, _value: f64, config: &Config) {
+    // 返回是否成功吸收了能量
+    fn action_absorb(&mut self, idx: usize, _value: f64, config: &Config) -> bool {
         let creature = &self.creatures[idx];
         let nearby = self.energy_grid.query(creature.x, creature.y, config.contact_range);
 
@@ -629,16 +640,18 @@ impl World {
                 if dist < config.contact_range {
                     let energy = self.energy_particles[particle_idx].consume();
                     self.creatures[idx].energy += energy;
-                    break; // 一次只吸收一个
+                    return true; // 吸收成功
                 }
             }
         }
+        false // 没有吸收到
     }
 
     // 功能 3: 释放
-    fn action_release(&mut self, idx: usize, value: f64, config: &Config) {
+    // 返回是否成功释放了能量
+    fn action_release(&mut self, idx: usize, value: f64, config: &Config) -> bool {
         if value <= 0.0 {
-            return;
+            return false;
         }
 
         let release_amount = value * 10.0;
@@ -654,24 +667,27 @@ impl World {
                 config.energy_particle_lifetime,
             );
             self.energy_particles.push(particle);
+            return true;
         }
+        false
     }
 
     // 功能 4: 繁殖
-    fn action_reproduce(&mut self, idx: usize, value: f64, config: &Config) {
+    // 返回是否成功繁殖
+    fn action_reproduce(&mut self, idx: usize, value: f64, config: &Config) -> bool {
         // 降低阈值使繁殖更容易触发
         if value <= 0.2 {
-            return;
+            return false;
         }
 
         // 检查是否超过最大生物数量
         let alive_count = self.creatures.iter().filter(|c| c.alive).count();
         if alive_count >= config.max_creatures {
-            return;
+            return false;
         }
 
         if self.creatures[idx].energy < config.reproduce_threshold {
-            return;
+            return false;
         }
 
         let child_energy = self.creatures[idx].energy * config.reproduce_energy_ratio;
@@ -694,12 +710,14 @@ impl World {
         let family_id = child.family_id;
         self.creatures.push(child);
         *self.family_stats.entry(family_id).or_insert(0) += 1;
+        true
     }
 
     // 功能 5: 能量转移
-    fn action_transfer(&mut self, idx: usize, value: f64, config: &Config) {
+    // 返回是否成功转移了能量
+    fn action_transfer(&mut self, idx: usize, value: f64, config: &Config) -> bool {
         if value.abs() < 0.1 {
-            return;
+            return false;
         }
 
         let creature = &self.creatures[idx];
@@ -728,25 +746,38 @@ impl World {
                     self.creatures[idx].energy -= actual;
                     self.creatures[other_idx].energy += actual;
                 }
-                break; // 一次只与一个交互
+                return true; // 转移成功
             }
         }
+        false
     }
 
     // 功能 6: 设置扫描半径
-    fn action_set_scan_radius(&mut self, idx: usize, value: f64, config: &Config) {
+    // 返回是否有显著变化（>10%）
+    fn action_set_scan_radius(&mut self, idx: usize, value: f64, config: &Config) -> bool {
         // value: -1~1 映射到 free_radius ~ max_radius
         let normalized = (value + 1.0) / 2.0;  // 0~1
         let radius = config.scan_free_radius + normalized * (config.scan_max_radius - config.scan_free_radius);
+        let old_radius = self.creatures[idx].scan_radius;
         self.creatures[idx].scan_radius = radius;
+        // 只在变化超过10%时统计
+        (radius - old_radius).abs() / old_radius > 0.1
     }
 
     // 功能 7: 设置扫描角速度
-    fn action_set_scan_velocity(&mut self, idx: usize, value: f64, config: &Config) {
+    // 返回是否有显著变化（>10%）
+    fn action_set_scan_velocity(&mut self, idx: usize, value: f64, config: &Config) -> bool {
         // value: -1~1 映射到 0 ~ max_angular_velocity
         let normalized = (value + 1.0) / 2.0;  // 0~1
         let velocity = normalized * config.scan_max_angular_velocity;
+        let old_velocity = self.creatures[idx].scan_angular_velocity;
         self.creatures[idx].scan_angular_velocity = velocity;
+        // 只在变化超过10%时统计（避免除零）
+        if old_velocity < 0.1 {
+            velocity > 0.1
+        } else {
+            (velocity - old_velocity).abs() / old_velocity > 0.1
+        }
     }
 
     /// 更新能量粒子
