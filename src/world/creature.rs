@@ -67,7 +67,7 @@ impl Creature {
             scan_cache: Vec::new(),
             last_scan_degree: 0,
             perception_cache: [0.0; 17],
-            last_perception_time: 0.0,
+            last_perception_time: -1.0,  // 负值确保第一帧立即触发感知计算
         }
     }
 

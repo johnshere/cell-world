@@ -332,6 +332,18 @@ impl World {
         let scan_radius = creature.scan_radius;
         let last_perception_time = creature.last_perception_time;
 
+        // 新生物初始化：做一次完整360度扫描（免费）
+        if last_perception_time < 0.0 {
+            for degree in 0..360 {
+                let degree_rad = (degree as f64).to_radians();
+                self.scan_degree(creature_idx, degree_rad, scan_radius, config);
+            }
+            self.compute_perception(creature_idx, config);
+            self.creatures[creature_idx].last_perception_time = self.time;
+            self.creatures[creature_idx].scan_cache.clear();
+            return;
+        }
+
         // 更新扫描角度
         let mut new_angle = old_angle + angular_velocity * dt;
 
