@@ -162,9 +162,9 @@ impl StatsPanel {
 
         ui.separator();
 
-        // 种群统计 + 下拉选 + 添加按钮
+        // 统计 + 下拉选 + 添加按钮
         ui.horizontal(|ui| {
-            ui.label("种群统计");
+            ui.label("统计");
             ui.separator();
 
             // 下拉选择模板
@@ -219,7 +219,7 @@ impl StatsPanel {
             ui.label(format!("最大代: {}", self.cached_stats.max_generation));
         });
 
-        // 种群统计
+        // 统计
         ui.horizontal_wrapped(|ui| {
             ui.label(format!("种群: {}", self.cached_stats.species_count));
             ui.label(" │ ");
