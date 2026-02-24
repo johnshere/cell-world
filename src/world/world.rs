@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::time::Instant;
 
 use crate::config::Config;
-use super::{Creature, EnergyParticle, SpatialGrid};
+use super::{Creature, EnergyParticle, ScanResult, SpatialGrid};
 
 /// 性能统计（单帧）
 #[derive(Default, Clone)]
@@ -60,8 +60,8 @@ impl World {
         Self {
             creatures: Vec::new(),
             energy_particles: Vec::new(),
-            creature_grid: SpatialGrid::new(config.sense_range),
-            energy_grid: SpatialGrid::new(config.sense_range),
+            creature_grid: SpatialGrid::new(config.scan_max_radius),
+            energy_grid: SpatialGrid::new(config.scan_max_radius),
             time: 0.0,
             family_stats: FxHashMap::default(),
             extinct_families: 0,
@@ -184,15 +184,56 @@ impl World {
         }
     }
 
-    /// 生成能量粒子（只在视窗范围内生成）
+    /// 计算当前能量强度（基于多层正弦波叠加）
+    /// 返回值范围: [1-amplitude, 1+amplitude]，当 wave_enabled=false 时返回 1.0
+    pub fn calculate_energy_intensity(&self, config: &Config) -> f64 {
+        if !config.energy_wave_enabled {
+            return 1.0;
+        }
+
+        let periods = &config.energy_wave_periods;
+        let amplitude = config.energy_wave_amplitude;
+
+        // 多层正弦波叠加，权重均匀分布使各周期贡献相近
+        let weights = [0.3, 0.3, 0.25, 0.15];
+        let mut wave_sum = 0.0;
+
+        for (i, &period) in periods.iter().enumerate() {
+            if period > 0.0 {
+                let phase = self.time * 2.0 * std::f64::consts::PI / period;
+                wave_sum += phase.sin() * weights[i];
+            }
+        }
+
+        // wave_sum 范围约 [-1.0, 1.0]，乘以 amplitude 后加到基准值 1.0
+        (1.0 + wave_sum * amplitude).max(0.1)
+    }
+
+    /// 生成能量粒子（只在视窗范围内生成，受波动影响）
     fn spawn_energy(&mut self, dt: f64, config: &Config) {
         self.energy_spawn_timer += dt;
 
         if self.energy_spawn_timer >= config.energy_spawn_interval {
             self.energy_spawn_timer = 0.0;
 
+            // 计算当前能量强度
+            let intensity = self.calculate_energy_intensity(config);
+
+            // 根据强度调整生成数量（概率性）
+            let base_count = config.energy_spawn_count as f64 * intensity;
+            let spawn_count = base_count.floor() as usize;
+            let fractional = base_count - base_count.floor();
+
             let mut rng = rand::thread_rng();
-            for _ in 0..config.energy_spawn_count {
+
+            // 额外的概率性生成（处理小数部分）
+            let extra = if rng.gen::<f64>() < fractional { 1 } else { 0 };
+            let total_count = spawn_count + extra;
+
+            // 能量值也受强度影响（波动更明显）
+            let energy_value = config.energy_particle_value * intensity;
+
+            for _ in 0..total_count {
                 // 在当前视窗范围内生成能量粒子
                 let x = rng.gen_range(self.viewport_min_x..self.viewport_max_x);
                 let y = rng.gen_range(self.viewport_min_y..self.viewport_max_y);
@@ -202,7 +243,7 @@ impl World {
                     energy_id,
                     x,
                     y,
-                    config.energy_particle_value,
+                    energy_value,
                     config.energy_particle_lifetime,
                 );
                 self.energy_particles.push(particle);
@@ -256,13 +297,14 @@ impl World {
                 continue;
             }
 
-            // 收集感知数据
+            // 更新雷达扫描
             let t0 = Instant::now();
-            let perception = self.perceive(i, config);
+            self.update_scan(i, dt, config);
             perceive_time += t0.elapsed().as_secs_f64() * 1000.0;
 
-            // 神经网络决策
+            // 神经网络决策（使用缓存的感知结果）
             let t1 = Instant::now();
+            let perception = self.creatures[i].perception_cache;
             let outputs = self.creatures[i].brain.forward(&perception);
             forward_time += t1.elapsed().as_secs_f64() * 1000.0;
 
@@ -282,98 +324,211 @@ impl World {
         self.perf_stats.creature_count = alive_count;
     }
 
-    /// 感知环境 (17维输入)
-    /// 0-7: 8方向能量感知
-    /// 8-15: 8方向邻居相似度 (0=无邻居, >0=有邻居且为相似度)
-    /// 16: 自身能量
-    fn perceive(&self, creature_idx: usize, config: &Config) -> [f64; 17] {
+    /// 更新雷达扫描
+    fn update_scan(&mut self, creature_idx: usize, dt: f64, config: &Config) {
         let creature = &self.creatures[creature_idx];
-        let mut input = [0.0; 17];  // 栈分配，避免堆分配开销
+        let old_angle = creature.scan_angle;
+        let angular_velocity = creature.scan_angular_velocity;
+        let scan_radius = creature.scan_radius;
+        let last_perception_time = creature.last_perception_time;
 
-        // 8方向
-        let directions: [(f64, f64); 8] = [
-            (0.0, -1.0),     // N
-            (0.707, -0.707), // NE
-            (1.0, 0.0),      // E
-            (0.707, 0.707),  // SE
-            (0.0, 1.0),      // S
-            (-0.707, 0.707), // SW
-            (-1.0, 0.0),     // W
-            (-0.707, -0.707), // NW
-        ];
+        // 更新扫描角度
+        let mut new_angle = old_angle + angular_velocity * dt;
 
-        // 查询附近实体
-        let nearby_creatures = self.creature_grid.query(creature.x, creature.y, config.sense_range);
-        let nearby_energy = self.energy_grid.query(creature.x, creature.y, config.sense_range);
+        // 计算跨越的整度数
+        let old_degree = old_angle.floor() as i32;
+        let mut new_degree = new_angle.floor() as i32;
 
-        for (dir_idx, (dx, dy)) in directions.iter().enumerate() {
-            let mut dir_energy = 0.0;
-            let mut dir_similarity = 0.0;
-            let mut neighbor_count = 0;
-
-            // 检查邻居
-            for &idx in &nearby_creatures {
-                if idx == creature_idx {
-                    continue;
-                }
-                let other = &self.creatures[idx];
-                if !other.alive {
-                    continue;
-                }
-
-                let ox = other.x - creature.x;
-                let oy = other.y - creature.y;
-                let dist = (ox * ox + oy * oy).sqrt();
-
-                if dist > 0.0 && dist < config.sense_range {
-                    // 检查是否在这个方向
-                    let dot = (ox * dx + oy * dy) / dist;
-                    if dot > 0.5 {
-                        dir_similarity += self.get_similarity(creature, other);
-                        neighbor_count += 1;
-                    }
-                }
-            }
-
-            // 检查能量粒子
-            for &idx in &nearby_energy {
-                let particle = &self.energy_particles[idx];
-                if !particle.alive {
-                    continue;
-                }
-
-                let px = particle.x - creature.x;
-                let py = particle.y - creature.y;
-                let dist = (px * px + py * py).sqrt();
-
-                if dist > 0.0 && dist < config.sense_range {
-                    let dot = (px * dx + py * dy) / dist;
-                    if dot > 0.5 {
-                        dir_energy += particle.energy;
-                    }
-                }
-            }
-
-            // 归一化
-            // 0-7: 能量感知
-            input[dir_idx] = (dir_energy / 200.0).min(1.0);
-            // 8-15: 邻居相似度 (0=无邻居, >0=平均相似度)
-            input[8 + dir_idx] = if neighbor_count > 0 {
-                dir_similarity / neighbor_count as f64
-            } else {
-                0.0
-            };
+        // 处理角度回绕
+        if new_angle >= 360.0 {
+            new_angle %= 360.0;
+            new_degree = 359;  // 确保扫描到 359 度
         }
 
-        // 16: 自身能量
+        self.creatures[creature_idx].scan_angle = new_angle;
+
+        // 对每个跨越的度数进行扫描和耗能
+        for degree in (old_degree + 1)..=new_degree {
+            let degree_rad = (degree as f64).to_radians();
+
+            // 扫描该角度扇形内的实体
+            self.scan_degree(creature_idx, degree_rad, scan_radius, config);
+
+            // 计算扫描耗能: max(0, r - 50)² × (π/360) × cost
+            let excess_radius = (scan_radius - config.scan_free_radius).max(0.0);
+            let scan_cost = excess_radius * excess_radius * std::f64::consts::PI / 360.0 * config.scan_cost;
+            self.creatures[creature_idx].energy -= scan_cost;
+
+            // 检查是否需要更新感知（超过1秒且跨过一度时）
+            let time_since_last = self.time - last_perception_time;
+            if time_since_last >= 1.0 {
+                self.compute_perception(creature_idx, config);
+                self.creatures[creature_idx].last_perception_time = self.time;
+                // 清空缓存，开始新一轮收集
+                self.creatures[creature_idx].scan_cache.clear();
+            }
+        }
+    }
+
+    /// 扫描指定角度的扇形区域
+    fn scan_degree(&mut self, creature_idx: usize, angle_rad: f64, radius: f64, _config: &Config) {
+        let creature = &self.creatures[creature_idx];
+        let cx = creature.x;
+        let cy = creature.y;
+
+        // 扫描方向向量
+        let scan_dx = angle_rad.cos();
+        let scan_dy = angle_rad.sin();
+
+        // 扇形半角（约 0.5 度 = 0.00873 弧度）
+        let half_angle = 0.5_f64.to_radians();
+        let cos_half = half_angle.cos();
+
+        // 先收集数据，避免借用冲突
+        let mut new_results: Vec<ScanResult> = Vec::new();
+
+        // 查询附近的生物
+        let nearby_creatures = self.creature_grid.query(cx, cy, radius);
+        for &idx in &nearby_creatures {
+            if idx == creature_idx {
+                continue;
+            }
+            let other = &self.creatures[idx];
+            if !other.alive {
+                continue;
+            }
+
+            let dx = other.x - cx;
+            let dy = other.y - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+
+            if dist > 0.0 && dist <= radius {
+                // 检查是否在扫描扇形内
+                let dot = (dx * scan_dx + dy * scan_dy) / dist;
+                if dot >= cos_half {
+                    // 计算角度
+                    let angle = dy.atan2(dx).to_degrees();
+                    let angle = if angle < 0.0 { angle + 360.0 } else { angle };
+
+                    // 计算相似度
+                    let similarity = self.get_similarity(&self.creatures[creature_idx], other);
+
+                    new_results.push(ScanResult {
+                        angle,
+                        distance: dist,
+                        similarity,
+                        energy: other.energy,
+                    });
+                }
+            }
+        }
+
+        // 查询附近的能量粒子
+        let nearby_energy = self.energy_grid.query(cx, cy, radius);
+        for &idx in &nearby_energy {
+            let particle = &self.energy_particles[idx];
+            if !particle.alive {
+                continue;
+            }
+
+            let dx = particle.x - cx;
+            let dy = particle.y - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+
+            if dist > 0.0 && dist <= radius {
+                let dot = (dx * scan_dx + dy * scan_dy) / dist;
+                if dot >= cos_half {
+                    let angle = dy.atan2(dx).to_degrees();
+                    let angle = if angle < 0.0 { angle + 360.0 } else { angle };
+
+                    new_results.push(ScanResult {
+                        angle,
+                        distance: dist,
+                        similarity: 0.0,  // 能量粒子无相似度
+                        energy: particle.energy,
+                    });
+                }
+            }
+        }
+
+        // 将收集的结果推入缓存
+        self.creatures[creature_idx].scan_cache.extend(new_results);
+    }
+
+    /// 从扫描缓存计算 17 维感知输入
+    /// [0-3]   最近最大同类: 角度, 距离, 相似度, 能量
+    /// [4-7]   最近最小同类: 角度, 距离, 相似度, 能量
+    /// [8-11]  最近最大异类: 角度, 距离, 相似度, 能量
+    /// [12-15] 最近最小异类: 角度, 距离, 相似度, 能量
+    /// [16]    自身能量
+    fn compute_perception(&mut self, creature_idx: usize, config: &Config) {
+        let creature = &self.creatures[creature_idx];
+        let threshold = config.species_similarity_threshold;
+
+        let mut input = [0.0; 17];
+
+        // 分类：同类 vs 异类（能量粒子视为异类，相似度=0）
+        let mut allies: Vec<&ScanResult> = Vec::new();
+        let mut enemies: Vec<&ScanResult> = Vec::new();
+
+        for result in &creature.scan_cache {
+            if result.similarity >= threshold {
+                allies.push(result);
+            } else {
+                enemies.push(result);
+            }
+        }
+
+        // 评分函数: 能量 / 距离
+        let score = |r: &ScanResult| -> f64 {
+            if r.distance > 0.0 { r.energy / r.distance } else { r.energy * 1000.0 }
+        };
+
+        // 最近最大同类（评分最高）
+        if let Some(best_ally) = allies.iter().max_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
+            input[0] = best_ally.angle / 360.0;
+            input[1] = (best_ally.distance / config.scan_max_radius).min(1.0);
+            input[2] = best_ally.similarity;
+            input[3] = (best_ally.energy / 200.0).min(1.0);
+        }
+
+        // 最近最小同类（评分最低）
+        if let Some(worst_ally) = allies.iter().min_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
+            input[4] = worst_ally.angle / 360.0;
+            input[5] = (worst_ally.distance / config.scan_max_radius).min(1.0);
+            input[6] = worst_ally.similarity;
+            input[7] = (worst_ally.energy / 200.0).min(1.0);
+        }
+
+        // 最近最大异类（评分最高）
+        if let Some(best_enemy) = enemies.iter().max_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
+            input[8] = best_enemy.angle / 360.0;
+            input[9] = (best_enemy.distance / config.scan_max_radius).min(1.0);
+            input[10] = best_enemy.similarity;
+            input[11] = (best_enemy.energy / 200.0).min(1.0);
+        }
+
+        // 最近最小异类（评分最低）
+        if let Some(worst_enemy) = enemies.iter().min_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
+            input[12] = worst_enemy.angle / 360.0;
+            input[13] = (worst_enemy.distance / config.scan_max_radius).min(1.0);
+            input[14] = worst_enemy.similarity;
+            input[15] = (worst_enemy.energy / 200.0).min(1.0);
+        }
+
+        // 自身能量
         input[16] = (creature.energy / 200.0).min(1.0);
 
-        input
+        self.creatures[creature_idx].perception_cache = input;
     }
 
     /// 执行动作
     fn execute_actions(&mut self, creature_idx: usize, outputs: &[f64], dt: f64, config: &Config) {
         let output_map = self.creatures[creature_idx].genome.output_map.clone();
+
+        // 先收集移动方向和速度（需要组合使用）
+        let mut move_direction: Option<f64> = None;
+        let mut move_speed: Option<f64> = None;
 
         for (out_idx, &func_id) in output_map.iter().enumerate() {
             if out_idx >= outputs.len() {
@@ -382,31 +537,41 @@ impl World {
             let value = outputs[out_idx];
 
             match func_id {
-                0 => self.action_move_x(creature_idx, value, dt, config),
-                1 => self.action_move_y(creature_idx, value, dt, config),
+                0 => move_direction = Some(value),  // 移动方向
+                1 => move_speed = Some(value),      // 移动速度
                 2 => self.action_absorb(creature_idx, value, config),
                 3 => self.action_release(creature_idx, value, config),
                 4 => self.action_reproduce(creature_idx, value, config),
                 5 => self.action_transfer(creature_idx, value, config),
+                6 => self.action_set_scan_radius(creature_idx, value, config),
+                7 => self.action_set_scan_velocity(creature_idx, value, config),
                 _ => {}
             }
         }
+
+        // 执行移动（需要方向和速度都有值）
+        if let (Some(dir), Some(spd)) = (move_direction, move_speed) {
+            self.action_move(creature_idx, dir, spd, dt, config);
+        }
     }
 
-    // 功能 0: 移动 X（无边界限制）
-    fn action_move_x(&mut self, idx: usize, value: f64, dt: f64, config: &Config) {
-        let dx = value * dt * 50.0;
+    // 功能 0+1: 移动（方向 + 速度）
+    fn action_move(&mut self, idx: usize, direction: f64, speed: f64, dt: f64, config: &Config) {
+        // direction: -1~1 映射到 0~360 度
+        // speed: -1~1，绝对值为速度
+        let angle_deg = (direction + 1.0) / 2.0 * 360.0;  // 0~360
+        let angle_rad = angle_deg.to_radians();
+        let actual_speed = speed.abs() * 50.0;  // 最大速度 50 单位/秒
+
+        let dx = angle_rad.cos() * actual_speed * dt;
+        let dy = angle_rad.sin() * actual_speed * dt;
+
         self.creatures[idx].x += dx;
-        // 世界无限大，不限制移动范围
-        self.creatures[idx].energy -= dx.abs() * config.move_cost;
-    }
-
-    // 功能 1: 移动 Y（无边界限制）
-    fn action_move_y(&mut self, idx: usize, value: f64, dt: f64, config: &Config) {
-        let dy = value * dt * 50.0;
         self.creatures[idx].y += dy;
-        // 世界无限大，不限制移动范围
-        self.creatures[idx].energy -= dy.abs() * config.move_cost;
+
+        // 移动消耗
+        let distance = (dx * dx + dy * dy).sqrt();
+        self.creatures[idx].energy -= distance * config.move_cost;
     }
 
     // 功能 2: 吸收（自动触发，接触即吸收）
@@ -525,6 +690,22 @@ impl World {
                 break; // 一次只与一个交互
             }
         }
+    }
+
+    // 功能 6: 设置扫描半径
+    fn action_set_scan_radius(&mut self, idx: usize, value: f64, config: &Config) {
+        // value: -1~1 映射到 free_radius ~ max_radius
+        let normalized = (value + 1.0) / 2.0;  // 0~1
+        let radius = config.scan_free_radius + normalized * (config.scan_max_radius - config.scan_free_radius);
+        self.creatures[idx].scan_radius = radius;
+    }
+
+    // 功能 7: 设置扫描角速度
+    fn action_set_scan_velocity(&mut self, idx: usize, value: f64, config: &Config) {
+        // value: -1~1 映射到 0 ~ max_angular_velocity
+        let normalized = (value + 1.0) / 2.0;  // 0~1
+        let velocity = normalized * config.scan_max_angular_velocity;
+        self.creatures[idx].scan_angular_velocity = velocity;
     }
 
     /// 更新能量粒子

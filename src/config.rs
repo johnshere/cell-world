@@ -13,12 +13,21 @@ pub struct Config {
 
     /// 能量粒子生成间隔（秒）
     pub energy_spawn_interval: f64,
-    /// 每次生成的能量粒子数量
+    /// 每次生成的能量粒子数量（基准值，会被波动影响）
     pub energy_spawn_count: usize,
-    /// 每个能量粒子的能量值
+    /// 每个能量粒子的能量值（基准值，会被波动影响）
     pub energy_particle_value: f64,
     /// 能量粒子存活时间（秒）
     pub energy_particle_lifetime: f64,
+
+    /// 能量波动开关
+    pub energy_wave_enabled: bool,
+    /// 能量波动幅度（0.0~1.0，建议0.3~0.6）
+    /// 实际强度范围: [1-amplitude, 1+amplitude]
+    pub energy_wave_amplitude: f64,
+    /// 能量波动周期（秒数组，使用互质数产生弱周期效果）
+    /// 多层正弦波叠加，产生看似无规律的波动
+    pub energy_wave_periods: [f64; 4],
 
     /// 基础代谢率（每秒固定消耗）
     pub base_metabolism: f64,
@@ -31,8 +40,14 @@ pub struct Config {
     /// 子代获得的能量比例
     pub reproduce_energy_ratio: f64,
 
-    /// 感知半径
-    pub sense_range: f64,
+    /// 免费感知半径（此范围内扫描不耗能）
+    pub scan_free_radius: f64,
+    /// 最大感知半径
+    pub scan_max_radius: f64,
+    /// 最大扫描角速度（度/秒）
+    pub scan_max_angular_velocity: f64,
+    /// 扫描单位成本（每度耗能 = max(0, r-free)² × π/360 × cost）
+    pub scan_cost: f64,
     /// 接触判定距离
     pub contact_range: f64,
 
@@ -51,17 +66,23 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            initial_speed: 3.5,  // 初始倍速，加速演化
+            initial_speed: 1.0,  // 初始倍速，加速演化
 
             min_creatures: 40,  // 更大种群，增加有用变异概率
             max_creatures: 150, // 限制最大数量以保证性能（O(n²)聚类）
 
             initial_energy: 70.0,  // 更多初始能量，延长生存时间
 
-            energy_spawn_interval: 0.15,  // 更频繁生成
+            energy_spawn_interval: 0.6,  // 更频繁生成
             energy_spawn_count: 2,  // 每次生成更多
-            energy_particle_value: 50.0,  // 每个粒子更多能量
+            energy_particle_value: 40.0,  // 每个粒子更多能量
             energy_particle_lifetime: 40.0,  // 能量存在更久
+
+            energy_wave_enabled: true,  // 启用能量波动
+            energy_wave_amplitude: 0.5,  // 波动幅度50%（强度范围 0.5~1.5）
+            // 使用质数周期（秒），产生长周期/弱周期效果
+            // 总周期 = LCM(31, 47, 73, 113) ≈ 12,005,773 秒（超过138天）
+            energy_wave_periods: [31.0, 47.0, 73.0, 113.0],
 
             base_metabolism: 0.05,  // 降低基础代谢
             percent_metabolism: 0.002,  // 降低百分比代谢
@@ -69,7 +90,10 @@ impl Default for Config {
             reproduce_threshold: 28.0,  // 降低繁殖阈值，让更多生物能繁殖
             reproduce_energy_ratio: 0.4,  // 子代获得40%能量
 
-            sense_range: 50.0,
+            scan_free_radius: 50.0,      // 免费扫描半径
+            scan_max_radius: 200.0,       // 最大扫描半径
+            scan_max_angular_velocity: 180.0,  // 最大角速度（度/秒）
+            scan_cost: 0.00001,           // 扫描单位成本
             contact_range: 8.0,
 
             mutation_rate: 0.15,  // 提高变异率，加速结构探索

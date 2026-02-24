@@ -217,7 +217,7 @@ impl eframe::App for CellWorldApp {
 
         // 更新面板缓存
         let t_panel = std::time::Instant::now();
-        self.panel.update(&self.world, self.config.species_similarity_threshold, self.fps, now);
+        self.panel.update(&self.world, &self.config, self.config.species_similarity_threshold, self.fps, now);
         self.frame_perf.panel_update_ms = t_panel.elapsed().as_secs_f64() * 1000.0;
 
         // 每10秒记录一次日志

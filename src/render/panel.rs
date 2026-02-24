@@ -2,6 +2,7 @@ use egui::Ui;
 use rustc_hash::FxHashMap;
 use std::time::Instant;
 
+use crate::config::Config;
 use crate::store::Store;
 use crate::world::World;
 use super::Selection;
@@ -48,6 +49,8 @@ pub struct CachedStats {
     pub fps: f64,
     pub creature_count: usize,
     pub energy_particle_count: usize,
+    /// 当前能量投放强度（波动值，1.0 = 100%）
+    pub energy_intensity: f64,
     pub alive_families: usize,
     pub extinct_families: usize,
     pub largest_family: usize,
@@ -78,9 +81,11 @@ impl StatsPanel {
     }
 
     /// 更新缓存的统计数据
-    pub fn update(&mut self, world: &World, species_threshold: f64, fps: f64, now: Instant) {
+    pub fn update(&mut self, world: &World, config: &Config, species_threshold: f64, fps: f64, now: Instant) {
         // fps 每帧都更新
         self.cached_stats.fps = fps;
+        // 能量强度每帧更新（显示波动效果）
+        self.cached_stats.energy_intensity = world.calculate_energy_intensity(config);
 
         // 使用真实时间进行缓存检查，避免速度倍率影响
         if now.duration_since(self.last_update).as_secs_f64() >= self.update_interval {
@@ -91,6 +96,7 @@ impl StatsPanel {
                 fps,
                 creature_count: stats.creature_count,
                 energy_particle_count: stats.energy_particle_count,
+                energy_intensity: self.cached_stats.energy_intensity,
                 alive_families: stats.alive_families,
                 extinct_families: stats.extinct_families,
                 largest_family: stats.largest_family,
@@ -191,6 +197,17 @@ impl StatsPanel {
             ui.label(format!("能量: {}", self.cached_stats.energy_particle_count));
             ui.label(" │ ");
             ui.label(format!("均能: {:.0}", self.cached_stats.avg_energy));
+            ui.label(" │ ");
+            // 能量强度（波动值），用不同颜色表示高低
+            let intensity = self.cached_stats.energy_intensity;
+            let color = if intensity > 1.2 {
+                egui::Color32::from_rgb(100, 255, 100)  // 高强度：绿色
+            } else if intensity < 0.8 {
+                egui::Color32::from_rgb(255, 150, 100)  // 低强度：橙色
+            } else {
+                egui::Color32::from_rgb(200, 200, 200)  // 正常：灰色
+            };
+            ui.colored_label(color, format!("☀{:.0}%", intensity * 100.0));
         });
 
         // 家族统计
