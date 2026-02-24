@@ -219,36 +219,33 @@ impl StatsPanel {
             ui.colored_label(color, format!("☀{:.0}%", intensity * 100.0));
         });
 
-        // 功能解锁统计（每个功能解锁的生物数）
-        let func_names = ["方向", "速度", "吸收", "释放", "繁殖", "转移", "扫描R", "扫描V"];
+        // 功能解锁统计（合并移动，跳过速度）
+        // 索引: 0=方向, 1=速度, 2=吸收, 3=释放, 4=繁殖, 5=转移, 6=扫描R, 7=扫描V
+        let func = &self.cached_stats.function_unlocks;
         ui.horizontal_wrapped(|ui| {
-            ui.label("功能:");
-            for (i, &count) in self.cached_stats.function_unlocks.iter().enumerate() {
-                if i > 0 {
-                    ui.label("│");
-                }
-                ui.label(format!("{}:{}", func_names[i], count));
-            }
+            ui.label(format!(
+                "功能: 移动:{}│吸收:{}│释放:{}│繁殖:{}│转移:{}│半径:{}│角速:{}",
+                func[0], func[2], func[3], func[4], func[5], func[6], func[7]
+            ));
         });
 
-        // 行为触发次数统计
-        let action_names = ["移动", "速度", "吸收", "释放", "繁殖", "转移", "扫描R", "扫描V"];
-        ui.horizontal_wrapped(|ui| {
-            ui.label("行为:");
-            for (i, &count) in self.cached_stats.action_counts.iter().enumerate() {
-                if i > 0 {
-                    ui.label("│");
-                }
-                // 用 K/M 简化大数字显示
-                let display = if count >= 1_000_000 {
-                    format!("{}:{:.1}M", action_names[i], count as f64 / 1_000_000.0)
-                } else if count >= 1_000 {
-                    format!("{}:{:.1}K", action_names[i], count as f64 / 1_000.0)
-                } else {
-                    format!("{}:{}", action_names[i], count)
-                };
-                ui.label(display);
+        // 行为触发次数统计（跳过速度，用 K/M 简化显示）
+        let acts = &self.cached_stats.action_counts;
+        let format_count = |c: usize| -> String {
+            if c >= 1_000_000 {
+                format!("{:.1}M", c as f64 / 1_000_000.0)
+            } else if c >= 1_000 {
+                format!("{:.1}K", c as f64 / 1_000.0)
+            } else {
+                format!("{}", c)
             }
+        };
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!(
+                "行为: 移动:{}│吸收:{}│释放:{}│繁殖:{}│转移:{}│半径:{}│角速:{}",
+                format_count(acts[0]), format_count(acts[2]), format_count(acts[3]),
+                format_count(acts[4]), format_count(acts[5]), format_count(acts[6]), format_count(acts[7])
+            ));
         });
 
         // 排行榜
