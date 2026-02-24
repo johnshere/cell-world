@@ -219,9 +219,9 @@ impl StatsPanel {
             ui.label(format!("最大代: {}", self.cached_stats.max_generation));
         });
 
-        // 种族统计
+        // 种群统计
         ui.horizontal_wrapped(|ui| {
-            ui.label(format!("种族: {}", self.cached_stats.species_count));
+            ui.label(format!("种群: {}", self.cached_stats.species_count));
             ui.label(" │ ");
             ui.label(format!("最多种: {}", self.cached_stats.largest_species));
             ui.label(" │ ");
@@ -241,9 +241,9 @@ impl StatsPanel {
                 }
             });
             ui.separator();
-            // 种族前三
+            // 种群前三
             ui.vertical(|ui| {
-                ui.label("种族前三:");
+                ui.label("种群前三:");
                 for (i, entry) in self.cached_stats.top_species.iter().enumerate() {
                     ui.label(format!("{}. {}[${}]", i + 1, entry.count, entry.species_id));
                 }
@@ -316,7 +316,7 @@ impl StatsPanel {
                         });
 
                         ui.horizontal(|ui| {
-                            ui.label("种族ID:");
+                            ui.label("种群ID:");
                             let species_id = creature_species_map.get(&creature.id).copied().unwrap_or(0);
                             ui.label(format!("{}", species_id));
                         });
