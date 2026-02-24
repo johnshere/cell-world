@@ -56,9 +56,10 @@ pub struct CachedStats {
     pub extinct_families: usize,
     pub max_generation: usize,
     pub avg_energy: f64,
-    // 行为统计
-    pub transfer_unlocked: usize,
-    pub release_unlocked: usize,
+    // 功能解锁统计（每个功能解锁的生物数）
+    pub function_unlocks: [usize; 8],
+    // 行为触发统计（累计触发次数）
+    pub action_counts: [usize; 8],
     // 种群统计
     pub species_count: usize,
     pub top_families: Vec<RankedEntry>,
@@ -101,8 +102,8 @@ impl StatsPanel {
                 extinct_families: stats.extinct_families,
                 max_generation: stats.max_generation,
                 avg_energy: stats.avg_energy,
-                transfer_unlocked: stats.transfer_unlocked,
-                release_unlocked: stats.release_unlocked,
+                function_unlocks: stats.function_unlocks,
+                action_counts: stats.action_counts,
                 species_count: stats.species_count,
                 top_families: stats.top_families.iter()
                     .map(|e| RankedEntry {
@@ -188,16 +189,24 @@ impl StatsPanel {
             }
         });
 
-        // 数量统计
+        // 统计（一行显示）
         ui.horizontal_wrapped(|ui| {
-            ui.label(format!("生物: {}", self.cached_stats.creature_count));
-            ui.label(" │ ");
-            ui.label(format!("粒子: {}", self.cached_stats.energy_particle_count));
-            ui.label(" │ ");
-            ui.label(format!("总能: {:.0}", self.cached_stats.total_energy));
-            ui.label(" │ ");
-            ui.label(format!("均能: {:.0}", self.cached_stats.avg_energy));
-            ui.label(" │ ");
+            ui.label(format!("生物:{}", self.cached_stats.creature_count));
+            ui.label("│");
+            ui.label(format!("粒子:{}", self.cached_stats.energy_particle_count));
+            ui.label("│");
+            ui.label(format!("总能:{:.0}", self.cached_stats.total_energy));
+            ui.label("│");
+            ui.label(format!("均能:{:.0}", self.cached_stats.avg_energy));
+            ui.label("│");
+            ui.label(format!("家族:{}", self.cached_stats.alive_families));
+            ui.label("│");
+            ui.label(format!("灭绝:{}", self.cached_stats.extinct_families));
+            ui.label("│");
+            ui.label(format!("代:{}", self.cached_stats.max_generation));
+            ui.label("│");
+            ui.label(format!("种群:{}", self.cached_stats.species_count));
+            ui.label("│");
             // 能量强度（波动值），用不同颜色表示高低
             let intensity = self.cached_stats.energy_intensity;
             let color = if intensity > 1.2 {
@@ -210,20 +219,36 @@ impl StatsPanel {
             ui.colored_label(color, format!("☀{:.0}%", intensity * 100.0));
         });
 
-        // 家族统计
+        // 功能解锁统计（每个功能解锁的生物数）
+        let func_names = ["方向", "速度", "吸收", "释放", "繁殖", "转移", "扫描R", "扫描V"];
         ui.horizontal_wrapped(|ui| {
-            ui.label(format!("家族: {} | 灭绝: {}", self.cached_stats.alive_families, self.cached_stats.extinct_families));
-            ui.label(" │ ");
-            ui.label(format!("最大代: {}", self.cached_stats.max_generation));
+            ui.label("功能:");
+            for (i, &count) in self.cached_stats.function_unlocks.iter().enumerate() {
+                if i > 0 {
+                    ui.label("│");
+                }
+                ui.label(format!("{}:{}", func_names[i], count));
+            }
         });
 
-        // 种群统计
+        // 行为触发次数统计
+        let action_names = ["移动", "速度", "吸收", "释放", "繁殖", "转移", "扫描R", "扫描V"];
         ui.horizontal_wrapped(|ui| {
-            ui.label(format!("种群: {}", self.cached_stats.species_count));
-            ui.label(" │ ");
-            ui.label(format!("释放: {}", self.cached_stats.release_unlocked));
-            ui.label(" │ ");
-            ui.label(format!("转移: {}", self.cached_stats.transfer_unlocked));
+            ui.label("行为:");
+            for (i, &count) in self.cached_stats.action_counts.iter().enumerate() {
+                if i > 0 {
+                    ui.label("│");
+                }
+                // 用 K/M 简化大数字显示
+                let display = if count >= 1_000_000 {
+                    format!("{}:{:.1}M", action_names[i], count as f64 / 1_000_000.0)
+                } else if count >= 1_000 {
+                    format!("{}:{:.1}K", action_names[i], count as f64 / 1_000.0)
+                } else {
+                    format!("{}:{}", action_names[i], count)
+                };
+                ui.label(display);
+            }
         });
 
         // 排行榜

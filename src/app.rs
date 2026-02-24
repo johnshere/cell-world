@@ -117,8 +117,8 @@ impl CellWorldApp {
                 .open(log_path)
             {
                 let _ = writeln!(file, "# Cell World 运行日志\n");
-                let _ = writeln!(file, "| 时间(s) | FPS | 生物 | 粒子 | 总能 | 存活 | 灭绝 | 最大代 | 均能 | 种群 | 释放 | 转移 |");
-                let _ = writeln!(file, "|---------|-----|------|------|------|------|------|--------|------|------|------|------|");
+                let _ = writeln!(file, "| 时间 | FPS | 生物 | 粒子 | 总能 | 家族 | 灭绝 | 代 | 均能 | 种群 | 功能解锁(方向/速度/吸收/释放/繁殖/转移/扫描R/扫描V) |");
+                let _ = writeln!(file, "|------|-----|------|------|------|------|------|-----|------|------|-------------------------------------------------------|");
             }
             // 性能分析日志
             if let Ok(mut file) = OpenOptions::new()
@@ -140,9 +140,10 @@ impl CellWorldApp {
             .append(true)
             .open(log_path)
         {
+            let func = &stats.function_unlocks;
             let _ = writeln!(
                 file,
-                "| {:.0} | {:.0} | {} | {} | {:.0} | {} | {} | {} | {:.0} | {} | {} | {} |",
+                "| {:.0} | {:.0} | {} | {} | {:.0} | {} | {} | {} | {:.0} | {} | {}/{}/{}/{}/{}/{}/{}/{} |",
                 stats.time,
                 stats.fps,
                 stats.creature_count,
@@ -153,8 +154,7 @@ impl CellWorldApp {
                 stats.max_generation,
                 stats.avg_energy,
                 stats.species_count,
-                stats.release_unlocked,
-                stats.transfer_unlocked
+                func[0], func[1], func[2], func[3], func[4], func[5], func[6], func[7]
             );
         }
 

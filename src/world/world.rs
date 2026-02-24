@@ -53,6 +53,9 @@ pub struct World {
 
     // 缓存清理计时器
     cache_cleanup_timer: f64,
+
+    // 行为触发次数统计（8个功能）
+    pub action_counts: [usize; 8],
 }
 
 impl World {
@@ -77,6 +80,7 @@ impl World {
             perf_stats: PerfStats::default(),
             similarity_cache: RefCell::new(FxHashMap::default()),
             cache_cleanup_timer: 0.0,
+            action_counts: [0; 8],
         }
     }
 
@@ -553,12 +557,30 @@ impl World {
             match func_id {
                 0 => move_direction = Some(value),  // 移动方向
                 1 => move_speed = Some(value),      // 移动速度
-                2 => self.action_absorb(creature_idx, value, config),
-                3 => self.action_release(creature_idx, value, config),
-                4 => self.action_reproduce(creature_idx, value, config),
-                5 => self.action_transfer(creature_idx, value, config),
-                6 => self.action_set_scan_radius(creature_idx, value, config),
-                7 => self.action_set_scan_velocity(creature_idx, value, config),
+                2 => {
+                    self.action_absorb(creature_idx, value, config);
+                    self.action_counts[2] += 1;
+                }
+                3 => {
+                    self.action_release(creature_idx, value, config);
+                    self.action_counts[3] += 1;
+                }
+                4 => {
+                    self.action_reproduce(creature_idx, value, config);
+                    self.action_counts[4] += 1;
+                }
+                5 => {
+                    self.action_transfer(creature_idx, value, config);
+                    self.action_counts[5] += 1;
+                }
+                6 => {
+                    self.action_set_scan_radius(creature_idx, value, config);
+                    self.action_counts[6] += 1;
+                }
+                7 => {
+                    self.action_set_scan_velocity(creature_idx, value, config);
+                    self.action_counts[7] += 1;
+                }
                 _ => {}
             }
         }
@@ -566,6 +588,7 @@ impl World {
         // 执行移动（需要方向和速度都有值）
         if let (Some(dir), Some(spd)) = (move_direction, move_speed) {
             self.action_move(creature_idx, dir, spd, dt, config);
+            self.action_counts[0] += 1;  // 移动算一次
         }
     }
 
@@ -788,13 +811,15 @@ impl World {
             creature_energy / alive_creatures.len() as f64
         };
 
-        // 统计解锁高级功能的生物数
-        let transfer_unlocked = alive_creatures.iter()
-            .filter(|c| c.genome.output_map.contains(&5))
-            .count();
-        let release_unlocked = alive_creatures.iter()
-            .filter(|c| c.genome.output_map.contains(&3))
-            .count();
+        // 统计每个功能解锁的生物数
+        let mut function_unlocks = [0usize; 8];
+        for creature in &alive_creatures {
+            for &func_id in &creature.genome.output_map {
+                if func_id < 8 {
+                    function_unlocks[func_id] += 1;
+                }
+            }
+        }
 
         // 计算种群分组（使用并查集思想）
         let (species_count, top_species, creature_species_map) =
@@ -849,8 +874,8 @@ impl World {
             extinct_families: self.extinct_families,
             max_generation,
             avg_energy,
-            transfer_unlocked,
-            release_unlocked,
+            function_unlocks,
+            action_counts: self.action_counts,
             species_count,
             top_families,
             top_species,
@@ -1047,9 +1072,10 @@ pub struct WorldStats {
     pub extinct_families: usize,
     pub max_generation: usize,
     pub avg_energy: f64,
-    // 行为统计
-    pub transfer_unlocked: usize,  // 解锁转移功能的生物数
-    pub release_unlocked: usize,   // 解锁释放功能的生物数
+    // 功能解锁统计（每个功能解锁的生物数）
+    pub function_unlocks: [usize; 8],
+    // 行为触发统计（累计触发次数）
+    pub action_counts: [usize; 8],
     // 种群统计
     pub species_count: usize,      // 种群数量
     pub top_families: Vec<RankedEntry>,   // 前三家族
