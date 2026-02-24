@@ -71,12 +71,12 @@ impl Default for Config {
             min_creatures: 40,  // 更大种群，增加有用变异概率
             max_creatures: 150, // 限制最大数量以保证性能（O(n²)聚类）
 
-            initial_energy: 45.0,  // 初始能量略高于繁殖阈值
+            initial_energy: 50.0,  // 初始能量更高，确保能繁殖一次
 
-            energy_spawn_interval: 0.6,  // 适中生成频率
-            energy_spawn_count: 2,  // 每次生成2个
-            energy_particle_value: 25.0,  // 单个粒子价值适中，促进竞争
-            energy_particle_lifetime: 40.0,  // 能量存在更久
+            energy_spawn_interval: 0.5,  // 略快生成，增加能量供给
+            energy_spawn_count: 3,  // 每次生成3个，增加能量可用性
+            energy_particle_value: 30.0,  // 提高粒子价值，让觅食更有效
+            energy_particle_lifetime: 45.0,  // 能量存在更久
 
             energy_wave_enabled: true,  // 启用能量波动
             energy_wave_amplitude: 0.5,  // 波动幅度50%（强度范围 0.5~1.5）
@@ -84,11 +84,11 @@ impl Default for Config {
             // 总周期 = LCM(31, 47, 73, 113) ≈ 12,005,773 秒（超过138天）
             energy_wave_periods: [31.0, 47.0, 73.0, 113.0],
 
-            base_metabolism: 0.15,  // 高基础消耗，强迫移动觅食
-            percent_metabolism: 0.008,  // 高百分比代谢，能量多消耗快，鼓励繁殖
+            base_metabolism: 0.10,  // 降低基础消耗，减轻生存压力
+            percent_metabolism: 0.006,  // 降低百分比代谢，高能量生物更持久
             move_cost: 0.001,  // 移动消耗极低，移动比待机划算
-            reproduce_threshold: 35.0,  // 繁殖阈值适中，让成功觅食者能繁殖
-            reproduce_energy_ratio: 0.35,  // 子代获得35%能量，确保子代能存活
+            reproduce_threshold: 30.0,  // 降低繁殖阈值，更易繁殖
+            reproduce_energy_ratio: 0.45,  // 子代获得45%能量，确保子代能存活
 
             scan_free_radius: 50.0,      // 免费扫描半径
             scan_max_radius: 200.0,       // 最大扫描半径
