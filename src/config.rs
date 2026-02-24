@@ -71,11 +71,11 @@ impl Default for Config {
             min_creatures: 40,  // 更大种群，增加有用变异概率
             max_creatures: 150, // 限制最大数量以保证性能（O(n²)聚类）
 
-            initial_energy: 50.0,  // 初始能量适中，略高于繁殖阈值
+            initial_energy: 45.0,  // 初始能量略高于繁殖阈值
 
-            energy_spawn_interval: 0.8,  // 适中的生成频率，维持能量供给
-            energy_spawn_count: 1,  // 每次只生成1个（稀缺但稳定）
-            energy_particle_value: 50.0,  // 单个粒子价值适中
+            energy_spawn_interval: 0.5,  // 较快生成频率，增加能量供给
+            energy_spawn_count: 2,  // 每次生成2个
+            energy_particle_value: 30.0,  // 单个粒子价值降低，总量增加
             energy_particle_lifetime: 40.0,  // 能量存在更久
 
             energy_wave_enabled: true,  // 启用能量波动
@@ -87,14 +87,14 @@ impl Default for Config {
             base_metabolism: 0.15,  // 高基础消耗，强迫移动觅食
             percent_metabolism: 0.008,  // 高百分比代谢，能量多消耗快，鼓励繁殖
             move_cost: 0.001,  // 移动消耗极低，移动比待机划算
-            reproduce_threshold: 38.0,  // 繁殖阈值适中，让成功觅食者能繁殖
+            reproduce_threshold: 35.0,  // 繁殖阈值适中，让成功觅食者能繁殖
             reproduce_energy_ratio: 0.35,  // 子代获得35%能量，确保子代能存活
 
             scan_free_radius: 50.0,      // 免费扫描半径
             scan_max_radius: 200.0,       // 最大扫描半径
             scan_max_angular_velocity: 180.0,  // 最大角速度（度/秒）
             scan_cost: 0.00001,           // 扫描单位成本
-            contact_range: 8.0,
+            contact_range: 15.0,  // 增大接触范围，让吸收更容易
 
             mutation_rate: 0.15,  // 提高变异率，加速结构探索
             initial_connections_min: 6,  // 更多初始连接，增加有用组合概率
