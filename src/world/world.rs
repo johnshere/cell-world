@@ -60,7 +60,7 @@ pub struct World {
 
 impl World {
     pub fn new(config: &Config) -> Self {
-        Self {
+        let mut world = Self {
             creatures: Vec::new(),
             energy_particles: Vec::new(),
             creature_grid: SpatialGrid::new(config.scan_max_radius),
@@ -81,7 +81,12 @@ impl World {
             similarity_cache: RefCell::new(FxHashMap::default()),
             cache_cleanup_timer: 0.0,
             action_counts: [0; 8],
+        };
+        // 生成初始生物
+        for _ in 0..config.min_creatures {
+            world.spawn_creature(config);
         }
+        world
     }
 
     /// 获取缓存的相似度（或计算并缓存）
