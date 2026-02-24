@@ -219,17 +219,17 @@ impl StatsPanel {
             ui.colored_label(color, format!("☀{:.0}%", intensity * 100.0));
         });
 
-        // 功能解锁统计（合并移动，跳过速度）
-        // 索引: 0=方向, 1=速度, 2=吸收, 3=释放, 4=繁殖, 5=转移, 6=扫描R, 7=扫描V
+        // 功能解锁统计（5个核心功能）
+        // 索引: 0=方向, 2=吸收, 3=释放, 4=繁殖, 5=转移
         let func = &self.cached_stats.function_unlocks;
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
-                "功能: 移动:{}│吸收:{}│释放:{}│繁殖:{}│转移:{}│半径:{}│角速:{}",
-                func[0], func[2], func[3], func[4], func[5], func[6], func[7]
+                "功能: 移动:{}│吸收:{}│释放:{}│繁殖:{}│转移:{}",
+                func[0], func[2], func[3], func[4], func[5]
             ));
         });
 
-        // 行为触发次数统计（跳过速度，用 K/M 简化显示）
+        // 行为触发次数统计（用 K/M 简化显示）
         let acts = &self.cached_stats.action_counts;
         let format_count = |c: usize| -> String {
             if c >= 1_000_000 {
@@ -242,9 +242,9 @@ impl StatsPanel {
         };
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
-                "行为: 移动:{}│吸收:{}│释放:{}│繁殖:{}│转移:{}│半径:{}│角速:{}",
+                "行为: 移动:{}│吸收:{}│释放:{}│繁殖:{}│转移:{}",
                 format_count(acts[0]), format_count(acts[2]), format_count(acts[3]),
-                format_count(acts[4]), format_count(acts[5]), format_count(acts[6]), format_count(acts[7])
+                format_count(acts[4]), format_count(acts[5])
             ));
         });
 

@@ -582,16 +582,12 @@ impl World {
                     }
                 }
                 6 => {
-                    // 扫描半径调整：只在值变化超过阈值时统计
-                    if self.action_set_scan_radius(creature_idx, value, config) {
-                        self.action_counts[6] += 1;
-                    }
+                    // 扫描半径调整
+                    self.action_set_scan_radius(creature_idx, value, config);
                 }
                 7 => {
-                    // 扫描角速度调整：只在值变化超过阈值时统计
-                    if self.action_set_scan_velocity(creature_idx, value, config) {
-                        self.action_counts[7] += 1;
-                    }
+                    // 扫描角速度调整
+                    self.action_set_scan_velocity(creature_idx, value, config);
                 }
                 _ => {}
             }
@@ -753,31 +749,19 @@ impl World {
     }
 
     // 功能 6: 设置扫描半径
-    // 返回是否有显著变化（>10%）
-    fn action_set_scan_radius(&mut self, idx: usize, value: f64, config: &Config) -> bool {
+    fn action_set_scan_radius(&mut self, idx: usize, value: f64, config: &Config) {
         // value: -1~1 映射到 free_radius ~ max_radius
         let normalized = (value + 1.0) / 2.0;  // 0~1
         let radius = config.scan_free_radius + normalized * (config.scan_max_radius - config.scan_free_radius);
-        let old_radius = self.creatures[idx].scan_radius;
         self.creatures[idx].scan_radius = radius;
-        // 只在变化超过10%时统计
-        (radius - old_radius).abs() / old_radius > 0.1
     }
 
     // 功能 7: 设置扫描角速度
-    // 返回是否有显著变化（>10%）
-    fn action_set_scan_velocity(&mut self, idx: usize, value: f64, config: &Config) -> bool {
+    fn action_set_scan_velocity(&mut self, idx: usize, value: f64, config: &Config) {
         // value: -1~1 映射到 0 ~ max_angular_velocity
         let normalized = (value + 1.0) / 2.0;  // 0~1
         let velocity = normalized * config.scan_max_angular_velocity;
-        let old_velocity = self.creatures[idx].scan_angular_velocity;
         self.creatures[idx].scan_angular_velocity = velocity;
-        // 只在变化超过10%时统计（避免除零）
-        if old_velocity < 0.1 {
-            velocity > 0.1
-        } else {
-            (velocity - old_velocity).abs() / old_velocity > 0.1
-        }
     }
 
     /// 更新能量粒子

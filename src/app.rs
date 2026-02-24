@@ -117,8 +117,8 @@ impl CellWorldApp {
                 .open(log_path)
             {
                 let _ = writeln!(file, "# Cell World 运行日志\n");
-                let _ = writeln!(file, "| 时间 | 生物 | 粒子 | 总能 | 家族 | 灭绝 | 代 | 种群 | 功能(移动/吸收/释放/繁殖/转移/半径/角速) | 行为(移动/吸收/释放/繁殖/转移/半径/角速) |");
-                let _ = writeln!(file, "|------|------|------|------|------|------|-----|------|----------------------------------------|----------------------------------------|");
+                let _ = writeln!(file, "| 时间 | 生物 | 粒子 | 总能 | 家族 | 灭绝 | 代 | 种群 | 功能(移动/吸收/释放/繁殖/转移) | 行为(移动/吸收/释放/繁殖/转移) |");
+                let _ = writeln!(file, "|------|------|------|------|------|------|-----|------|------------------------------|------------------------------|");
             }
             // 性能分析日志
             if let Ok(mut file) = OpenOptions::new()
@@ -144,7 +144,7 @@ impl CellWorldApp {
             let acts = &stats.action_counts;
             let _ = writeln!(
                 file,
-                "| {:.0} | {} | {} | {:.0} | {} | {} | {} | {} | {}/{}/{}/{}/{}/{}/{} | {}/{}/{}/{}/{}/{}/{} |",
+                "| {:.0} | {} | {} | {:.0} | {} | {} | {} | {} | {}/{}/{}/{}/{} | {}/{}/{}/{}/{} |",
                 stats.time,
                 stats.creature_count,
                 stats.energy_particle_count,
@@ -153,8 +153,8 @@ impl CellWorldApp {
                 stats.extinct_families,
                 stats.max_generation,
                 stats.species_count,
-                func[0], func[2], func[3], func[4], func[5], func[6], func[7],
-                acts[0], acts[2], acts[3], acts[4], acts[5], acts[6], acts[7]
+                func[0], func[2], func[3], func[4], func[5],
+                acts[0], acts[2], acts[3], acts[4], acts[5]
             );
         }
 
