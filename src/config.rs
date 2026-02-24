@@ -84,11 +84,11 @@ impl Default for Config {
             // 总周期 = LCM(31, 47, 73, 113) ≈ 12,005,773 秒（超过138天）
             energy_wave_periods: [31.0, 47.0, 73.0, 113.0],
 
-            base_metabolism: 0.05,  // 降低基础代谢
-            percent_metabolism: 0.002,  // 降低百分比代谢
-            move_cost: 0.1,
-            reproduce_threshold: 28.0,  // 降低繁殖阈值，让更多生物能繁殖
-            reproduce_energy_ratio: 0.4,  // 子代获得40%能量
+            base_metabolism: 0.1,  // 待机消耗翻倍，鼓励活动
+            percent_metabolism: 0.002,  // 百分比代谢
+            move_cost: 0.05,  // 移动消耗减半，鼓励移动
+            reproduce_threshold: 28.0,  // 繁殖阈值
+            reproduce_energy_ratio: 0.2,  // 子代获得20%能量（五分之一），保留更多给父代
 
             scan_free_radius: 50.0,      // 免费扫描半径
             scan_max_radius: 200.0,       // 最大扫描半径
