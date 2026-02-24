@@ -85,7 +85,7 @@ impl Default for Config {
             energy_wave_periods: [31.0, 47.0, 73.0, 113.0],
 
             base_metabolism: 0.15,  // 待机消耗高，鼓励活动
-            percent_metabolism: 0.002,  // 百分比代谢
+            percent_metabolism: 0.004,  // 百分比代谢翻倍
             move_cost: 0.002,  // 移动消耗极低，让移动比待机更划算
             reproduce_threshold: 28.0,  // 繁殖阈值
             reproduce_energy_ratio: 0.2,  // 子代获得20%能量（五分之一），保留更多给父代

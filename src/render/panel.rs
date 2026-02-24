@@ -49,22 +49,21 @@ pub struct CachedStats {
     pub fps: f64,
     pub creature_count: usize,
     pub energy_particle_count: usize,
+    pub total_energy: f64,           // 总能量（生物+粒子）
     /// 当前能量投放强度（波动值，1.0 = 100%）
     pub energy_intensity: f64,
     pub alive_families: usize,
     pub extinct_families: usize,
-    pub largest_family: usize,
     pub max_generation: usize,
     pub avg_energy: f64,
     // 行为统计
     pub transfer_unlocked: usize,
     pub release_unlocked: usize,
-    // 种族统计
+    // 种群统计
     pub species_count: usize,
-    pub largest_species: usize,
     pub top_families: Vec<RankedEntry>,
     pub top_species: Vec<RankedEntry>,
-    // 生物ID -> 种族ID 映射
+    // 生物ID -> 种群ID 映射
     pub creature_species_map: FxHashMap<u64, usize>,
 }
 
@@ -96,16 +95,15 @@ impl StatsPanel {
                 fps,
                 creature_count: stats.creature_count,
                 energy_particle_count: stats.energy_particle_count,
+                total_energy: stats.total_energy,
                 energy_intensity: self.cached_stats.energy_intensity,
                 alive_families: stats.alive_families,
                 extinct_families: stats.extinct_families,
-                largest_family: stats.largest_family,
                 max_generation: stats.max_generation,
                 avg_energy: stats.avg_energy,
                 transfer_unlocked: stats.transfer_unlocked,
                 release_unlocked: stats.release_unlocked,
                 species_count: stats.species_count,
-                largest_species: stats.largest_species,
                 top_families: stats.top_families.iter()
                     .map(|e| RankedEntry {
                         id: e.id,
@@ -194,7 +192,9 @@ impl StatsPanel {
         ui.horizontal_wrapped(|ui| {
             ui.label(format!("生物: {}", self.cached_stats.creature_count));
             ui.label(" │ ");
-            ui.label(format!("能量: {}", self.cached_stats.energy_particle_count));
+            ui.label(format!("粒子: {}", self.cached_stats.energy_particle_count));
+            ui.label(" │ ");
+            ui.label(format!("总能: {:.0}", self.cached_stats.total_energy));
             ui.label(" │ ");
             ui.label(format!("均能: {:.0}", self.cached_stats.avg_energy));
             ui.label(" │ ");
@@ -214,16 +214,12 @@ impl StatsPanel {
         ui.horizontal_wrapped(|ui| {
             ui.label(format!("家族: {} | 灭绝: {}", self.cached_stats.alive_families, self.cached_stats.extinct_families));
             ui.label(" │ ");
-            ui.label(format!("最大族: {}", self.cached_stats.largest_family));
-            ui.label(" │ ");
             ui.label(format!("最大代: {}", self.cached_stats.max_generation));
         });
 
-        // 统计
+        // 种群统计
         ui.horizontal_wrapped(|ui| {
             ui.label(format!("种群: {}", self.cached_stats.species_count));
-            ui.label(" │ ");
-            ui.label(format!("最多种: {}", self.cached_stats.largest_species));
             ui.label(" │ ");
             ui.label(format!("释放: {}", self.cached_stats.release_unlocked));
             ui.label(" │ ");

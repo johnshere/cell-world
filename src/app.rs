@@ -117,8 +117,8 @@ impl CellWorldApp {
                 .open(log_path)
             {
                 let _ = writeln!(file, "# Cell World 运行日志\n");
-                let _ = writeln!(file, "| 时间(s) | FPS | 生物 | 能量 | 存活 | 灭绝 | 最大族 | 最大代 | 均能 | 种群 | 最多种 | 释放 | 转移 |");
-                let _ = writeln!(file, "|---------|-----|------|------|------|------|--------|--------|------|------|--------|------|------|");
+                let _ = writeln!(file, "| 时间(s) | FPS | 生物 | 粒子 | 总能 | 存活 | 灭绝 | 最大代 | 均能 | 种群 | 释放 | 转移 |");
+                let _ = writeln!(file, "|---------|-----|------|------|------|------|------|--------|------|------|------|------|");
             }
             // 性能分析日志
             if let Ok(mut file) = OpenOptions::new()
@@ -142,18 +142,17 @@ impl CellWorldApp {
         {
             let _ = writeln!(
                 file,
-                "| {:.0} | {:.0} | {} | {} | {} | {} | {} | {} | {:.0} | {} | {} | {} | {} |",
+                "| {:.0} | {:.0} | {} | {} | {:.0} | {} | {} | {} | {:.0} | {} | {} | {} |",
                 stats.time,
                 stats.fps,
                 stats.creature_count,
                 stats.energy_particle_count,
+                stats.total_energy,
                 stats.alive_families,
                 stats.extinct_families,
-                stats.largest_family,
                 stats.max_generation,
                 stats.avg_energy,
                 stats.species_count,
-                stats.largest_species,
                 stats.release_unlocked,
                 stats.transfer_unlocked
             );

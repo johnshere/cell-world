@@ -770,15 +770,22 @@ impl World {
     pub fn stats(&self, species_threshold: f64) -> WorldStats {
         let alive_creatures: Vec<_> = self.creatures.iter().filter(|c| c.alive).collect();
         let alive_families = self.family_stats.len();
-        let largest_family = self.family_stats.values().max().copied().unwrap_or(0);
         let max_generation = alive_creatures.iter()
             .map(|c| c.generation)
             .max()
             .unwrap_or(0);
+
+        // 计算能量统计
+        let creature_energy: f64 = alive_creatures.iter().map(|c| c.energy).sum();
+        let particle_energy: f64 = self.energy_particles.iter()
+            .filter(|e| e.alive)
+            .map(|e| e.energy)
+            .sum();
+        let total_energy = creature_energy + particle_energy;
         let avg_energy = if alive_creatures.is_empty() {
             0.0
         } else {
-            alive_creatures.iter().map(|c| c.energy).sum::<f64>() / alive_creatures.len() as f64
+            creature_energy / alive_creatures.len() as f64
         };
 
         // 统计解锁高级功能的生物数
@@ -789,8 +796,8 @@ impl World {
             .filter(|c| c.genome.output_map.contains(&3))
             .count();
 
-        // 计算种族分组（使用并查集思想）
-        let (species_count, largest_species, top_species, creature_species_map) =
+        // 计算种群分组（使用并查集思想）
+        let (species_count, top_species, creature_species_map) =
             self.calculate_species(&alive_creatures, species_threshold);
 
         // 统计每个家族的种族分布
@@ -836,16 +843,15 @@ impl World {
         WorldStats {
             time: self.time,
             creature_count: alive_creatures.len(),
-            energy_particle_count: self.energy_particles.len(),
+            energy_particle_count: self.energy_particles.iter().filter(|e| e.alive).count(),
+            total_energy,
             alive_families,
             extinct_families: self.extinct_families,
-            largest_family,
             max_generation,
             avg_energy,
             transfer_unlocked,
             release_unlocked,
             species_count,
-            largest_species,
             top_families,
             top_species,
             creature_species_map: id_species_map,
@@ -938,9 +944,9 @@ impl World {
 
     /// 计算种族分组（使用并查集优化，O(n²·α(n)) 代替 O(n³)）
     /// 返回: (种族数, 最大种族数, 种族前三, 生物索引->种族根索引映射)
-    fn calculate_species(&self, alive_creatures: &[&Creature], threshold: f64) -> (usize, usize, Vec<RankedEntry>, FxHashMap<usize, usize>) {
+    fn calculate_species(&self, alive_creatures: &[&Creature], threshold: f64) -> (usize, Vec<RankedEntry>, FxHashMap<usize, usize>) {
         if alive_creatures.is_empty() {
-            return (0, 0, Vec::new(), FxHashMap::default());
+            return (0, Vec::new(), FxHashMap::default());
         }
 
         let n = alive_creatures.len();
@@ -998,9 +1004,8 @@ impl World {
         }
 
         let species_count = species_counts.len();
-        let largest_species = species_counts.values().max().copied().unwrap_or(0);
 
-        // 计算种族前三，找出每个种族的主导家族
+        // 计算种群前三，找出每个种群的主导家族
         let mut species_vec: Vec<_> = species_counts.into_iter()
             .map(|(species_id, count)| {
                 // 找出该种族中数量最多的家族
@@ -1019,7 +1024,7 @@ impl World {
         species_vec.sort_by(|a, b| b.count.cmp(&a.count));
         let top_species: Vec<_> = species_vec.into_iter().take(3).collect();
 
-        (species_count, largest_species, top_species, creature_species_map)
+        (species_count, top_species, creature_species_map)
     }
 }
 
@@ -1037,18 +1042,17 @@ pub struct WorldStats {
     pub time: f64,
     pub creature_count: usize,
     pub energy_particle_count: usize,
+    pub total_energy: f64,         // 总能量（生物+粒子）
     pub alive_families: usize,
     pub extinct_families: usize,
-    pub largest_family: usize,
     pub max_generation: usize,
     pub avg_energy: f64,
     // 行为统计
     pub transfer_unlocked: usize,  // 解锁转移功能的生物数
     pub release_unlocked: usize,   // 解锁释放功能的生物数
-    // 种族统计
-    pub species_count: usize,      // 种族数量
-    pub largest_species: usize,    // 最大种族数量
+    // 种群统计
+    pub species_count: usize,      // 种群数量
     pub top_families: Vec<RankedEntry>,   // 前三家族
-    pub top_species: Vec<RankedEntry>,    // 前三种族
-    pub creature_species_map: FxHashMap<u64, usize>,  // 生物ID -> 种族ID
+    pub top_species: Vec<RankedEntry>,    // 前三种群
+    pub creature_species_map: FxHashMap<u64, usize>,  // 生物ID -> 种群ID
 }
