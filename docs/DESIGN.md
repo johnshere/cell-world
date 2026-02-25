@@ -403,7 +403,6 @@ pub struct Config {
     // 初始化
     pub initial_energy: f64,           // 70.0
     pub min_creatures: usize,          // 40
-    pub max_creatures: usize,          // 150
 
     // 能量生成
     pub energy_spawn_interval: f64,    // 0.6 秒

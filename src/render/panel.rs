@@ -57,9 +57,9 @@ pub struct CachedStats {
     pub max_generation: usize,
     pub avg_energy: f64,
     // 功能解锁统计（每个功能解锁的生物数）
-    pub function_unlocks: [usize; 8],
+    pub function_unlocks: [usize; 9],
     // 行为触发统计（累计触发次数）
-    pub action_counts: [usize; 8],
+    pub action_counts: [usize; 9],
     // 种群统计
     pub species_count: usize,
     pub top_families: Vec<RankedEntry>,
@@ -219,13 +219,13 @@ impl StatsPanel {
             ui.colored_label(color, format!("☀{:.0}%", intensity * 100.0));
         });
 
-        // 功能解锁统计（5个核心功能）
-        // 索引: 0=方向, 2=吸收, 3=释放, 4=繁殖, 5=转移
+        // 功能解锁统计
+        // 索引: 0,1=方向sin/cos, 2=速度, 3=吸收, 4=释放, 5=繁殖, 6=转移, 7=扫描R, 8=扫描V
         let func = &self.cached_stats.function_unlocks;
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
                 "功能: 移动:{}│吸收:{}│释放:{}│繁殖:{}│转移:{}",
-                func[0], func[2], func[3], func[4], func[5]
+                func[0], func[3], func[4], func[5], func[6]
             ));
         });
 
@@ -243,8 +243,8 @@ impl StatsPanel {
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
                 "行为: 移动:{}│吸收:{}│释放:{}│繁殖:{}│转移:{}",
-                format_count(acts[0]), format_count(acts[2]), format_count(acts[3]),
-                format_count(acts[4]), format_count(acts[5])
+                format_count(acts[0]), format_count(acts[3]), format_count(acts[4]),
+                format_count(acts[5]), format_count(acts[6])
             ));
         });
 
@@ -364,7 +364,7 @@ impl StatsPanel {
                         });
 
                         // 功能映射
-                        let func_names = ["移动X", "移动Y", "吸收", "释放", "繁殖", "转移"];
+                        let func_names = ["方向S", "方向C", "速度", "吸收", "释放", "繁殖", "转移", "扫R", "扫V"];
                         ui.horizontal_wrapped(|ui| {
                             ui.label("功能:");
                             for &func_id in &creature.genome.output_map {

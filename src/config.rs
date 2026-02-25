@@ -5,8 +5,6 @@ pub struct Config {
 
     /// 最小生物数量（低于此值自动补充）
     pub min_creatures: usize,
-    /// 最大生物数量（超过此值停止繁殖）
-    pub max_creatures: usize,
 
     /// 初始能量
     pub initial_energy: f64,
@@ -31,8 +29,8 @@ pub struct Config {
 
     /// 基础代谢率（每秒固定消耗）
     pub base_metabolism: f64,
-    /// 百分比代谢率（每秒消耗当前能量的百分比）
-    pub percent_metabolism: f64,
+    /// 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
+    pub age_metabolism_factor: f64,
     /// 移动消耗（每单位距离）
     pub move_cost: f64,
     /// 繁殖所需最低能量
@@ -68,27 +66,25 @@ impl Default for Config {
         Self {
             initial_speed: 1.0,  // 初始倍速，加速演化
 
-            min_creatures: 40,  // 更大种群，增加有用变异概率
-            max_creatures: 150, // 限制最大数量以保证性能（O(n²)聚类）
+            min_creatures: 10,  // 低于此值自动补充
 
             initial_energy: 50.0,  // 初始能量更高，确保能繁殖一次
 
-            energy_spawn_interval: 0.5,  // 略快生成，增加能量供给
-            energy_spawn_count: 3,  // 每次生成3个，增加能量可用性
-            energy_particle_value: 30.0,  // 提高粒子价值，让觅食更有效
-            energy_particle_lifetime: 45.0,  // 能量存在更久
+            energy_spawn_interval: 0.6,  // 略快生成，增加能量供给
+            energy_spawn_count: 2,  // 每次生成3个，增加能量可用性
+            energy_particle_value: 35.0,  // 提高粒子价值，让觅食更有效
+            energy_particle_lifetime: 35.0,  // 能量存在更久
 
             energy_wave_enabled: true,  // 启用能量波动
-            energy_wave_amplitude: 0.5,  // 波动幅度50%（强度范围 0.5~1.5）
+            energy_wave_amplitude: 0.75,  // 波动幅度75%（强度范围 0.25~1.75）
             // 使用质数周期（秒），产生长周期/弱周期效果
-            // 总周期 = LCM(31, 47, 73, 113) ≈ 12,005,773 秒（超过138天）
-            energy_wave_periods: [31.0, 47.0, 73.0, 113.0],
+            energy_wave_periods: [62.0, 94.0, 146.0, 226.0],
 
-            base_metabolism: 0.10,  // 降低基础消耗，减轻生存压力
-            percent_metabolism: 0.006,  // 降低百分比代谢，高能量生物更持久
+            base_metabolism: 0.2,  // 基础消耗
+            age_metabolism_factor: 0.03,  // 年龄倍率：age=33s时消耗×2.0，age=100s时消耗×4.0
             move_cost: 0.001,  // 移动消耗极低，移动比待机划算
-            reproduce_threshold: 30.0,  // 降低繁殖阈值，更易繁殖
-            reproduce_energy_ratio: 0.45,  // 子代获得45%能量，确保子代能存活
+            reproduce_threshold: 50.0,  // 降低繁殖阈值，更易繁殖
+            reproduce_energy_ratio: 0.3,  // 子代获得45%能量，确保子代能存活
 
             scan_free_radius: 50.0,      // 免费扫描半径
             scan_max_radius: 200.0,       // 最大扫描半径

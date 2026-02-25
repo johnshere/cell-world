@@ -44,26 +44,28 @@ pub struct Genome {
 }
 
 impl Genome {
-    /// 输入维度（角度编码: -1~1，与输出方向一致，追逐权重≈+1，躲避权重≈-1）
-    /// [0-3]   最近最大同类: 角度(-1~1), 距离(0~1), 相似度(0~1), 能量(0~1)
-    /// [4-7]   最近最小同类: 角度(-1~1), 距离(0~1), 相似度(0~1), 能量(0~1)
-    /// [8-11]  最近最大异类: 角度(-1~1), 距离(0~1), 相似度(0~1), 能量(0~1)
-    /// [12-15] 最近最小异类: 角度(-1~1), 距离(0~1), 相似度(0~1), 能量(0~1)
-    /// [16]    自身能量(0~1)
-    pub const INPUT_SIZE: usize = 17;
+    /// 输入维度（sin/cos角度编码，无跳变，追逐权重≈+1，逃离权重≈-1）
+    /// [0-4]   最佳同类: sin(θ), cos(θ), 距离(0~1), 相似度(0~1), 能量(0~1)
+    /// [5-9]   最差同类: sin(θ), cos(θ), 距离(0~1), 相似度(0~1), 能量(0~1)
+    /// [10-14] 最佳异类: sin(θ), cos(θ), 距离(0~1), 相似度(0~1), 能量(0~1)
+    /// [15-19] 最差异类: sin(θ), cos(θ), 距离(0~1), 相似度(0~1), 能量(0~1)
+    /// [20-23] 最佳能量粒子: sin(θ), cos(θ), 距离(0~1), 能量(0~1)
+    /// [24]    自身能量(0~1)
+    pub const INPUT_SIZE: usize = 25;
     /// 功能池大小
-    /// [0] 移动方向     -1~1 (tanh输出，与角度输入编码一致)
-    /// [1] 移动速度     0~1
-    /// [2] 吸收
-    /// [3] 释放
-    /// [4] 繁殖
-    /// [5] 能量转移
-    /// [6] 扫描半径     0~1 → 50~200
-    /// [7] 扫描角速度   0~1 → 0~max°/s
-    pub const FUNCTION_POOL_SIZE: usize = 8;
+    /// [0] 移动方向sin   tanh(-1~1)
+    /// [1] 移动方向cos   tanh(-1~1)
+    /// [2] 移动速度      0~1
+    /// [3] 吸收
+    /// [4] 释放
+    /// [5] 繁殖
+    /// [6] 能量转移
+    /// [7] 扫描半径      0~1 → 50~200
+    /// [8] 扫描角速度    0~1 → 0~max°/s
+    pub const FUNCTION_POOL_SIZE: usize = 9;
 
     /// 创建最小基因组（只有输入输出，无隐藏层）
-    /// 必须包含：移动方向(0)、移动速度(1)、吸收(2)、繁殖(4)
+    /// 初始功能：方向sin(0)、方向cos(1)、速度(2)、吸收(3)、繁殖(5)、扫描半径(7)、扫描角速度(8)
     /// 所有连接完全随机，让行为通过进化自然涌现
     pub fn random_minimal(min_connections: usize, max_connections: usize) -> Self {
         let mut rng = rand::thread_rng();
@@ -78,9 +80,8 @@ impl Genome {
             });
         }
 
-        // 核心功能：移动(0,1)、吸收(2)、繁殖(4)、扫描控制(6,7)
-        // 扫描控制让生物能调整感知范围和速度，是演化复杂行为的基础
-        let output_map = vec![0, 1, 2, 4, 6, 7];
+        // 核心功能：方向sin/cos(0,1)、速度(2)、吸收(3)、繁殖(5)、扫描控制(7,8)
+        let output_map = vec![0, 1, 2, 3, 5, 7, 8];
 
         // 为每个输出创建节点和随机连接
         for (i, &_func_id) in output_map.iter().enumerate() {
@@ -103,11 +104,12 @@ impl Genome {
             }
         }
 
+        let next_node_id = Self::INPUT_SIZE + output_map.len();
         Self {
             nodes,
             connections,
             output_map,
-            next_node_id: Self::INPUT_SIZE + 4,
+            next_node_id,
         }
     }
 
@@ -303,30 +305,106 @@ impl Genome {
     }
 
     /// 计算与另一个基因组的相似度
+    /// 要求相同基因类型（连接拓扑）且对应权重近似才算同类
     pub fn similarity(&self, other: &Genome) -> f64 {
-        // 简单的 Jaccard 相似度
-        let self_conns: std::collections::HashSet<(usize, usize)> = self
+        // 构建连接映射: (in_node, out_node) -> weight
+        let self_conns: std::collections::HashMap<(usize, usize), f64> = self
             .connections
             .iter()
             .filter(|c| c.enabled)
-            .map(|c| (c.in_node, c.out_node))
+            .map(|c| ((c.in_node, c.out_node), c.weight))
             .collect();
 
-        let other_conns: std::collections::HashSet<(usize, usize)> = other
+        let other_conns: std::collections::HashMap<(usize, usize), f64> = other
             .connections
             .iter()
             .filter(|c| c.enabled)
-            .map(|c| (c.in_node, c.out_node))
+            .map(|c| ((c.in_node, c.out_node), c.weight))
             .collect();
 
-        let intersection = self_conns.intersection(&other_conns).count();
-        let union = self_conns.union(&other_conns).count();
-
-        if union == 0 {
-            1.0
-        } else {
-            intersection as f64 / union as f64
+        // 收集所有唯一连接键
+        let mut all_keys: std::collections::HashSet<(usize, usize)> =
+            self_conns.keys().cloned().collect();
+        for key in other_conns.keys() {
+            all_keys.insert(*key);
         }
+
+        if all_keys.is_empty() {
+            return 1.0;
+        }
+
+        // 计算相似度：拓扑匹配 + 权重近似
+        let mut similarity_sum = 0.0;
+        for key in &all_keys {
+            if let (Some(&w1), Some(&w2)) = (self_conns.get(key), other_conns.get(key)) {
+                // 双方都有此连接：计算权重相似度
+                // 权重范围 [-2, 2]，最大差值 4.0
+                similarity_sum += 1.0 - (w1 - w2).abs() / 4.0;
+            }
+            // 仅一方有此连接：贡献 0（拓扑不匹配）
+        }
+
+        similarity_sum / all_keys.len() as f64
     }
 
+    /// NEAT 有性繁殖：两个父代基因交叉产生子代
+    /// - 匹配连接（相同 in_node, out_node）：随机从一方继承
+    /// - 不匹配连接：从适应度高的一方（fitter）继承
+    /// - 节点：取两方并集
+    /// - 输出映射：从 fitter 继承
+    pub fn crossover(parent_a: &Genome, parent_b: &Genome, a_is_fitter: bool) -> Genome {
+        let mut rng = rand::thread_rng();
+        let (fitter, weaker) = if a_is_fitter { (parent_a, parent_b) } else { (parent_b, parent_a) };
+
+        // 构建 weaker 的连接映射
+        let weaker_conns: std::collections::HashMap<(usize, usize), &ConnectionGene> = weaker
+            .connections
+            .iter()
+            .map(|c| ((c.in_node, c.out_node), c))
+            .collect();
+
+        // 交叉连接
+        let mut child_connections = Vec::new();
+        for conn in &fitter.connections {
+            let key = (conn.in_node, conn.out_node);
+            if let Some(&weaker_conn) = weaker_conns.get(&key) {
+                // 匹配连接：随机从一方继承
+                if rng.gen_bool(0.5) {
+                    child_connections.push(conn.clone());
+                } else {
+                    child_connections.push(weaker_conn.clone());
+                }
+            } else {
+                // 不匹配连接：从 fitter 继承
+                child_connections.push(conn.clone());
+            }
+        }
+
+        // 节点：取两方并集
+        let mut node_ids: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut child_nodes = Vec::new();
+        for node in &fitter.nodes {
+            node_ids.insert(node.id);
+            child_nodes.push(node.clone());
+        }
+        for node in &weaker.nodes {
+            if !node_ids.contains(&node.id) {
+                node_ids.insert(node.id);
+                child_nodes.push(node.clone());
+            }
+        }
+
+        // 输出映射：从 fitter 继承
+        let child_output_map = fitter.output_map.clone();
+
+        // next_node_id：取两方最大值
+        let next_node_id = fitter.next_node_id.max(weaker.next_node_id);
+
+        Genome {
+            nodes: child_nodes,
+            connections: child_connections,
+            output_map: child_output_map,
+            next_node_id,
+        }
+    }
 }

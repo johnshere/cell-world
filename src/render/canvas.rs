@@ -99,7 +99,7 @@ impl WorldCanvas {
             if rect.contains(pos) {
                 let alpha = (1.0 - particle.age / particle.lifetime) as f32;
                 let color = Color32::from_rgba_unmultiplied(255, 220, 100, (alpha * 200.0) as u8);
-                let radius = 1.33 * self.scale;
+                let radius = 1.064 * self.scale;
                 painter.circle_filled(pos, radius, color);
 
                 // 选中描边
@@ -120,7 +120,7 @@ impl WorldCanvas {
                 let species_hash = ctx.creature_species.get(&idx).copied().unwrap_or(0);
                 let color = species_to_color(species_hash);
 
-                let radius = (3.0 + (creature.energy / 50.0) as f32).min(8.0) * self.scale;
+                let radius = ((creature.energy as f32 * 0.32).sqrt()).clamp(1.5, 8.0) * self.scale;
                 painter.circle_filled(pos, radius, color);
 
                 // 家族排名四分之一圆弧（金上/银左/铜下）
@@ -154,7 +154,7 @@ impl WorldCanvas {
                 continue;
             }
             let pos = self.world_to_screen(Pos2::new(creature.x as f32, creature.y as f32), rect);
-            let radius = (3.0 + (creature.energy / 50.0) as f32).min(8.0) * self.scale;
+            let radius = ((creature.energy as f32 * 0.32).sqrt()).clamp(1.5, 8.0) * self.scale;
             let dist = click_pos.distance(pos);
             if dist <= radius + 5.0 {
                 return Selection::Creature(creature.id);
@@ -167,7 +167,7 @@ impl WorldCanvas {
                 continue;
             }
             let pos = self.world_to_screen(Pos2::new(particle.x as f32, particle.y as f32), rect);
-            let radius = 1.33 * self.scale;
+            let radius = 1.064 * self.scale;
             let dist = click_pos.distance(pos);
             if dist <= radius + 5.0 {
                 return Selection::Energy(particle.id);

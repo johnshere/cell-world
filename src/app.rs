@@ -153,8 +153,8 @@ impl CellWorldApp {
                 stats.extinct_families,
                 stats.max_generation,
                 stats.species_count,
-                func[0], func[2], func[3], func[4], func[5],
-                acts[0], acts[2], acts[3], acts[4], acts[5]
+                func[0], func[3], func[4], func[5], func[6],
+                acts[0], acts[3], acts[4], acts[5], acts[6]
             );
         }
 

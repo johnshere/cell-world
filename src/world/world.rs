@@ -54,8 +54,8 @@ pub struct World {
     // 缓存清理计时器
     cache_cleanup_timer: f64,
 
-    // 行为触发次数统计（8个功能）
-    pub action_counts: [usize; 8],
+    // 行为触发次数统计（9个功能）
+    pub action_counts: [usize; 9],
 }
 
 impl World {
@@ -80,7 +80,7 @@ impl World {
             perf_stats: PerfStats::default(),
             similarity_cache: RefCell::new(FxHashMap::default()),
             cache_cleanup_timer: 0.0,
-            action_counts: [0; 8],
+            action_counts: [0; 9],
         };
         // 生成初始生物
         for _ in 0..config.min_creatures {
@@ -117,8 +117,8 @@ impl World {
         // 生成能量粒子
         self.spawn_energy(dt, config);
 
-        // 自动补充生物（已禁用，让演化自然进行）
-        // self.replenish_creatures(config);
+        // 自动补充生物（低于阈值时补充）
+        self.replenish_creatures(config);
 
         // 重建空间索引（计时）
         let spatial_start = Instant::now();
@@ -296,10 +296,10 @@ impl World {
             }
             alive_count += 1;
 
-            // 基础代谢 = 固定消耗 + 百分比消耗
-            let base_cost = config.base_metabolism * dt;
-            let percent_cost = self.creatures[i].energy * config.percent_metabolism * dt;
-            self.creatures[i].energy -= base_cost + percent_cost;
+            // 基础代谢 × 年龄倍率（年龄越大消耗越高）
+            let age_multiplier = 1.0 + self.creatures[i].age * config.age_metabolism_factor;
+            let metabolism_cost = config.base_metabolism * age_multiplier * dt;
+            self.creatures[i].energy -= metabolism_cost;
             self.creatures[i].age += dt;
 
             // 能量耗尽则死亡
@@ -382,11 +382,11 @@ impl World {
             let scan_cost = excess_radius * excess_radius * std::f64::consts::PI / 360.0 * config.scan_cost;
             self.creatures[creature_idx].energy -= scan_cost;
 
-            // 检查是否需要更新感知（超过1秒且跨过一度时）
-            let time_since_last = self.time - last_perception_time;
-            if time_since_last >= 1.0 {
+            // 累计扫描度数，每90度更新一次感知
+            self.creatures[creature_idx].degrees_since_perception += 1;
+            if self.creatures[creature_idx].degrees_since_perception >= 90 {
                 self.compute_perception(creature_idx, config);
-                self.creatures[creature_idx].last_perception_time = self.time;
+                self.creatures[creature_idx].degrees_since_perception = 0;
                 // 清空缓存，开始新一轮收集
                 self.creatures[creature_idx].scan_cache.clear();
             }
@@ -441,6 +441,7 @@ impl World {
                         distance: dist,
                         similarity,
                         energy: other.energy,
+                        is_energy: false,
                     });
                 }
             }
@@ -467,8 +468,9 @@ impl World {
                     new_results.push(ScanResult {
                         angle,
                         distance: dist,
-                        similarity: 0.0,  // 能量粒子无相似度
+                        similarity: 0.0,
                         energy: particle.energy,
+                        is_energy: true,
                     });
                 }
             }
@@ -478,24 +480,28 @@ impl World {
         self.creatures[creature_idx].scan_cache.extend(new_results);
     }
 
-    /// 从扫描缓存计算 17 维感知输入
-    /// [0-3]   最近最大同类: 角度, 距离, 相似度, 能量
-    /// [4-7]   最近最小同类: 角度, 距离, 相似度, 能量
-    /// [8-11]  最近最大异类: 角度, 距离, 相似度, 能量
-    /// [12-15] 最近最小异类: 角度, 距离, 相似度, 能量
-    /// [16]    自身能量
+    /// 从扫描缓存计算 25 维感知输入（sin/cos角度编码 + 能量粒子独立通道）
+    /// [0-4]   最佳同类: sin(θ), cos(θ), 距离, 相似度, 能量
+    /// [5-9]   最差同类: sin(θ), cos(θ), 距离, 相似度, 能量
+    /// [10-14] 最佳异类: sin(θ), cos(θ), 距离, 相似度, 能量
+    /// [15-19] 最差异类: sin(θ), cos(θ), 距离, 相似度, 能量
+    /// [20-23] 最佳能量粒子: sin(θ), cos(θ), 距离, 能量
+    /// [24]    自身能量
     fn compute_perception(&mut self, creature_idx: usize, config: &Config) {
         let creature = &self.creatures[creature_idx];
         let threshold = config.species_similarity_threshold;
 
-        let mut input = [0.0; 17];
+        let mut input = [0.0; 25];
 
-        // 分类：同类 vs 异类（能量粒子视为异类，相似度=0）
+        // 分类：同类 vs 异类 vs 能量粒子（三类独立）
         let mut allies: Vec<&ScanResult> = Vec::new();
         let mut enemies: Vec<&ScanResult> = Vec::new();
+        let mut energy_particles: Vec<&ScanResult> = Vec::new();
 
         for result in &creature.scan_cache {
-            if result.similarity >= threshold {
+            if result.is_energy {
+                energy_particles.push(result);
+            } else if result.similarity >= threshold {
                 allies.push(result);
             } else {
                 enemies.push(result);
@@ -507,54 +513,55 @@ impl World {
             if r.distance > 0.0 { r.energy / r.distance } else { r.energy * 1000.0 }
         };
 
-        // 角度编码: -1~1（与输出方向编码一致）
-        // 0°=-1, 180°=0, 360°=1
-        // 这样追逐只需权重≈+1，躲避只需权重≈-1
+        // 填充生物感知槽（sin/cos角度编码，连续无跳变）
+        let fill_slot = |input: &mut [f64; 25], offset: usize, result: &ScanResult, max_radius: f64| {
+            let angle_rad = result.angle.to_radians();
+            input[offset]     = angle_rad.sin();
+            input[offset + 1] = angle_rad.cos();
+            input[offset + 2] = (result.distance / max_radius).min(1.0);
+            input[offset + 3] = result.similarity;
+            input[offset + 4] = (result.energy / 200.0).min(1.0);
+        };
 
-        // 最近最大同类（评分最高）
-        if let Some(best_ally) = allies.iter().max_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
-            input[0] = best_ally.angle / 180.0 - 1.0;
-            input[1] = (best_ally.distance / config.scan_max_radius).min(1.0);
-            input[2] = best_ally.similarity;
-            input[3] = (best_ally.energy / 200.0).min(1.0);
+        // 最佳同类（评分最高）
+        if let Some(best) = allies.iter().max_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
+            fill_slot(&mut input, 0, best, config.scan_max_radius);
+        }
+        // 最差同类（评分最低）
+        if let Some(worst) = allies.iter().min_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
+            fill_slot(&mut input, 5, worst, config.scan_max_radius);
+        }
+        // 最佳异类（评分最高）
+        if let Some(best) = enemies.iter().max_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
+            fill_slot(&mut input, 10, best, config.scan_max_radius);
+        }
+        // 最差异类（评分最低）
+        if let Some(worst) = enemies.iter().min_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
+            fill_slot(&mut input, 15, worst, config.scan_max_radius);
         }
 
-        // 最近最小同类（评分最低）
-        if let Some(worst_ally) = allies.iter().min_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
-            input[4] = worst_ally.angle / 180.0 - 1.0;
-            input[5] = (worst_ally.distance / config.scan_max_radius).min(1.0);
-            input[6] = worst_ally.similarity;
-            input[7] = (worst_ally.energy / 200.0).min(1.0);
-        }
-
-        // 最近最大异类（评分最高）
-        if let Some(best_enemy) = enemies.iter().max_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
-            input[8] = best_enemy.angle / 180.0 - 1.0;
-            input[9] = (best_enemy.distance / config.scan_max_radius).min(1.0);
-            input[10] = best_enemy.similarity;
-            input[11] = (best_enemy.energy / 200.0).min(1.0);
-        }
-
-        // 最近最小异类（评分最低）
-        if let Some(worst_enemy) = enemies.iter().min_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
-            input[12] = worst_enemy.angle / 180.0 - 1.0;
-            input[13] = (worst_enemy.distance / config.scan_max_radius).min(1.0);
-            input[14] = worst_enemy.similarity;
-            input[15] = (worst_enemy.energy / 200.0).min(1.0);
+        // 最佳能量粒子（独立通道，4维）
+        if let Some(best) = energy_particles.iter().max_by(|a, b| score(a).partial_cmp(&score(b)).unwrap()) {
+            let angle_rad = best.angle.to_radians();
+            input[20] = angle_rad.sin();
+            input[21] = angle_rad.cos();
+            input[22] = (best.distance / config.scan_max_radius).min(1.0);
+            input[23] = (best.energy / 200.0).min(1.0);
         }
 
         // 自身能量
-        input[16] = (creature.energy / 200.0).min(1.0);
+        input[24] = (creature.energy / 200.0).min(1.0);
 
         self.creatures[creature_idx].perception_cache = input;
     }
 
-    /// 执行动作
+    /// 执行动作（9个功能池）
     fn execute_actions(&mut self, creature_idx: usize, outputs: &[f64], dt: f64, config: &Config) {
         let output_map = self.creatures[creature_idx].genome.output_map.clone();
 
-        // 先收集移动方向和速度（需要组合使用）
-        let mut move_direction: Option<f64> = None;
+        // 先收集移动参数（需要组合使用）
+        let mut move_dir_sin: Option<f64> = None;
+        let mut move_dir_cos: Option<f64> = None;
         let mut move_speed: Option<f64> = None;
 
         for (out_idx, &func_id) in output_map.iter().enumerate() {
@@ -564,55 +571,52 @@ impl World {
             let value = outputs[out_idx];
 
             match func_id {
-                0 => move_direction = Some(value),  // 移动方向
-                1 => move_speed = Some(value),      // 移动速度
-                2 => {
-                    if self.action_absorb(creature_idx, value, config) {
-                        self.action_counts[2] += 1;  // 只统计实际吸收成功
-                    }
-                }
+                0 => move_dir_sin = Some(value),   // 移动方向 sin
+                1 => move_dir_cos = Some(value),   // 移动方向 cos
+                2 => move_speed = Some(value),     // 移动速度
                 3 => {
-                    if self.action_release(creature_idx, value, config) {
-                        self.action_counts[3] += 1;  // 只统计实际释放成功
+                    if self.action_absorb(creature_idx, value, config) {
+                        self.action_counts[3] += 1;
                     }
                 }
                 4 => {
-                    if self.action_reproduce(creature_idx, value, config) {
-                        self.action_counts[4] += 1;  // 只统计实际繁殖成功
+                    if self.action_release(creature_idx, value, config) {
+                        self.action_counts[4] += 1;
                     }
                 }
                 5 => {
-                    if self.action_transfer(creature_idx, value, config) {
-                        self.action_counts[5] += 1;  // 只统计实际转移成功
+                    if self.action_reproduce(creature_idx, value, config) {
+                        self.action_counts[5] += 1;
                     }
                 }
                 6 => {
-                    // 扫描半径调整
-                    self.action_set_scan_radius(creature_idx, value, config);
+                    if self.action_transfer(creature_idx, value, config) {
+                        self.action_counts[6] += 1;
+                    }
                 }
                 7 => {
-                    // 扫描角速度调整
+                    self.action_set_scan_radius(creature_idx, value, config);
+                }
+                8 => {
                     self.action_set_scan_velocity(creature_idx, value, config);
                 }
                 _ => {}
             }
         }
 
-        // 执行移动（需要方向和速度都有值，且速度>0.1才统计）
-        if let (Some(dir), Some(spd)) = (move_direction, move_speed) {
+        // 执行移动（需要sin/cos和速度，且速度>0.1才统计）
+        if let (Some(sin_v), Some(cos_v), Some(spd)) = (move_dir_sin, move_dir_cos, move_speed) {
             if spd.abs() > 0.1 {
-                self.action_move(creature_idx, dir, spd, dt, config);
+                self.action_move(creature_idx, sin_v, cos_v, spd, dt, config);
                 self.action_counts[0] += 1;
             }
         }
     }
 
-    // 功能 0+1: 移动（方向 + 速度）
-    fn action_move(&mut self, idx: usize, direction: f64, speed: f64, dt: f64, config: &Config) {
-        // direction: -1~1 映射到 0~360 度
-        // speed: -1~1，绝对值为速度
-        let angle_deg = (direction + 1.0) / 2.0 * 360.0;  // 0~360
-        let angle_rad = angle_deg.to_radians();
+    // 功能 0+1+2: 移动（sin/cos方向 + 速度）
+    fn action_move(&mut self, idx: usize, dir_sin: f64, dir_cos: f64, speed: f64, dt: f64, config: &Config) {
+        // dir_sin, dir_cos: tanh输出(-1~1)，用atan2计算方向
+        let angle_rad = dir_sin.atan2(dir_cos);
         let actual_speed = speed.abs() * 50.0;  // 最大速度 50 单位/秒
 
         let dx = angle_rad.cos() * actual_speed * dt;
@@ -673,17 +677,11 @@ impl World {
         false
     }
 
-    // 功能 4: 繁殖
-    // 返回是否成功繁殖
+    // 功能 5: 繁殖（支持有性繁殖/交叉）
+    // 如果附近有同种生物，进行交叉繁殖；否则无性繁殖
     fn action_reproduce(&mut self, idx: usize, value: f64, config: &Config) -> bool {
         // 降低阈值使繁殖更容易触发
         if value <= 0.2 {
-            return false;
-        }
-
-        // 检查是否超过最大生物数量
-        let alive_count = self.creatures.iter().filter(|c| c.alive).count();
-        if alive_count >= config.max_creatures {
             return false;
         }
 
@@ -698,20 +696,66 @@ impl World {
         let offset_x = rng.gen_range(-10.0..10.0);
         let offset_y = rng.gen_range(-10.0..10.0);
 
+        // 尝试找同种邻居进行交叉繁殖
+        let mate_genome = self.find_mate(idx, config);
+
         let creature_id = self.next_creature_id;
         self.next_creature_id += 1;
-        let child = self.creatures[idx].reproduce(
-            creature_id,
-            self.creatures[idx].x + offset_x,
-            self.creatures[idx].y + offset_y,
-            child_energy,
-            config.mutation_rate,
-        );
+
+        let child = if let Some(mate_genome) = mate_genome {
+            // 有性繁殖：交叉 + 变异
+            let a_is_fitter = true; // 主动繁殖者视为更适应
+            let crossover_genome = crate::neural::Genome::crossover(
+                &self.creatures[idx].genome,
+                &mate_genome,
+                a_is_fitter,
+            );
+            let child_genome = crossover_genome.mutate(config.mutation_rate);
+            Creature::new(
+                creature_id,
+                self.creatures[idx].x + offset_x,
+                self.creatures[idx].y + offset_y,
+                child_energy,
+                child_genome,
+                self.creatures[idx].family_id,
+                self.creatures[idx].generation + 1,
+            )
+        } else {
+            // 无性繁殖：变异
+            self.creatures[idx].reproduce(
+                creature_id,
+                self.creatures[idx].x + offset_x,
+                self.creatures[idx].y + offset_y,
+                child_energy,
+                config.mutation_rate,
+            )
+        };
 
         let family_id = child.family_id;
         self.creatures.push(child);
         *self.family_stats.entry(family_id).or_insert(0) += 1;
         true
+    }
+
+    /// 寻找附近的同种配偶（返回其基因组的克隆）
+    fn find_mate(&self, idx: usize, config: &Config) -> Option<crate::neural::Genome> {
+        let creature = &self.creatures[idx];
+        let nearby = self.creature_grid.query(creature.x, creature.y, config.contact_range);
+
+        for &other_idx in &nearby {
+            if other_idx == idx || !self.creatures[other_idx].alive {
+                continue;
+            }
+            let other = &self.creatures[other_idx];
+            let dist = ((other.x - creature.x).powi(2) + (other.y - creature.y).powi(2)).sqrt();
+            if dist < config.contact_range {
+                let similarity = self.get_similarity(creature, other);
+                if similarity >= config.species_similarity_threshold {
+                    return Some(other.genome.clone());
+                }
+            }
+        }
+        None
     }
 
     // 功能 5: 能量转移
@@ -756,7 +800,7 @@ impl World {
         false
     }
 
-    // 功能 6: 设置扫描半径
+    // 功能 7: 设置扫描半径
     fn action_set_scan_radius(&mut self, idx: usize, value: f64, config: &Config) {
         // value: -1~1 映射到 free_radius ~ max_radius
         let normalized = (value + 1.0) / 2.0;  // 0~1
@@ -764,7 +808,7 @@ impl World {
         self.creatures[idx].scan_radius = radius;
     }
 
-    // 功能 7: 设置扫描角速度
+    // 功能 8: 设置扫描角速度
     fn action_set_scan_velocity(&mut self, idx: usize, value: f64, config: &Config) {
         // value: -1~1 映射到 0 ~ max_angular_velocity
         let normalized = (value + 1.0) / 2.0;  // 0~1
@@ -839,10 +883,10 @@ impl World {
         };
 
         // 统计每个功能解锁的生物数
-        let mut function_unlocks = [0usize; 8];
+        let mut function_unlocks = [0usize; 9];
         for creature in &alive_creatures {
             for &func_id in &creature.genome.output_map {
-                if func_id < 8 {
+                if func_id < 9 {
                     function_unlocks[func_id] += 1;
                 }
             }
@@ -964,24 +1008,29 @@ impl World {
             }
         }
 
-        // 计算每个种族的基因哈希 XOR（用于稳定且分散的颜色标识）
-        // XOR 比 min 更能产生分散的值，同时保持相对稳定
-        let mut species_xor_hash: FxHashMap<usize, u64> = FxHashMap::with_capacity_and_hasher(n, Default::default());
+        // 取每个种族中最老成员的 genome_hash 作为稳定颜色标识
+        // 最老成员变动最少，颜色最稳定
+        let mut species_elder: FxHashMap<usize, (u64, f64)> = FxHashMap::with_capacity_and_hasher(n, Default::default());
         for (i, &idx) in alive_indices.iter().enumerate() {
             let root = find(&mut parent, i);
-            let hash = self.creatures[idx].genome_hash;
-            species_xor_hash
+            let creature = &self.creatures[idx];
+            species_elder
                 .entry(root)
-                .and_modify(|xor| *xor ^= hash)
-                .or_insert(hash);
+                .and_modify(|(hash, age)| {
+                    if creature.age > *age {
+                        *hash = creature.genome_hash;
+                        *age = creature.age;
+                    }
+                })
+                .or_insert((creature.genome_hash, creature.age));
         }
 
-        // 构建 creature_index -> 种族 XOR 基因哈希 映射
+        // 构建 creature_index -> 种族颜色哈希 映射
         let mut creature_species: FxHashMap<usize, u64> = FxHashMap::with_capacity_and_hasher(n, Default::default());
         for (i, &idx) in alive_indices.iter().enumerate() {
             let root = find(&mut parent, i);
-            let xor_hash = species_xor_hash[&root];
-            creature_species.insert(idx, xor_hash);
+            let (elder_hash, _) = species_elder[&root];
+            creature_species.insert(idx, elder_hash);
         }
 
         // 获取前三家族ID
@@ -1100,9 +1149,9 @@ pub struct WorldStats {
     pub max_generation: usize,
     pub avg_energy: f64,
     // 功能解锁统计（每个功能解锁的生物数）
-    pub function_unlocks: [usize; 8],
+    pub function_unlocks: [usize; 9],
     // 行为触发统计（累计触发次数）
-    pub action_counts: [usize; 8],
+    pub action_counts: [usize; 9],
     // 种群统计
     pub species_count: usize,      // 种群数量
     pub top_families: Vec<RankedEntry>,   // 前三家族
