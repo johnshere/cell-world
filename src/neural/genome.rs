@@ -314,7 +314,6 @@ impl Genome {
 
     /// NEAT 有性繁殖：两个父代基因交叉产生子代
     pub fn crossover(parent_a: &Genome, parent_b: &Genome, a_is_fitter: bool) -> Genome {
-        let mut rng = rand::thread_rng();
         let (fitter, weaker) = if a_is_fitter { (parent_a, parent_b) } else { (parent_b, parent_a) };
 
         // 构建 weaker 的连接映射
@@ -324,16 +323,16 @@ impl Genome {
             .map(|c| ((c.in_node, c.out_node), c))
             .collect();
 
-        // 交叉连接
+        // 保守交叉：共享连接取权重平均值，独有连接继承自强者
         let mut child_connections = Vec::new();
         for conn in &fitter.connections {
             let key = (conn.in_node, conn.out_node);
             if let Some(&weaker_conn) = weaker_conns.get(&key) {
-                if rng.gen_bool(0.5) {
-                    child_connections.push(conn.clone());
-                } else {
-                    child_connections.push(weaker_conn.clone());
-                }
+                // 双方共有的连接：权重取平均，保留功能共识
+                let mut blended = conn.clone();
+                blended.weight = (conn.weight + weaker_conn.weight) / 2.0;
+                blended.enabled = conn.enabled || weaker_conn.enabled;
+                child_connections.push(blended);
             } else {
                 child_connections.push(conn.clone());
             }

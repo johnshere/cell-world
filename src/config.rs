@@ -56,8 +56,6 @@ pub struct Config {
     pub initial_connections_max: usize,
     /// 种族相似度阈值（高于此值视为同一种族）
     pub species_similarity_threshold: f64,
-    /// 捕猎能量转化率（掠夺的能量 × 此值 = 实际获得）
-    pub predation_efficiency: f64,
     /// 优势种检测：种群最老成员最低年龄
     pub dominant_min_age: f64,
     /// 初始世界缩放比例
@@ -76,7 +74,7 @@ impl Default for Config {
             volcano_x: 0.0,
             volcano_y: 0.0,
             volcano_interval: 30.0,         // 喷发间隔（秒）
-            volcano_radius: 200.0,          // 喷射半径
+            volcano_radius: 300.0,          // 喷射半径（内密外疏）
             volcano_count: 60,              // 每次粒子数
             volcano_particle_energy: 35.0,  // 单粒子能量
             meteorite_interval: 12.0,       // 陨石间隔（秒）
@@ -98,7 +96,6 @@ impl Default for Config {
             initial_connections_min: 6,  // 更多初始连接，增加有用组合概率
             initial_connections_max: 12,
             species_similarity_threshold: 0.9,  // 基因相似度 >= 视为同一种族
-            predation_efficiency: 0.8,  // 捕猎转化率
             dominant_min_age: 500.0,  // 优势种检测：最老成员需达到年龄（秒）
             initial_scale: 0.6,  // 初始世界缩放比例
         }

@@ -48,7 +48,7 @@ pub struct CachedStats {
     pub death_age_stats: DeathAgeStats,
     pub species_count: usize,
     pub top_species: Vec<RankedEntry>,
-    pub creature_species_map: FxHashMap<u64, usize>,
+    pub creature_species_map: FxHashMap<u64, u64>,
     pub dominant_candidate: Option<DominantCandidate>,
 }
 

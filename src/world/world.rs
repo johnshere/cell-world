@@ -59,23 +59,28 @@ pub struct World {
     death_age_sum: f64,
     pub death_age_stats: DeathAgeStats,
 
-    // 聚类缓存
-    species_cache: RefCell<Option<SpeciesCache>>,
-    species_cache_time: RefCell<f64>,
+    // 种族缓存（祖先追溯模型）
+    clan_cache: RefCell<Option<ClanCache>>,
+    clan_cache_time: RefCell<f64>,
 
     // 空间查询缓冲区复用
     creature_query_buf: Vec<usize>,
     energy_query_buf: Vec<usize>,
 }
 
-/// 聚类缓存结果
+/// 种族缓存（祖先追溯模型）
 #[derive(Clone)]
-struct SpeciesCache {
-    parent: Vec<usize>,
+struct ClanCache {
+    /// 活生物在 creatures 数组中的原始索引
     alive_indices: Vec<usize>,
+    /// 种族数量
     species_count: usize,
+    /// 前三种族
     top_species: Vec<RankedEntry>,
-    creature_species_map: FxHashMap<usize, usize>,
+    /// 活生物局部索引 -> 族长 creature id
+    creature_clan_map: FxHashMap<usize, u64>,
+    /// 族长 id -> 族长 genome_hash（用于颜色）
+    clan_color: FxHashMap<u64, u64>,
 }
 
 impl World {
@@ -102,8 +107,8 @@ impl World {
             death_ages: Vec::new(),
             death_age_sum: 0.0,
             death_age_stats: DeathAgeStats::default(),
-            species_cache: RefCell::new(None),
-            species_cache_time: RefCell::new(-1.0),
+            clan_cache: RefCell::new(None),
+            clan_cache_time: RefCell::new(-999.0),
             creature_query_buf: Vec::new(),
             energy_query_buf: Vec::new(),
         };
@@ -207,7 +212,7 @@ impl World {
 
         let creature_id = self.next_creature_id;
         self.next_creature_id += 1;
-        let creature = Creature::new(creature_id, x, y, energy, genome.clone(), 0);
+        let creature = Creature::new(creature_id, x, y, energy, genome.clone(), 0, None);
         self.creatures.push(creature);
     }
 
@@ -237,7 +242,8 @@ impl World {
         let mut rng = rand::thread_rng();
         for _ in 0..config.volcano_count {
             let angle = rng.gen_range(0.0..std::f64::consts::TAU);
-            let r = rng.gen_range(0.0_f64..1.0).sqrt() * config.volcano_radius;
+            // 内密外疏：不开根，使半径线性分布 → 中心密度更高
+            let r = rng.gen_range(0.0_f64..1.0) * config.volcano_radius;
             let x = config.volcano_x + r * angle.cos();
             let y = config.volcano_y + r * angle.sin();
             let energy_id = self.next_energy_id;
@@ -538,13 +544,15 @@ impl World {
             }
 
             if mouth < -0.1 {
-                // 咬（捕食）
+                // 咬（捕食）— 相似度越高收益越低（生化兼容性）
+                let similarity = self.get_similarity(&self.creatures[idx], &self.creatures[other_idx]);
                 let bite_strength = (-mouth).min(1.0);
                 let transfer_ratio = bite_strength * 0.2;
                 let target_energy = self.creatures[other_idx].energy;
                 let transfer_amount = target_energy * transfer_ratio;
+                let efficiency = 1.0 - similarity;
                 self.creatures[other_idx].energy -= transfer_amount;
-                self.creatures[idx].energy += transfer_amount * config.predation_efficiency;
+                self.creatures[idx].energy += transfer_amount * efficiency;
                 self.action_counts[2] += 1; // 咬
             } else {
                 // 喂（哺育）
@@ -592,6 +600,7 @@ impl World {
                 child_energy,
                 child_genome,
                 self.creatures[idx].generation + 1,
+                Some(self.creatures[idx].id),
             )
         } else {
             self.creatures[idx].reproduce(
@@ -692,26 +701,26 @@ impl World {
         let avg_energy = if alive_creatures.is_empty() { 0.0 }
             else { creature_energy / alive_creatures.len() as f64 };
 
-        // 种群聚类
-        self.ensure_species_cache(species_threshold);
-        let cache = self.species_cache.borrow();
+        // 种族聚类（祖先追溯模型）
+        self.ensure_clan_cache(species_threshold);
+        let cache = self.clan_cache.borrow();
         let cache = cache.as_ref().unwrap();
         let species_count = cache.species_count;
         let top_species = cache.top_species.clone();
-        let creature_species_map = cache.creature_species_map.clone();
+        let creature_clan_map = cache.creature_clan_map.clone();
 
-        // 构建生物ID -> 种族ID映射
-        let mut id_species_map: FxHashMap<u64, usize> = FxHashMap::default();
+        // 构建生物ID -> 族长ID映射
+        let mut id_species_map: FxHashMap<u64, u64> = FxHashMap::default();
         for (i, creature) in alive_creatures.iter().enumerate() {
-            if let Some(&species_id) = creature_species_map.get(&i) {
-                id_species_map.insert(creature.id, species_id);
+            if let Some(&leader_id) = creature_clan_map.get(&i) {
+                id_species_map.insert(creature.id, leader_id);
             }
         }
 
         // 优势种检测
         let dominant_candidate = self.detect_dominant(
             &alive_creatures,
-            &creature_species_map,
+            &creature_clan_map,
             avg_energy,
             max_generation,
             config,
@@ -733,50 +742,24 @@ impl World {
         }
     }
 
-    /// 获取渲染上下文数据
+    /// 获取渲染上下文数据（族长 genome_hash 作为颜色标识）
     pub fn get_render_data(&self, threshold: f64) -> FxHashMap<usize, u64> {
-        self.ensure_species_cache(threshold);
-        let cache_ref = self.species_cache.borrow();
+        self.ensure_clan_cache(threshold);
+        let cache_ref = self.clan_cache.borrow();
         let cache = match cache_ref.as_ref() {
             Some(c) => c,
             None => return FxHashMap::default(),
         };
 
-        if cache.alive_indices.is_empty() {
-            return FxHashMap::default();
-        }
-
-        let n = cache.alive_indices.len();
-        let mut parent = cache.parent.clone();
-
-        fn find(parent: &mut [usize], x: usize) -> usize {
-            if parent[x] != x {
-                parent[x] = find(parent, parent[x]);
+        let mut creature_species: FxHashMap<usize, u64> = FxHashMap::with_capacity_and_hasher(
+            cache.alive_indices.len(), Default::default(),
+        );
+        for (i, &original_idx) in cache.alive_indices.iter().enumerate() {
+            if let Some(&leader_id) = cache.creature_clan_map.get(&i) {
+                if let Some(&color_hash) = cache.clan_color.get(&leader_id) {
+                    creature_species.insert(original_idx, color_hash);
+                }
             }
-            parent[x]
-        }
-
-        // 取每个种族中最老成员的 genome_hash 作为稳定颜色标识
-        let mut species_elder: FxHashMap<usize, (u64, f64)> = FxHashMap::with_capacity_and_hasher(n, Default::default());
-        for (i, &idx) in cache.alive_indices.iter().enumerate() {
-            let root = find(&mut parent, i);
-            let creature = &self.creatures[idx];
-            species_elder
-                .entry(root)
-                .and_modify(|(hash, age)| {
-                    if creature.age > *age {
-                        *hash = creature.genome_hash;
-                        *age = creature.age;
-                    }
-                })
-                .or_insert((creature.genome_hash, creature.age));
-        }
-
-        let mut creature_species: FxHashMap<usize, u64> = FxHashMap::with_capacity_and_hasher(n, Default::default());
-        for (i, &idx) in cache.alive_indices.iter().enumerate() {
-            let root = find(&mut parent, i);
-            let (elder_hash, _) = species_elder[&root];
-            creature_species.insert(idx, elder_hash);
         }
 
         creature_species
@@ -786,7 +769,7 @@ impl World {
     fn detect_dominant(
         &self,
         alive_creatures: &[&Creature],
-        creature_species_map: &FxHashMap<usize, usize>,
+        creature_clan_map: &FxHashMap<usize, u64>,
         global_avg_energy: f64,
         global_max_generation: usize,
         config: &Config,
@@ -797,10 +780,10 @@ impl World {
         let death_median = self.death_age_stats.median;
         let has_death_data = self.death_age_stats.count > 0;
 
-        let mut species_members: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
+        let mut species_members: FxHashMap<u64, Vec<usize>> = FxHashMap::default();
         for (i, _) in alive_creatures.iter().enumerate() {
-            if let Some(&species_root) = creature_species_map.get(&i) {
-                species_members.entry(species_root).or_default().push(i);
+            if let Some(&leader_id) = creature_clan_map.get(&i) {
+                species_members.entry(leader_id).or_default().push(i);
             }
         }
 
@@ -873,81 +856,63 @@ impl World {
 
     // ========== 聚类缓存 ==========
 
-    fn ensure_species_cache(&self, threshold: f64) {
+    fn ensure_clan_cache(&self, threshold: f64) {
         let current_time = self.time;
-        if *self.species_cache_time.borrow() == current_time && self.species_cache.borrow().is_some() {
+        if *self.clan_cache_time.borrow() == current_time && self.clan_cache.borrow().is_some() {
             return;
         }
         let alive_creatures: Vec<&Creature> = self.creatures.iter().filter(|c| c.alive).collect();
-        let cache = self.calculate_species_cache(&alive_creatures, threshold);
-        *self.species_cache.borrow_mut() = Some(cache);
-        *self.species_cache_time.borrow_mut() = current_time;
+        let cache = self.calculate_clan_cache(&alive_creatures, threshold);
+        *self.clan_cache.borrow_mut() = Some(cache);
+        *self.clan_cache_time.borrow_mut() = current_time;
     }
 
-    fn calculate_species_cache(&self, alive_creatures: &[&Creature], threshold: f64) -> SpeciesCache {
-        if alive_creatures.is_empty() {
-            return SpeciesCache {
-                parent: Vec::new(),
+    /// 祖先追溯种族计算：
+    /// 对每个活生物，沿 parent_id 向上追溯到最老的活祖先（族长）,
+    /// 然后检查与族长的基因相似度。相似度 >= 阈值则属同族，否则自立门户。
+    fn calculate_clan_cache(&self, alive_creatures: &[&Creature], threshold: f64) -> ClanCache {
+        let n = alive_creatures.len();
+        if n == 0 {
+            return ClanCache {
                 alive_indices: Vec::new(),
                 species_count: 0,
                 top_species: Vec::new(),
-                creature_species_map: FxHashMap::default(),
+                creature_clan_map: FxHashMap::default(),
+                clan_color: FxHashMap::default(),
             };
         }
 
-        let n = alive_creatures.len();
-        let mut parent: Vec<usize> = (0..n).collect();
-        let mut rank: Vec<usize> = vec![0; n];
-
-        fn find(parent: &mut [usize], x: usize) -> usize {
-            if parent[x] != x { parent[x] = find(parent, parent[x]); }
-            parent[x]
+        // 建立 creature ID -> 局部索引映射
+        let mut id_to_local: FxHashMap<u64, usize> = FxHashMap::with_capacity_and_hasher(n, Default::default());
+        for (i, c) in alive_creatures.iter().enumerate() {
+            id_to_local.insert(c.id, i);
         }
 
-        fn union(parent: &mut [usize], rank: &mut [usize], x: usize, y: usize) {
-            let root_x = find(parent, x);
-            let root_y = find(parent, y);
-            if root_x != root_y {
-                if rank[root_x] < rank[root_y] {
-                    parent[root_x] = root_y;
-                } else if rank[root_x] > rank[root_y] {
-                    parent[root_y] = root_x;
-                } else {
-                    parent[root_y] = root_x;
-                    rank[root_x] += 1;
-                }
-            }
-        }
-
-        let mut buckets: FxHashMap<u64, Vec<usize>> = FxHashMap::default();
+        // 为每个生物找到族长
+        let mut creature_clan_map: FxHashMap<usize, u64> = FxHashMap::with_capacity_and_hasher(n, Default::default());
         for i in 0..n {
-            let sh = alive_creatures[i].genome.structural_hash();
-            buckets.entry(sh).or_default().push(i);
+            let leader_id = self.find_clan_leader(i, alive_creatures, &id_to_local, threshold);
+            creature_clan_map.insert(i, leader_id);
         }
 
-        for members in buckets.values() {
-            for (a_idx, &i) in members.iter().enumerate() {
-                for &j in &members[a_idx + 1..] {
-                    if self.get_similarity(alive_creatures[i], alive_creatures[j]) >= threshold {
-                        union(&mut parent, &mut rank, i, j);
-                    }
-                }
-            }
-        }
-
-        let mut species_counts: FxHashMap<usize, usize> = FxHashMap::default();
-        let mut creature_species_map: FxHashMap<usize, usize> = FxHashMap::default();
+        // 构建族长颜色映射和统计
+        let mut clan_color: FxHashMap<u64, u64> = FxHashMap::default();
+        let mut clan_counts: FxHashMap<u64, usize> = FxHashMap::default();
 
         for i in 0..n {
-            let root = find(&mut parent, i);
-            *species_counts.entry(root).or_insert(0) += 1;
-            creature_species_map.insert(i, root);
+            let leader_id = creature_clan_map[&i];
+            *clan_counts.entry(leader_id).or_insert(0) += 1;
+            clan_color.entry(leader_id).or_insert_with(|| {
+                id_to_local.get(&leader_id)
+                    .map(|&local| alive_creatures[local].genome_hash)
+                    .unwrap_or(0)
+            });
         }
 
-        let species_count = species_counts.len();
+        let species_count = clan_counts.len();
 
-        let mut species_vec: Vec<_> = species_counts.into_iter()
-            .map(|(species_id, count)| RankedEntry { id: species_id, count })
+        let mut species_vec: Vec<_> = clan_counts.into_iter()
+            .map(|(leader_id, count)| RankedEntry { id: leader_id as usize, count })
             .collect();
         species_vec.sort_by(|a, b| b.count.cmp(&a.count));
         let top_species: Vec<_> = species_vec.into_iter().take(3).collect();
@@ -956,12 +921,55 @@ impl World {
             .filter(|&i| self.creatures[i].alive)
             .collect();
 
-        SpeciesCache {
-            parent,
+        ClanCache {
             alive_indices,
             species_count,
             top_species,
-            creature_species_map,
+            creature_clan_map,
+            clan_color,
+        }
+    }
+
+    /// 沿 parent_id 向上追溯，找到最老的活祖先，
+    /// 检查相似度决定是否归属该祖先的族群
+    fn find_clan_leader(
+        &self,
+        local_idx: usize,
+        alive_creatures: &[&Creature],
+        id_to_local: &FxHashMap<u64, usize>,
+        threshold: f64,
+    ) -> u64 {
+        let creature = alive_creatures[local_idx];
+
+        // 向上走，找最老的活祖先
+        let mut ancestor_local = local_idx;
+        let mut depth = 0;
+        loop {
+            if depth > 1000 { break; } // 安全上限
+            match alive_creatures[ancestor_local].parent_id {
+                Some(parent_id) => {
+                    if let Some(&parent_local) = id_to_local.get(&parent_id) {
+                        ancestor_local = parent_local;
+                        depth += 1;
+                    } else {
+                        break; // 父代已死
+                    }
+                }
+                None => break, // 无父代（自然生成）
+            }
+        }
+
+        if ancestor_local == local_idx {
+            // 自己就是最老活祖先 → 自立门户
+            creature.id
+        } else {
+            // 检查与最老活祖先的相似度
+            let similarity = self.get_similarity(creature, alive_creatures[ancestor_local]);
+            if similarity >= threshold {
+                alive_creatures[ancestor_local].id
+            } else {
+                creature.id // 变异过大 → 自立门户
+            }
         }
     }
 }
@@ -994,7 +1002,7 @@ pub struct WorldStats {
     pub death_age_stats: DeathAgeStats,
     pub species_count: usize,
     pub top_species: Vec<RankedEntry>,
-    pub creature_species_map: FxHashMap<u64, usize>,
+    pub creature_species_map: FxHashMap<u64, u64>,
     pub dominant_candidate: Option<DominantCandidate>,
 }
 

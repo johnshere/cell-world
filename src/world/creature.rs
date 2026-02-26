@@ -23,6 +23,9 @@ pub struct Creature {
     pub brain: Network,
     pub generation: usize,
 
+    // 血缘（None = 自然生成，无祖先）
+    pub parent_id: Option<u64>,
+
     // 缓存
     pub genome_hash: u64,
 
@@ -31,7 +34,7 @@ pub struct Creature {
 }
 
 impl Creature {
-    pub fn new(id: u64, x: f64, y: f64, energy: f64, genome: Genome, generation: usize) -> Self {
+    pub fn new(id: u64, x: f64, y: f64, energy: f64, genome: Genome, generation: usize, parent_id: Option<u64>) -> Self {
         let brain = Network::from_genome(&genome);
         let genome_hash = genome.hash();
 
@@ -46,12 +49,13 @@ impl Creature {
             genome,
             brain,
             generation,
+            parent_id,
             genome_hash,
             perception_cache: [0.0; 10],
         }
     }
 
-    /// 创建随机生物（第0代）
+    /// 创建随机生物（第0代，无祖先）
     pub fn random(
         id: u64,
         x: f64,
@@ -61,12 +65,12 @@ impl Creature {
         max_connections: usize,
     ) -> Self {
         let genome = Genome::random_minimal(min_connections, max_connections);
-        Self::new(id, x, y, energy, genome, 0)
+        Self::new(id, x, y, energy, genome, 0, None)
     }
 
-    /// 繁殖产生子代（代数+1）
+    /// 繁殖产生子代（代数+1，parent_id = 自己的 id）
     pub fn reproduce(&self, id: u64, x: f64, y: f64, energy: f64, mutation_rate: f64) -> Self {
         let child_genome = self.genome.mutate(mutation_rate);
-        Self::new(id, x, y, energy, child_genome, self.generation + 1)
+        Self::new(id, x, y, energy, child_genome, self.generation + 1, Some(self.id))
     }
 }
