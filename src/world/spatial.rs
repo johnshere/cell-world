@@ -36,6 +36,13 @@ impl SpatialGrid {
     /// 查询范围内的实体索引
     pub fn query(&self, x: f64, y: f64, range: f64) -> Vec<usize> {
         let mut result = Vec::new();
+        self.query_into(x, y, range, &mut result);
+        result
+    }
+
+    /// 查询范围内的实体索引（复用缓冲区，避免分配）
+    pub fn query_into(&self, x: f64, y: f64, range: f64, result: &mut Vec<usize>) {
+        result.clear();
 
         let cells_range = (range / self.cell_size).ceil() as i32 + 1;
         let center = self.cell_key(x, y);
@@ -48,7 +55,5 @@ impl SpatialGrid {
                 }
             }
         }
-
-        result
     }
 }

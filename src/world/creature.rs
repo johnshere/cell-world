@@ -39,9 +39,7 @@ pub struct Creature {
     pub scan_radius: f64,             // 当前扫描半径
     pub scan_angular_velocity: f64,   // 当前角速度（度/秒）
     pub scan_cache: Vec<ScanResult>,  // 扫描到的个体缓存
-    pub last_scan_degree: i32,        // 上次结算的整度数
     pub perception_cache: [f64; 25],  // 感知结果缓存（25维：4×5生物 + 1×4能量 + 1自身能量）
-    pub last_perception_time: f64,    // 上次计算感知的时间（仅用于初始扫描标记）
     pub degrees_since_perception: i32, // 自上次感知更新以来扫描的度数
 }
 
@@ -67,9 +65,7 @@ impl Creature {
             scan_radius: 50.0,            // 初始使用免费半径
             scan_angular_velocity: 90.0,   // 初始角速度
             scan_cache: Vec::new(),
-            last_scan_degree: 0,
             perception_cache: [0.0; 25],
-            last_perception_time: -1.0,  // 负值标记需要初始化扫描
             degrees_since_perception: 0,
         }
     }

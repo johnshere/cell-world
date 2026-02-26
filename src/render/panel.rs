@@ -96,7 +96,7 @@ impl StatsPanel {
         // 使用真实时间进行缓存检查，避免速度倍率影响
         if now.duration_since(self.last_update).as_secs_f64() >= self.update_interval {
             self.last_update = now;
-            let stats = world.stats(species_threshold);
+            let stats = world.stats(species_threshold, config);
             self.cached_stats = CachedStats {
                 time: stats.time,
                 fps,

@@ -305,47 +305,76 @@ impl Genome {
         hasher.finish()
     }
 
-    /// 计算与另一个基因组的相似度
+    /// 计算结构哈希（只看连接拓扑和输出映射，忽略权重）
+    /// 用于种群聚类的快速分桶预过滤
+    pub fn structural_hash(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        let mut keys: Vec<(usize, usize)> = self
+            .connections
+            .iter()
+            .filter(|c| c.enabled)
+            .map(|c| (c.in_node, c.out_node))
+            .collect();
+        keys.sort();
+        keys.hash(&mut hasher);
+        self.output_map.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// 计算与另一个基因组的相似度（排序归并，零 HashMap 分配）
     /// 要求相同基因类型（连接拓扑）且对应权重近似才算同类
     pub fn similarity(&self, other: &Genome) -> f64 {
-        // 构建连接映射: (in_node, out_node) -> weight
-        let self_conns: std::collections::HashMap<(usize, usize), f64> = self
+        // 收集并排序启用的连接
+        let mut self_conns: Vec<(usize, usize, f64)> = self
             .connections
             .iter()
             .filter(|c| c.enabled)
-            .map(|c| ((c.in_node, c.out_node), c.weight))
+            .map(|c| (c.in_node, c.out_node, c.weight))
             .collect();
+        self_conns.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
 
-        let other_conns: std::collections::HashMap<(usize, usize), f64> = other
+        let mut other_conns: Vec<(usize, usize, f64)> = other
             .connections
             .iter()
             .filter(|c| c.enabled)
-            .map(|c| ((c.in_node, c.out_node), c.weight))
+            .map(|c| (c.in_node, c.out_node, c.weight))
             .collect();
+        other_conns.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
 
-        // 收集所有唯一连接键
-        let mut all_keys: std::collections::HashSet<(usize, usize)> =
-            self_conns.keys().cloned().collect();
-        for key in other_conns.keys() {
-            all_keys.insert(*key);
-        }
-
-        if all_keys.is_empty() {
+        if self_conns.is_empty() && other_conns.is_empty() {
             return 1.0;
         }
 
-        // 计算相似度：拓扑匹配 + 权重近似
+        // 归并比较：O(m+n)，零 HashMap 分配
+        let mut i = 0;
+        let mut j = 0;
+        let mut total = 0usize;
         let mut similarity_sum = 0.0;
-        for key in &all_keys {
-            if let (Some(&w1), Some(&w2)) = (self_conns.get(key), other_conns.get(key)) {
-                // 双方都有此连接：计算权重相似度
-                // 权重范围 [-2, 2]，最大差值 4.0
-                similarity_sum += 1.0 - (w1 - w2).abs() / 4.0;
-            }
-            // 仅一方有此连接：贡献 0（拓扑不匹配）
-        }
 
-        similarity_sum / all_keys.len() as f64
+        while i < self_conns.len() && j < other_conns.len() {
+            let k1 = (self_conns[i].0, self_conns[i].1);
+            let k2 = (other_conns[j].0, other_conns[j].1);
+            match k1.cmp(&k2) {
+                std::cmp::Ordering::Equal => {
+                    // 双方都有此连接：计算权重相似度
+                    similarity_sum += 1.0 - (self_conns[i].2 - other_conns[j].2).abs() / 4.0;
+                    total += 1;
+                    i += 1;
+                    j += 1;
+                }
+                std::cmp::Ordering::Less => {
+                    total += 1; // 仅 self 有
+                    i += 1;
+                }
+                std::cmp::Ordering::Greater => {
+                    total += 1; // 仅 other 有
+                    j += 1;
+                }
+            }
+        }
+        total += (self_conns.len() - i) + (other_conns.len() - j);
+
+        if total == 0 { 1.0 } else { similarity_sum / total as f64 }
     }
 
     /// NEAT 有性繁殖：两个父代基因交叉产生子代

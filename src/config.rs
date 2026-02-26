@@ -57,6 +57,10 @@ pub struct Config {
     pub initial_connections_max: usize,
     /// 种族相似度阈值（高于此值视为同一种族）
     pub species_similarity_threshold: f64,
+    /// 捕猎能量转化率（掠夺的能量 × 此值 = 实际获得）
+    pub predation_efficiency: f64,
+    /// 优势种检测：种群最老成员最低年龄
+    pub dominant_min_age: f64,
     /// 初始世界缩放比例
     pub initial_scale: f32,
 }
@@ -83,19 +87,21 @@ impl Default for Config {
             base_metabolism: 0.1,  // 基础消耗
             age_metabolism_factor: 0.05,  // 年龄倍率：age=33s时消耗×2.0，age=100s时消耗×4.0
             move_cost: 0.001,  // 移动消耗极低，移动比待机划算
-            reproduce_threshold: 50.0,  // 降低繁殖阈值，更易繁殖
-            reproduce_energy_ratio: 0.3,  // 子代获得45%能量，确保子代能存活
+            reproduce_threshold: 50.0,  // 繁殖阈值
+            reproduce_energy_ratio: 0.3,  // 子代获得能量
 
             scan_free_radius: 50.0,      // 免费扫描半径
             scan_max_radius: 200.0,       // 最大扫描半径
             scan_max_angular_velocity: 180.0,  // 最大角速度（度/秒）
-            scan_cost: 0.00001,           // 扫描单位成本
+            scan_cost: 0.00002,           // 扫描单位成本
             contact_range: 15.0,  // 增大接触范围，让吸收更容易
 
             mutation_rate: 0.15,  // 提高变异率，加速结构探索
             initial_connections_min: 6,  // 更多初始连接，增加有用组合概率
             initial_connections_max: 12,
             species_similarity_threshold: 0.9,  // 基因相似度 >= 视为同一种族
+            predation_efficiency: 0.8,  // 捕猎转化率
+            dominant_min_age: 700.0,  // 优势种检测：最老成员需达到年龄（秒）
             initial_scale: 0.6,  // 初始世界缩放比例
         }
     }

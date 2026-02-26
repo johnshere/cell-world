@@ -62,6 +62,30 @@ pub struct World {
     death_ages: Vec<f64>,           // 所有死亡生物的年龄（已排序，用于中位数）
     death_age_sum: f64,             // 死亡年龄累计和（用于平均值）
     pub death_age_stats: DeathAgeStats, // 缓存的统计结果
+
+    // 聚类缓存（stats 和 render 共享，使用 RefCell 允许 &self 时更新）
+    species_cache: RefCell<Option<SpeciesCache>>,
+    species_cache_time: RefCell<f64>,
+
+    // 扫描缓冲区复用
+    scan_buffer: Vec<ScanResult>,
+    creature_query_buf: Vec<usize>,
+    energy_query_buf: Vec<usize>,
+}
+
+/// 聚类缓存结果
+#[derive(Clone)]
+struct SpeciesCache {
+    /// 并查集 parent 数组（已路径压缩）
+    parent: Vec<usize>,
+    /// 活着的生物在 creatures 数组中的原始索引
+    alive_indices: Vec<usize>,
+    /// 种群数量
+    species_count: usize,
+    /// 前三种群
+    top_species: Vec<RankedEntry>,
+    /// 生物局部索引 -> 种群根索引
+    creature_species_map: FxHashMap<usize, usize>,
 }
 
 impl World {
@@ -90,6 +114,11 @@ impl World {
             death_ages: Vec::new(),
             death_age_sum: 0.0,
             death_age_stats: DeathAgeStats::default(),
+            species_cache: RefCell::new(None),
+            species_cache_time: RefCell::new(-1.0),
+            scan_buffer: Vec::new(),
+            creature_query_buf: Vec::new(),
+            energy_query_buf: Vec::new(),
         };
         // 生成初始生物
         for _ in 0..config.min_creatures {
@@ -146,12 +175,12 @@ impl World {
 
     /// 当生物数量低于最小值时自动补充
     fn replenish_creatures(&mut self, config: &Config) {
-        let alive_count = self.creatures.iter().filter(|c| c.alive).count();
-        while alive_count < config.min_creatures {
-            self.spawn_creature(config);
-            if self.creatures.iter().filter(|c| c.alive).count() >= config.min_creatures {
+        loop {
+            let alive_count = self.creatures.iter().filter(|c| c.alive).count();
+            if alive_count >= config.min_creatures {
                 break;
             }
+            self.spawn_creature(config);
         }
     }
 
@@ -344,25 +373,13 @@ impl World {
         self.perf_stats.creature_count = alive_count;
     }
 
-    /// 更新雷达扫描
+    /// 更新雷达扫描（每帧一次空间查询，替代逐度查询）
     fn update_scan(&mut self, creature_idx: usize, dt: f64, config: &Config) {
-        let creature = &self.creatures[creature_idx];
-        let old_angle = creature.scan_angle;
-        let angular_velocity = creature.scan_angular_velocity;
-        let scan_radius = creature.scan_radius;
-        let last_perception_time = creature.last_perception_time;
-
-        // 新生物初始化：做一次完整360度扫描（免费）
-        if last_perception_time < 0.0 {
-            for degree in 0..360 {
-                let degree_rad = (degree as f64).to_radians();
-                self.scan_degree(creature_idx, degree_rad, scan_radius, config);
-            }
-            self.compute_perception(creature_idx, config);
-            self.creatures[creature_idx].last_perception_time = self.time;
-            self.creatures[creature_idx].scan_cache.clear();
-            return;
-        }
+        let old_angle = self.creatures[creature_idx].scan_angle;
+        let angular_velocity = self.creatures[creature_idx].scan_angular_velocity;
+        let scan_radius = self.creatures[creature_idx].scan_radius;
+        let cx = self.creatures[creature_idx].x;
+        let cy = self.creatures[creature_idx].y;
 
         // 更新扫描角度
         let mut new_angle = old_angle + angular_velocity * dt;
@@ -374,54 +391,29 @@ impl World {
         // 处理角度回绕
         if new_angle >= 360.0 {
             new_angle %= 360.0;
-            new_degree = 359;  // 确保扫描到 359 度
+            new_degree = 359; // 确保扫描到 359 度
         }
 
         self.creatures[creature_idx].scan_angle = new_angle;
 
-        // 对每个跨越的度数进行扫描和耗能
-        for degree in (old_degree + 1)..=new_degree {
-            let degree_rad = (degree as f64).to_radians();
-
-            // 扫描该角度扇形内的实体
-            self.scan_degree(creature_idx, degree_rad, scan_radius, config);
-
-            // 计算扫描耗能: max(0, r - 50)² × (π/360) × cost
-            let excess_radius = (scan_radius - config.scan_free_radius).max(0.0);
-            let scan_cost = excess_radius * excess_radius * std::f64::consts::PI / 360.0 * config.scan_cost;
-            self.creatures[creature_idx].energy -= scan_cost;
-
-            // 累计扫描度数，每90度更新一次感知
-            self.creatures[creature_idx].degrees_since_perception += 1;
-            if self.creatures[creature_idx].degrees_since_perception >= 90 {
-                self.compute_perception(creature_idx, config);
-                self.creatures[creature_idx].degrees_since_perception = 0;
-                // 清空缓存，开始新一轮收集
-                self.creatures[creature_idx].scan_cache.clear();
-            }
+        let degrees_crossed = new_degree - old_degree;
+        if degrees_crossed <= 0 {
+            return;
         }
-    }
 
-    /// 扫描指定角度的扇形区域
-    fn scan_degree(&mut self, creature_idx: usize, angle_rad: f64, radius: f64, _config: &Config) {
-        let creature = &self.creatures[creature_idx];
-        let cx = creature.x;
-        let cy = creature.y;
+        // 扫描弧范围（对应原 1 度扇形的并集）
+        let arc_start = old_degree as f64 + 0.5;
+        let arc_end = new_degree as f64 + 0.5;
 
-        // 扫描方向向量
-        let scan_dx = angle_rad.cos();
-        let scan_dy = angle_rad.sin();
+        // 临时取出缓冲区避免借用冲突
+        let mut creature_buf = std::mem::take(&mut self.creature_query_buf);
+        let mut energy_buf = std::mem::take(&mut self.energy_query_buf);
+        let mut scan_buf = std::mem::take(&mut self.scan_buffer);
+        scan_buf.clear();
 
-        // 扇形半角（约 0.5 度 = 0.00873 弧度）
-        let half_angle = 0.5_f64.to_radians();
-        let cos_half = half_angle.cos();
-
-        // 先收集数据，避免借用冲突
-        let mut new_results: Vec<ScanResult> = Vec::new();
-
-        // 查询附近的生物
-        let nearby_creatures = self.creature_grid.query(cx, cy, radius);
-        for &idx in &nearby_creatures {
+        // 一次空间查询获取所有邻近生物
+        self.creature_grid.query_into(cx, cy, scan_radius, &mut creature_buf);
+        for &idx in &creature_buf {
             if idx == creature_idx {
                 continue;
             }
@@ -434,19 +426,17 @@ impl World {
             let dy = other.y - cy;
             let dist = (dx * dx + dy * dy).sqrt();
 
-            if dist > 0.0 && dist <= radius {
-                // 检查是否在扫描扇形内
-                let dot = (dx * scan_dx + dy * scan_dy) / dist;
-                if dot >= cos_half {
-                    // 计算角度
-                    let angle = dy.atan2(dx).to_degrees();
-                    let angle = if angle < 0.0 { angle + 360.0 } else { angle };
+            if dist > 0.0 && dist <= scan_radius {
+                let angle_deg = dy.atan2(dx).to_degrees();
+                let angle_deg = if angle_deg < 0.0 { angle_deg + 360.0 } else { angle_deg };
 
-                    // 计算相似度
-                    let similarity = self.get_similarity(&self.creatures[creature_idx], other);
-
-                    new_results.push(ScanResult {
-                        angle,
+                if angle_deg >= arc_start && angle_deg <= arc_end {
+                    let similarity = self.get_similarity(
+                        &self.creatures[creature_idx],
+                        &self.creatures[idx],
+                    );
+                    scan_buf.push(ScanResult {
+                        angle: angle_deg,
                         distance: dist,
                         similarity,
                         energy: other.energy,
@@ -456,9 +446,9 @@ impl World {
             }
         }
 
-        // 查询附近的能量粒子
-        let nearby_energy = self.energy_grid.query(cx, cy, radius);
-        for &idx in &nearby_energy {
+        // 一次空间查询获取所有邻近能量粒子
+        self.energy_grid.query_into(cx, cy, scan_radius, &mut energy_buf);
+        for &idx in &energy_buf {
             let particle = &self.energy_particles[idx];
             if !particle.alive {
                 continue;
@@ -468,14 +458,13 @@ impl World {
             let dy = particle.y - cy;
             let dist = (dx * dx + dy * dy).sqrt();
 
-            if dist > 0.0 && dist <= radius {
-                let dot = (dx * scan_dx + dy * scan_dy) / dist;
-                if dot >= cos_half {
-                    let angle = dy.atan2(dx).to_degrees();
-                    let angle = if angle < 0.0 { angle + 360.0 } else { angle };
+            if dist > 0.0 && dist <= scan_radius {
+                let angle_deg = dy.atan2(dx).to_degrees();
+                let angle_deg = if angle_deg < 0.0 { angle_deg + 360.0 } else { angle_deg };
 
-                    new_results.push(ScanResult {
-                        angle,
+                if angle_deg >= arc_start && angle_deg <= arc_end {
+                    scan_buf.push(ScanResult {
+                        angle: angle_deg,
                         distance: dist,
                         similarity: 0.0,
                         energy: particle.energy,
@@ -485,8 +474,27 @@ impl World {
             }
         }
 
-        // 将收集的结果推入缓存
-        self.creatures[creature_idx].scan_cache.extend(new_results);
+        // 批量推入扫描缓存
+        self.creatures[creature_idx].scan_cache.append(&mut scan_buf);
+
+        // 归还缓冲区
+        self.creature_query_buf = creature_buf;
+        self.energy_query_buf = energy_buf;
+        self.scan_buffer = scan_buf;
+
+        // 批量扫描耗能（替代逐度计算）
+        let excess_radius = (scan_radius - config.scan_free_radius).max(0.0);
+        let scan_cost_per_degree =
+            excess_radius * excess_radius * std::f64::consts::PI / 360.0 * config.scan_cost;
+        self.creatures[creature_idx].energy -= scan_cost_per_degree * degrees_crossed as f64;
+
+        // 更新感知计数，每 90 度触发一次感知计算
+        self.creatures[creature_idx].degrees_since_perception += degrees_crossed;
+        if self.creatures[creature_idx].degrees_since_perception >= 90 {
+            self.compute_perception(creature_idx, config);
+            self.creatures[creature_idx].degrees_since_perception %= 90;
+            self.creatures[creature_idx].scan_cache.clear();
+        }
     }
 
     /// 从扫描缓存计算 25 维感知输入（sin/cos角度编码 + 能量粒子独立通道）
@@ -791,12 +799,12 @@ impl World {
             let dist = ((other.x - creature.x).powi(2) + (other.y - creature.y).powi(2)).sqrt();
 
             if dist < config.contact_range {
-                // 掠夺：转移目标能量的 value×20%（最高20%）
+                // 掠夺：转移目标能量的 value×20%（最高20%），按转化率折损
                 let transfer_ratio = value * 0.2;
                 let target_energy = self.creatures[other_idx].energy;
                 let transfer_amount = target_energy * transfer_ratio;
                 self.creatures[other_idx].energy -= transfer_amount;
-                self.creatures[idx].energy += transfer_amount;
+                self.creatures[idx].energy += transfer_amount * config.predation_efficiency;
                 return true;
             }
         }
@@ -922,7 +930,7 @@ impl World {
     }
 
     /// 获取统计信息
-    pub fn stats(&self, species_threshold: f64) -> WorldStats {
+    pub fn stats(&self, species_threshold: f64, config: &Config) -> WorldStats {
         let alive_creatures: Vec<_> = self.creatures.iter().filter(|c| c.alive).collect();
         let alive_families = self.family_stats.len();
         let max_generation = alive_creatures.iter()
@@ -953,9 +961,13 @@ impl World {
             }
         }
 
-        // 计算种群分组（使用并查集思想）
-        let (species_count, top_species, creature_species_map) =
-            self.calculate_species(&alive_creatures, species_threshold);
+        // 计算种群分组（使用缓存的聚类结果）
+        self.ensure_species_cache(species_threshold);
+        let cache = self.species_cache.borrow();
+        let cache = cache.as_ref().unwrap();
+        let species_count = cache.species_count;
+        let top_species = cache.top_species.clone();
+        let creature_species_map = cache.creature_species_map.clone();
 
         // 统计每个家族的种族分布
         // family_id -> (species_id -> count)
@@ -1003,6 +1015,7 @@ impl World {
             &creature_species_map,
             avg_energy,
             max_generation,
+            config,
         );
 
         WorldStats {
@@ -1028,24 +1041,20 @@ impl World {
     /// 获取渲染上下文数据（种族映射和前三家族ID）
     /// 返回 (creature_index -> 种族XOR基因哈希, 前三家族ID)
     pub fn get_render_data(&self, threshold: f64) -> (FxHashMap<usize, u64>, Vec<usize>) {
-        // 预分配 Vec 容量以减少重新分配
-        let alive_count = self.creatures.iter().filter(|c| c.alive).count();
-        let mut alive_indices: Vec<usize> = Vec::with_capacity(alive_count);
-        for (i, c) in self.creatures.iter().enumerate() {
-            if c.alive {
-                alive_indices.push(i);
-            }
-        }
+        // 复用聚类缓存
+        self.ensure_species_cache(threshold);
+        let cache_ref = self.species_cache.borrow();
+        let cache = match cache_ref.as_ref() {
+            Some(c) => c,
+            None => return (FxHashMap::default(), Vec::new()),
+        };
 
-        if alive_indices.is_empty() {
+        if cache.alive_indices.is_empty() {
             return (FxHashMap::default(), Vec::new());
         }
 
-        let n = alive_indices.len();
-
-        // 并查集优化聚类（O(n²·α(n)) 代替 O(n³)）
-        let mut parent: Vec<usize> = (0..n).collect();
-        let mut rank: Vec<usize> = vec![0; n];
+        let n = cache.alive_indices.len();
+        let mut parent = cache.parent.clone();
 
         fn find(parent: &mut [usize], x: usize) -> usize {
             if parent[x] != x {
@@ -1054,35 +1063,9 @@ impl World {
             parent[x]
         }
 
-        fn union(parent: &mut [usize], rank: &mut [usize], x: usize, y: usize) {
-            let root_x = find(parent, x);
-            let root_y = find(parent, y);
-            if root_x != root_y {
-                if rank[root_x] < rank[root_y] {
-                    parent[root_x] = root_y;
-                } else if rank[root_x] > rank[root_y] {
-                    parent[root_y] = root_x;
-                } else {
-                    parent[root_y] = root_x;
-                    rank[root_x] += 1;
-                }
-            }
-        }
-
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let ci = &self.creatures[alive_indices[i]];
-                let cj = &self.creatures[alive_indices[j]];
-                if self.get_similarity(ci, cj) >= threshold {
-                    union(&mut parent, &mut rank, i, j);
-                }
-            }
-        }
-
         // 取每个种族中最老成员的 genome_hash 作为稳定颜色标识
-        // 最老成员变动最少，颜色最稳定
         let mut species_elder: FxHashMap<usize, (u64, f64)> = FxHashMap::with_capacity_and_hasher(n, Default::default());
-        for (i, &idx) in alive_indices.iter().enumerate() {
+        for (i, &idx) in cache.alive_indices.iter().enumerate() {
             let root = find(&mut parent, i);
             let creature = &self.creatures[idx];
             species_elder
@@ -1098,7 +1081,7 @@ impl World {
 
         // 构建 creature_index -> 种族颜色哈希 映射
         let mut creature_species: FxHashMap<usize, u64> = FxHashMap::with_capacity_and_hasher(n, Default::default());
-        for (i, &idx) in alive_indices.iter().enumerate() {
+        for (i, &idx) in cache.alive_indices.iter().enumerate() {
             let root = find(&mut parent, i);
             let (elder_hash, _) = species_elder[&root];
             creature_species.insert(idx, elder_hash);
@@ -1122,6 +1105,7 @@ impl World {
         creature_species_map: &FxHashMap<usize, usize>,
         global_avg_energy: f64,
         global_max_generation: usize,
+        config: &Config,
     ) -> Option<DominantCandidate> {
         let total_count = alive_creatures.len();
         if total_count < 5 {
@@ -1182,8 +1166,8 @@ impl World {
             let sp_avg_age = sum_age / count as f64;
             let sp_avg_energy = sum_energy / count as f64;
 
-            // 条件1: 种群最老成员 age >= 800
-            if max_age < 800.0 {
+            // 条件1: 种群最老成员 age >= 配置阈值
+            if max_age < config.dominant_min_age {
                 continue;
             }
 
@@ -1240,10 +1224,29 @@ impl World {
         best
     }
 
+    /// 确保聚类缓存有效（同一时刻只计算一次）
+    fn ensure_species_cache(&self, threshold: f64) {
+        let current_time = self.time;
+        if *self.species_cache_time.borrow() == current_time && self.species_cache.borrow().is_some() {
+            return;
+        }
+
+        let alive_creatures: Vec<&Creature> = self.creatures.iter().filter(|c| c.alive).collect();
+        let cache = self.calculate_species_cache(&alive_creatures, threshold);
+        *self.species_cache.borrow_mut() = Some(cache);
+        *self.species_cache_time.borrow_mut() = current_time;
+    }
+
     /// 返回: (种族数, 最大种族数, 种族前三, 生物索引->种族根索引映射)
-    fn calculate_species(&self, alive_creatures: &[&Creature], threshold: f64) -> (usize, Vec<RankedEntry>, FxHashMap<usize, usize>) {
+    fn calculate_species_cache(&self, alive_creatures: &[&Creature], threshold: f64) -> SpeciesCache {
         if alive_creatures.is_empty() {
-            return (0, Vec::new(), FxHashMap::default());
+            return SpeciesCache {
+                parent: Vec::new(),
+                alive_indices: Vec::new(),
+                species_count: 0,
+                top_species: Vec::new(),
+                creature_species_map: FxHashMap::default(),
+            };
         }
 
         let n = alive_creatures.len();
@@ -1276,11 +1279,19 @@ impl World {
             }
         }
 
-        // 聚类：将相似的生物归为同一种族（使用缓存）
+        // 按结构哈希分桶，只在同桶内做相似度比较（拓扑不同的 similarity 必然很低）
+        let mut buckets: FxHashMap<u64, Vec<usize>> = FxHashMap::default();
         for i in 0..n {
-            for j in (i + 1)..n {
-                if self.get_similarity(alive_creatures[i], alive_creatures[j]) >= threshold {
-                    union(&mut parent, &mut rank, i, j);
+            let sh = alive_creatures[i].genome.structural_hash();
+            buckets.entry(sh).or_default().push(i);
+        }
+
+        for members in buckets.values() {
+            for (a_idx, &i) in members.iter().enumerate() {
+                for &j in &members[a_idx + 1..] {
+                    if self.get_similarity(alive_creatures[i], alive_creatures[j]) >= threshold {
+                        union(&mut parent, &mut rank, i, j);
+                    }
                 }
             }
         }
@@ -1321,7 +1332,18 @@ impl World {
         species_vec.sort_by(|a, b| b.count.cmp(&a.count));
         let top_species: Vec<_> = species_vec.into_iter().take(3).collect();
 
-        (species_count, top_species, creature_species_map)
+        // 收集 alive_indices（creatures 数组中的原始索引）
+        let alive_indices: Vec<usize> = (0..self.creatures.len())
+            .filter(|&i| self.creatures[i].alive)
+            .collect();
+
+        SpeciesCache {
+            parent,
+            alive_indices,
+            species_count,
+            top_species,
+            creature_species_map,
+        }
     }
 }
 
