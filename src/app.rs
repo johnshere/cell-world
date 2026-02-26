@@ -117,8 +117,8 @@ impl CellWorldApp {
                 .open(log_path)
             {
                 let _ = writeln!(file, "# Cell World 运行日志\n");
-                let _ = writeln!(file, "| 时间 | 生物 | 粒子 | 总能 | 家族 | 灭绝 | 代 | 种群 | 寿命(均/中/长/短/死) | 功能(移动/吸收/释放/繁殖/捕食/哺育) | 行为(移动/吸收/释放/繁殖/捕食/哺育) |");
-                let _ = writeln!(file, "|------|------|------|------|------|------|-----|------|----------------------|--------------------------------------|--------------------------------------|");
+                let _ = writeln!(file, "| 时间 | 生物 | 粒子 | 总能 | 代 | 种群 | 寿命(均/中/长/短/死) | 行为(移动/吸收/咬/喂/繁殖) |");
+                let _ = writeln!(file, "|------|------|------|------|----|------|----------------------|----------------------------|");
             }
             // 性能分析日志
             if let Ok(mut file) = OpenOptions::new()
@@ -140,23 +140,19 @@ impl CellWorldApp {
             .append(true)
             .open(log_path)
         {
-            let func = &stats.function_unlocks;
             let acts = &stats.action_counts;
             let death = &stats.death_age_stats;
             let _ = writeln!(
                 file,
-                "| {:.0} | {} | {} | {:.0} | {} | {} | {} | {} | {:.1}/{:.1}/{:.1}/{:.1}/{} | {}/{}/{}/{}/{}/{} | {}/{}/{}/{}/{}/{} |",
+                "| {:.0} | {} | {} | {:.0} | {} | {} | {:.1}/{:.1}/{:.1}/{:.1}/{} | {}/{}/{}/{}/{} |",
                 stats.time,
                 stats.creature_count,
                 stats.energy_particle_count,
                 stats.total_energy,
-                stats.alive_families,
-                stats.extinct_families,
                 stats.max_generation,
                 stats.species_count,
                 death.avg, death.median, death.max, death.min, death.count,
-                func[0], func[3], func[4], func[5], func[6], func[9],
-                acts[0], acts[3], acts[4], acts[5], acts[6], acts[9]
+                acts[0], acts[1], acts[2], acts[3], acts[4]
             );
         }
 
@@ -377,10 +373,9 @@ impl eframe::App for CellWorldApp {
             // 每1秒（真实时间）更新一次渲染上下文（避免频繁计算O(n²)的种族聚类）
             if self.render_ctx_cache.is_none() || now.duration_since(self.last_render_ctx_update).as_secs_f64() >= 1.0 {
                 let t_ctx = std::time::Instant::now();
-                let (creature_species, top_family_ids) = self.world.get_render_data(self.config.species_similarity_threshold);
+                let creature_species = self.world.get_render_data(self.config.species_similarity_threshold);
                 self.render_ctx_cache = Some(RenderContext {
                     creature_species,
-                    top_family_ids,
                 });
                 self.last_render_ctx_update = now;
                 render_ctx_time = t_ctx.elapsed().as_secs_f64() * 1000.0;

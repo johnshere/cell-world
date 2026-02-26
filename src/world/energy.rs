@@ -4,6 +4,7 @@ pub struct EnergyParticle {
     pub x: f64,
     pub y: f64,
     pub energy: f64,
+    pub initial_energy: f64,
     pub lifetime: f64,
     pub age: f64,
     pub alive: bool,
@@ -16,6 +17,7 @@ impl EnergyParticle {
             x,
             y,
             energy,
+            initial_energy: energy,
             lifetime,
             age: 0.0,
             alive: true,
@@ -23,8 +25,15 @@ impl EnergyParticle {
     }
 
     /// 更新（返回是否仍然存活）
-    pub fn update(&mut self, dt: f64) -> bool {
+    pub fn update(&mut self, dt: f64, decay_rate: f64) -> bool {
         self.age += dt;
+        // 能量衰减
+        self.energy -= self.energy * decay_rate * dt;
+        // 能量过低则死亡
+        if self.energy <= 0.1 {
+            self.alive = false;
+        }
+        // 保留 lifetime 硬上限（释放粒子兼容）
         if self.age >= self.lifetime {
             self.alive = false;
         }

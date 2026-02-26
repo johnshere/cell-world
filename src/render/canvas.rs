@@ -4,12 +4,10 @@ use rustc_hash::FxHashMap;
 use crate::world::World;
 use super::Selection;
 
-/// 渲染上下文（种族颜色、家族排名等）
+/// 渲染上下文（种族颜色）
 pub struct RenderContext {
     /// 生物索引 -> 种族XOR基因哈希（用于分散且稳定的颜色）
     pub creature_species: FxHashMap<usize, u64>,
-    /// 前三家族ID
-    pub top_family_ids: Vec<usize>,
 }
 
 /// 世界画布渲染器
@@ -62,9 +60,10 @@ impl WorldCanvas {
             ui.allocate_painter(available_size, Sense::click_and_drag());
         let rect = response.rect;
 
-        // 首次渲染时设置默认缩放
+        // 首次渲染时设置默认缩放并居中视窗（原点在屏幕中心）
         if !self.initialized {
             self.scale = self.initial_scale;
+            self.offset = Vec2::new(available_size.x / 2.0, available_size.y / 2.0);
             self.initialized = true;
         }
 
@@ -97,7 +96,7 @@ impl WorldCanvas {
             }
             let pos = self.world_to_screen(Pos2::new(particle.x as f32, particle.y as f32), rect);
             if rect.contains(pos) {
-                let alpha = (1.0 - particle.age / particle.lifetime) as f32;
+                let alpha = (particle.energy / particle.initial_energy).clamp(0.0, 1.0) as f32;
                 let color = Color32::from_rgba_unmultiplied(255, 220, 100, (alpha * 200.0) as u8);
                 let radius = 1.064 * self.scale;
                 painter.circle_filled(pos, radius, color);
@@ -106,6 +105,18 @@ impl WorldCanvas {
                 if *selection == Selection::Energy(particle.id) {
                     painter.circle_stroke(pos, radius + 2.0, selection_stroke);
                 }
+            }
+        }
+
+        // 绘制火山标记（原点 0,0）
+        {
+            let volcano_pos = self.world_to_screen(Pos2::new(0.0, 0.0), rect);
+            if rect.contains(volcano_pos) {
+                let outer_r = 8.0 * self.scale;
+                let inner_r = 4.0 * self.scale;
+                let volcano_color = Color32::from_rgb(255, 80, 30);
+                painter.circle_filled(volcano_pos, outer_r, Color32::from_rgba_unmultiplied(255, 80, 30, 80));
+                painter.circle_filled(volcano_pos, inner_r, volcano_color);
             }
         }
 
@@ -123,21 +134,13 @@ impl WorldCanvas {
                 let radius = ((creature.energy as f32 * 0.32).sqrt()).clamp(1.5, 8.0) * self.scale;
                 painter.circle_filled(pos, radius, color);
 
-                // 家族排名四分之一圆弧（金上/银左/铜下）
-                let family_rank = ctx.top_family_ids.iter().position(|&id| id == creature.family_id);
-                if let Some(rank) = family_rank {
-                    let (rank_color, direction) = match rank {
-                        0 => (Color32::from_rgb(255, 215, 0), ArcDirection::Top),      // 金色-上
-                        1 => (Color32::from_rgb(192, 192, 192), ArcDirection::Left),   // 银色-左
-                        2 => (Color32::from_rgb(205, 127, 50), ArcDirection::Bottom),  // 铜色-下
-                        _ => (Color32::WHITE, ArcDirection::Top),
-                    };
-                    draw_quarter_arc(&painter, pos, radius + 2.0, direction, Stroke::new(0.5, rank_color));
-                }
+                // 头部方向圆弧（五分之一圆，指示朝向）
+                let heading = creature.heading as f32;
+                draw_heading_arc(&painter, pos, radius + 2.0, heading, Stroke::new(0.5, color));
 
-                // 选中五分之一圆弧（白色-右）
+                // 选中：半径大2px的白色圆
                 if *selection == Selection::Creature(creature.id) {
-                    draw_quarter_arc(&painter, pos, radius + 2.0, ArcDirection::Right, Stroke::new(0.5, Color32::WHITE));
+                    painter.circle_stroke(pos, radius + 2.0, Stroke::new(1.0, Color32::WHITE));
                 }
             }
         }
@@ -279,26 +282,12 @@ impl Default for WorldCanvas {
     }
 }
 
-/// 圆弧方向
-enum ArcDirection {
-    Top,
-    Left,
-    Bottom,
-    Right,
-}
-
-/// 绘制五分之一圆弧
-fn draw_quarter_arc(painter: &egui::Painter, center: Pos2, radius: f32, direction: ArcDirection, stroke: Stroke) {
-    // 根据方向确定起始和结束角度（弧度），五分之一圆 = 72° = 0.4π
+/// 绘制头部方向圆弧（五分之一圆，以 heading 为中心）
+fn draw_heading_arc(painter: &egui::Painter, center: Pos2, radius: f32, heading: f32, stroke: Stroke) {
     let half_arc = std::f32::consts::PI * 0.2;  // 36° 半角
-    let (start_angle, end_angle) = match direction {
-        ArcDirection::Top => (-std::f32::consts::PI * 0.5 - half_arc, -std::f32::consts::PI * 0.5 + half_arc),    // 上: -126° 到 -54°
-        ArcDirection::Left => (std::f32::consts::PI - half_arc, std::f32::consts::PI + half_arc),                  // 左: 144° 到 216°
-        ArcDirection::Bottom => (std::f32::consts::PI * 0.5 - half_arc, std::f32::consts::PI * 0.5 + half_arc),   // 下: 54° 到 126°
-        ArcDirection::Right => (-half_arc, half_arc),                                                              // 右: -36° 到 36°
-    };
+    let start_angle = heading - half_arc;
+    let end_angle = heading + half_arc;
 
-    // 用多个点近似圆弧
     let segments = 12;
     let points: Vec<Pos2> = (0..=segments)
         .map(|i| {

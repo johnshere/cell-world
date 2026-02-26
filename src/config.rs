@@ -9,23 +9,28 @@ pub struct Config {
     /// 初始能量
     pub initial_energy: f64,
 
-    /// 能量粒子生成间隔（秒）
-    pub energy_spawn_interval: f64,
-    /// 每次生成的能量粒子数量（基准值，会被波动影响）
-    pub energy_spawn_count: usize,
-    /// 每个能量粒子的能量值（基准值，会被波动影响）
-    pub energy_particle_value: f64,
-    /// 能量粒子存活时间（秒）
-    pub energy_particle_lifetime: f64,
-
-    /// 能量波动开关
-    pub energy_wave_enabled: bool,
-    /// 能量波动幅度（0.0~1.0，建议0.3~0.6）
-    /// 实际强度范围: [1-amplitude, 1+amplitude]
-    pub energy_wave_amplitude: f64,
-    /// 能量波动周期（秒数组，使用互质数产生弱周期效果）
-    /// 多层正弦波叠加，产生看似无规律的波动
-    pub energy_wave_periods: [f64; 4],
+    /// 火山坐标 X
+    pub volcano_x: f64,
+    /// 火山坐标 Y
+    pub volcano_y: f64,
+    /// 火山喷发间隔（秒）
+    pub volcano_interval: f64,
+    /// 火山喷射半径
+    pub volcano_radius: f64,
+    /// 每次喷发粒子数
+    pub volcano_count: usize,
+    /// 火山粒子能量
+    pub volcano_particle_energy: f64,
+    /// 陨石降落间隔（秒）
+    pub meteorite_interval: f64,
+    /// 每颗陨石粒子数
+    pub meteorite_count: usize,
+    /// 陨石散布线段长度
+    pub meteorite_length: f64,
+    /// 陨石粒子能量
+    pub meteorite_particle_energy: f64,
+    /// 粒子能量衰减率（每秒 energy *= (1 - rate)）
+    pub particle_decay_rate: f64,
 
     /// 基础代谢率（每秒固定消耗）
     pub base_metabolism: f64,
@@ -38,14 +43,8 @@ pub struct Config {
     /// 子代获得的能量比例
     pub reproduce_energy_ratio: f64,
 
-    /// 免费感知半径（此范围内扫描不耗能）
-    pub scan_free_radius: f64,
-    /// 最大感知半径
-    pub scan_max_radius: f64,
-    /// 最大扫描角速度（度/秒）
-    pub scan_max_angular_velocity: f64,
-    /// 扫描单位成本（每度耗能 = max(0, r-free)² × π/360 × cost）
-    pub scan_cost: f64,
+    /// 视觉半径（眼睛能看到的最大距离）
+    pub vision_range: f64,
     /// 接触判定距离
     pub contact_range: f64,
 
@@ -74,15 +73,17 @@ impl Default for Config {
 
             initial_energy: 50.0,  // 初始能量更高，确保能繁殖一次
 
-            energy_spawn_interval: 0.6,  // 略快生成，增加能量供给
-            energy_spawn_count: 2,  // 每次生成3个，增加能量可用性
-            energy_particle_value: 35.0,  // 提高粒子价值，让觅食更有效
-            energy_particle_lifetime: 35.0,  // 能量存在更久
-
-            energy_wave_enabled: true,  // 启用能量波动
-            energy_wave_amplitude: 0.75,  // 波动幅度75%（强度范围 0.25~1.75）
-            // 使用质数周期（秒），产生长周期/弱周期效果
-            energy_wave_periods: [93.0, 141.0, 219.0, 339.0],
+            volcano_x: 0.0,
+            volcano_y: 0.0,
+            volcano_interval: 30.0,         // 喷发间隔（秒）
+            volcano_radius: 200.0,          // 喷射半径
+            volcano_count: 60,              // 每次粒子数
+            volcano_particle_energy: 35.0,  // 单粒子能量
+            meteorite_interval: 12.0,       // 陨石间隔（秒）
+            meteorite_count: 15,            // 每颗粒子数
+            meteorite_length: 150.0,        // 散布线段长度
+            meteorite_particle_energy: 35.0,
+            particle_decay_rate: 0.005,     // 每秒 energy *= (1 - rate)
 
             base_metabolism: 0.07,  // 基础消耗
             age_metabolism_factor: 0.04,  // 年龄倍率：age=33s时消耗×2.0，age=100s时消耗×4.0
@@ -90,11 +91,8 @@ impl Default for Config {
             reproduce_threshold: 50.0,  // 繁殖阈值
             reproduce_energy_ratio: 0.3,  // 子代获得能量
 
-            scan_free_radius: 40.0,      // 免费扫描半径
-            scan_max_radius: 200.0,       // 最大扫描半径
-            scan_max_angular_velocity: 180.0,  // 最大角速度（度/秒）
-            scan_cost: 0.0001,           // 扫描单位成本
-            contact_range: 15.0,  // 增大接触范围，让吸收更容易
+            vision_range: 150.0,  // 视觉半径
+            contact_range: 15.0,  // 接触判定距离
 
             mutation_rate: 0.15,  // 提高变异率，加速结构探索
             initial_connections_min: 6,  // 更多初始连接，增加有用组合概率

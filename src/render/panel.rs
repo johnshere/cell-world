@@ -10,39 +10,27 @@ use super::Selection;
 /// 面板操作结果
 #[derive(Default)]
 pub struct PanelAction {
-    /// 添加生物（None=不添加，Some(None)=随机，Some(Some(name))=使用模板）
     pub spawn: Option<Option<String>>,
-    /// 删除选中的生物
     pub delete_selected: bool,
-    /// 保存选中的生物（带名称）
     pub save_selected: Option<String>,
-    /// 删除模板
     pub delete_template: Option<String>,
 }
 
 /// 统计面板
 pub struct StatsPanel {
-    /// 更新间隔（秒）
     update_interval: f64,
-    /// 上次更新时间（真实时间）
     last_update: Instant,
-    /// 缓存的统计数据
     cached_stats: CachedStats,
-    /// 当前选择的模板索引（0=随机）
     selected_template: usize,
-    /// 保存对话框状态
     save_dialog_open: bool,
-    /// 保存名称输入
     save_name: String,
 }
 
-/// 排名数据（用于显示）
+/// 排名数据
 #[derive(Clone, Default)]
 pub struct RankedEntry {
     pub id: usize,
     pub count: usize,
-    pub family_id: usize,   // 关联的家族ID
-    pub species_id: usize,  // 关联的种族ID
 }
 
 #[derive(Default, Clone)]
@@ -51,33 +39,23 @@ pub struct CachedStats {
     pub fps: f64,
     pub creature_count: usize,
     pub energy_particle_count: usize,
-    pub total_energy: f64,           // 总能量（生物+粒子）
-    /// 当前能量投放强度（波动值，1.0 = 100%）
-    pub energy_intensity: f64,
-    pub alive_families: usize,
-    pub extinct_families: usize,
+    pub total_energy: f64,
+    pub volcano_countdown: f64,
     pub max_generation: usize,
     pub avg_energy: f64,
-    // 功能解锁统计（每个功能解锁的生物数）
-    pub function_unlocks: [usize; 10],
-    // 行为触发统计（累计触发次数）
-    pub action_counts: [usize; 10],
-    // 死亡年龄统计
+    // 行为触发统计（5事件：移动/吸收/咬/喂/繁殖）
+    pub action_counts: [usize; 5],
     pub death_age_stats: DeathAgeStats,
-    // 种群统计
     pub species_count: usize,
-    pub top_families: Vec<RankedEntry>,
     pub top_species: Vec<RankedEntry>,
-    // 生物ID -> 种群ID 映射
     pub creature_species_map: FxHashMap<u64, usize>,
-    // 优势种候选
     pub dominant_candidate: Option<DominantCandidate>,
 }
 
 impl StatsPanel {
     pub fn new() -> Self {
         Self {
-            update_interval: 0.5, // 500ms
+            update_interval: 0.5,
             last_update: Instant::now(),
             cached_stats: CachedStats::default(),
             selected_template: 0,
@@ -86,14 +64,10 @@ impl StatsPanel {
         }
     }
 
-    /// 更新缓存的统计数据
     pub fn update(&mut self, world: &World, config: &Config, species_threshold: f64, fps: f64, now: Instant) {
-        // fps 每帧都更新
         self.cached_stats.fps = fps;
-        // 能量强度每帧更新（显示波动效果）
-        self.cached_stats.energy_intensity = world.calculate_energy_intensity(config);
+        self.cached_stats.volcano_countdown = world.volcano_countdown(config);
 
-        // 使用真实时间进行缓存检查，避免速度倍率影响
         if now.duration_since(self.last_update).as_secs_f64() >= self.update_interval {
             self.last_update = now;
             let stats = world.stats(species_threshold, config);
@@ -103,30 +77,14 @@ impl StatsPanel {
                 creature_count: stats.creature_count,
                 energy_particle_count: stats.energy_particle_count,
                 total_energy: stats.total_energy,
-                energy_intensity: self.cached_stats.energy_intensity,
-                alive_families: stats.alive_families,
-                extinct_families: stats.extinct_families,
+                volcano_countdown: self.cached_stats.volcano_countdown,
                 max_generation: stats.max_generation,
                 avg_energy: stats.avg_energy,
-                function_unlocks: stats.function_unlocks,
                 action_counts: stats.action_counts,
                 death_age_stats: stats.death_age_stats.clone(),
                 species_count: stats.species_count,
-                top_families: stats.top_families.iter()
-                    .map(|e| RankedEntry {
-                        id: e.id,
-                        count: e.count,
-                        family_id: e.family_id,
-                        species_id: e.species_id,
-                    })
-                    .collect(),
                 top_species: stats.top_species.iter()
-                    .map(|e| RankedEntry {
-                        id: e.id,
-                        count: e.count,
-                        family_id: e.family_id,
-                        species_id: e.species_id,
-                    })
+                    .map(|e| RankedEntry { id: e.id, count: e.count })
                     .collect(),
                 creature_species_map: stats.creature_species_map.clone(),
                 dominant_candidate: stats.dominant_candidate.clone(),
@@ -134,24 +92,21 @@ impl StatsPanel {
         }
     }
 
-    /// 获取缓存的统计数据
     pub fn stats(&self) -> &CachedStats {
         &self.cached_stats
     }
 
-    /// 重置模板选择为"随机"
     pub fn reset_template_selection(&mut self) {
         self.selected_template = 0;
     }
 
-    /// 渲染面板，返回面板操作
     pub fn render(&mut self, ui: &mut Ui, fps: f64, speed: &mut f64, paused: &mut bool, store: &Store) -> PanelAction {
         let mut action = PanelAction::default();
 
         ui.heading("Cell World");
         ui.separator();
 
-        // FPS 和 时间 一行
+        // FPS 和 时间
         ui.horizontal(|ui| {
             ui.label(format!("FPS: {:.0}", fps));
             ui.separator();
@@ -174,12 +129,11 @@ impl StatsPanel {
 
         ui.separator();
 
-        // 统计 + 下拉选 + 添加按钮
+        // 模板选择 + 添加按钮
         ui.horizontal(|ui| {
             ui.label("统计");
             ui.separator();
 
-            // 下拉选择模板
             let template_names = store.names();
             let options: Vec<&str> = std::iter::once("随机")
                 .chain(template_names.iter().copied())
@@ -195,13 +149,12 @@ impl StatsPanel {
 
             if ui.button("+").clicked() {
                 if self.selected_template == 0 {
-                    action.spawn = Some(None); // 随机
+                    action.spawn = Some(None);
                 } else if let Some(name) = template_names.get(self.selected_template - 1) {
-                    action.spawn = Some(Some(name.to_string())); // 使用模板
+                    action.spawn = Some(Some(name.to_string()));
                 }
             }
 
-            // 删除按钮（仅选中非"随机"时显示）
             if self.selected_template > 0 {
                 if ui.button("-").clicked() {
                     if let Some(name) = template_names.get(self.selected_template - 1) {
@@ -211,7 +164,7 @@ impl StatsPanel {
             }
         });
 
-        // 统计（一行显示）
+        // 统计
         ui.horizontal_wrapped(|ui| {
             ui.label(format!("生物:{}", self.cached_stats.creature_count));
             ui.label("│");
@@ -221,37 +174,23 @@ impl StatsPanel {
             ui.label("│");
             ui.label(format!("均能:{:.0}", self.cached_stats.avg_energy));
             ui.label("│");
-            ui.label(format!("家族:{}", self.cached_stats.alive_families));
-            ui.label("│");
-            ui.label(format!("灭绝:{}", self.cached_stats.extinct_families));
-            ui.label("│");
             ui.label(format!("代:{}", self.cached_stats.max_generation));
             ui.label("│");
             ui.label(format!("种群:{}", self.cached_stats.species_count));
             ui.label("│");
-            // 能量强度（波动值），用不同颜色表示高低
-            let intensity = self.cached_stats.energy_intensity;
-            let color = if intensity > 1.2 {
-                egui::Color32::from_rgb(100, 255, 100)  // 高强度：绿色
-            } else if intensity < 0.8 {
-                egui::Color32::from_rgb(255, 150, 100)  // 低强度：橙色
+            // 火山倒计时
+            let countdown = self.cached_stats.volcano_countdown;
+            let color = if countdown < 5.0 {
+                egui::Color32::from_rgb(255, 80, 30)
+            } else if countdown < 15.0 {
+                egui::Color32::from_rgb(255, 200, 50)
             } else {
-                egui::Color32::from_rgb(200, 200, 200)  // 正常：灰色
+                egui::Color32::from_rgb(200, 200, 200)
             };
-            ui.colored_label(color, format!("☀{:.0}%", intensity * 100.0));
+            ui.colored_label(color, format!("🌋{:.0}s", countdown));
         });
 
-        // 功能解锁统计
-        // 索引: 0,1=方向sin/cos, 2=速度, 3=吸收, 4=释放, 5=繁殖, 6=捕食, 7=扫描R, 8=扫描V, 9=哺育
-        let func = &self.cached_stats.function_unlocks;
-        ui.horizontal_wrapped(|ui| {
-            ui.label(format!(
-                "功能: 移动:{}│吸收:{}│释放:{}│繁殖:{}│捕食:{}│哺育:{}",
-                func[0], func[3], func[4], func[5], func[6], func[9]
-            ));
-        });
-
-        // 行为触发次数统计（用 K/M 简化显示）
+        // 行为统计（5事件）
         let acts = &self.cached_stats.action_counts;
         let format_count = |c: usize| -> String {
             if c >= 1_000_000 {
@@ -264,9 +203,9 @@ impl StatsPanel {
         };
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
-                "行为: 移动:{}│吸收:{}│释放:{}│繁殖:{}│捕食:{}│哺育:{}",
-                format_count(acts[0]), format_count(acts[3]), format_count(acts[4]),
-                format_count(acts[5]), format_count(acts[6]), format_count(acts[9])
+                "行为: 移动:{}│吸收:{}│咬:{}│喂:{}│繁殖:{}",
+                format_count(acts[0]), format_count(acts[1]), format_count(acts[2]),
+                format_count(acts[3]), format_count(acts[4])
             ));
         });
 
@@ -281,30 +220,16 @@ impl StatsPanel {
             });
         }
 
-        // 排行榜
+        // 种群排行
         ui.separator();
-        ui.horizontal(|ui| {
-            // 家族前三（金/银/铜描边）
-            ui.vertical(|ui| {
-                ui.label("家族前三:");
-                for (i, entry) in self.cached_stats.top_families.iter().enumerate() {
-                    ui.label(format!("{}. {}[#{}]", i + 1, entry.count, entry.family_id));
-                }
-            });
-            ui.separator();
-            // 种群前三
-            ui.vertical(|ui| {
-                ui.label("种群前三:");
-                for (i, entry) in self.cached_stats.top_species.iter().enumerate() {
-                    ui.label(format!("{}. {}[${}]", i + 1, entry.count, entry.species_id));
-                }
-            });
-        });
+        ui.label("种群前三:");
+        for (i, entry) in self.cached_stats.top_species.iter().enumerate() {
+            ui.label(format!("{}. {} 个体", i + 1, entry.count));
+        }
 
         action
     }
 
-    /// 渲染选中信息，返回操作
     pub fn render_selection(&mut self, ui: &mut Ui, selection: &Selection, world: &World) -> PanelAction {
         let creature_species_map = &self.cached_stats.creature_species_map;
         let mut action = PanelAction::default();
@@ -313,99 +238,75 @@ impl StatsPanel {
             Selection::None => {}
             Selection::Creature(id) => {
                 if let Some(creature) = world.creatures.iter().find(|c| c.id == *id && c.alive) {
-                        ui.separator();
-                        ui.label("选中生物");
+                    ui.separator();
+                    ui.label("选中生物");
 
-                        // 删除和保存按钮
-                        ui.horizontal(|ui| {
-                            if ui.button("🗑 删除").clicked() {
-                                action.delete_selected = true;
-                            }
-                            if ui.button("💾 保存").clicked() {
-                                self.save_dialog_open = true;
-                                self.save_name = format!("生物_{:08X}", creature.genome_hash);
-                            }
-                        });
-
-                        // 保存对话框
-                        if self.save_dialog_open {
-                            ui.horizontal(|ui| {
-                                ui.label("名称:");
-                                ui.text_edit_singleline(&mut self.save_name);
-                            });
-                            ui.horizontal(|ui| {
-                                if ui.button("确认保存").clicked() {
-                                    action.save_selected = Some(self.save_name.clone());
-                                    self.save_dialog_open = false;
-                                }
-                                if ui.button("取消").clicked() {
-                                    self.save_dialog_open = false;
-                                }
-                            });
+                    ui.horizontal(|ui| {
+                        if ui.button("🗑 删除").clicked() {
+                            action.delete_selected = true;
                         }
+                        if ui.button("💾 保存").clicked() {
+                            self.save_dialog_open = true;
+                            self.save_name = format!("生物_{:08X}", creature.genome_hash);
+                        }
+                    });
 
-                        ui.separator();
-
+                    if self.save_dialog_open {
                         ui.horizontal(|ui| {
-                            ui.label("位置:");
-                            ui.label(format!("({:.1}, {:.1})", creature.x, creature.y));
+                            ui.label("名称:");
+                            ui.text_edit_singleline(&mut self.save_name);
                         });
-
                         ui.horizontal(|ui| {
-                            ui.label("能量:");
-                            ui.label(format!("{:.1}", creature.energy));
-                        });
-
-                        ui.horizontal(|ui| {
-                            ui.label("年龄:");
-                            ui.label(format!("{:.1}s", creature.age));
-                        });
-
-                        ui.horizontal(|ui| {
-                            ui.label("家族ID:");
-                            ui.label(format!("{}", creature.family_id));
-                        });
-
-                        ui.horizontal(|ui| {
-                            ui.label("种群ID:");
-                            let species_id = creature_species_map.get(&creature.id).copied().unwrap_or(0);
-                            ui.label(format!("{}", species_id));
-                        });
-
-                        ui.horizontal(|ui| {
-                            ui.label("基因哈希:");
-                            ui.label(format!("{:08X}", creature.genome_hash));
-                        });
-
-                        // 神经网络信息
-                        ui.separator();
-                        ui.label("神经网络");
-
-                        ui.horizontal(|ui| {
-                            ui.label("节点数:");
-                            ui.label(format!("{}", creature.genome.nodes.len()));
-                        });
-
-                        ui.horizontal(|ui| {
-                            ui.label("连接数:");
-                            ui.label(format!("{}", creature.genome.connections.len()));
-                        });
-
-                        ui.horizontal(|ui| {
-                            ui.label("输出维度:");
-                            ui.label(format!("{}", creature.genome.output_map.len()));
-                        });
-
-                        // 功能映射
-                        let func_names = ["方向S", "方向C", "速度", "吸收", "释放", "繁殖", "捕食", "扫R", "扫V", "哺育"];
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("功能:");
-                            for &func_id in &creature.genome.output_map {
-                                if func_id < func_names.len() {
-                                    ui.label(func_names[func_id]);
-                                }
+                            if ui.button("确认保存").clicked() {
+                                action.save_selected = Some(self.save_name.clone());
+                                self.save_dialog_open = false;
+                            }
+                            if ui.button("取消").clicked() {
+                                self.save_dialog_open = false;
                             }
                         });
+                    }
+
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        ui.label("位置:");
+                        ui.label(format!("({:.1}, {:.1})", creature.x, creature.y));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("能量:");
+                        ui.label(format!("{:.1}", creature.energy));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("年龄:");
+                        ui.label(format!("{:.1}s", creature.age));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("朝向:");
+                        ui.label(format!("{:.1}°", creature.heading.to_degrees()));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("种群ID:");
+                        let species_id = creature_species_map.get(&creature.id).copied().unwrap_or(0);
+                        ui.label(format!("{}", species_id));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("基因哈希:");
+                        ui.label(format!("{:08X}", creature.genome_hash));
+                    });
+
+                    // 神经网络信息
+                    ui.separator();
+                    ui.label("神经网络");
+                    ui.horizontal(|ui| {
+                        ui.label("节点数:");
+                        ui.label(format!("{}", creature.genome.nodes.len()));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("连接数:");
+                        ui.label(format!("{}", creature.genome.connections.len()));
+                    });
+                    ui.label("输出: 转向/速度/嘴/繁殖");
                 }
             }
             Selection::Energy(id) => {
@@ -418,20 +319,17 @@ impl StatsPanel {
                         ui.label("位置:");
                         ui.label(format!("({:.1}, {:.1})", particle.x, particle.y));
                     });
-
                     ui.horizontal(|ui| {
                         ui.label("能量值:");
                         ui.label(format!("{:.1}", particle.energy));
                     });
-
+                    ui.horizontal(|ui| {
+                        ui.label("初始能量:");
+                        ui.label(format!("{:.1}", particle.initial_energy));
+                    });
                     ui.horizontal(|ui| {
                         ui.label("存在时间:");
                         ui.label(format!("{:.1}s", particle.age));
-                    });
-
-                    ui.horizontal(|ui| {
-                        ui.label("剩余时间:");
-                        ui.label(format!("{:.1}s", particle.lifetime - particle.age));
                     });
                 }
             }

@@ -39,35 +39,24 @@ pub struct ConnectionGene {
 pub struct Genome {
     pub nodes: Vec<NodeGene>,
     pub connections: Vec<ConnectionGene>,
-    pub output_map: Vec<usize>, // 输出节点 -> 功能池映射
     next_node_id: usize,
 }
 
 impl Genome {
-    /// 输入维度（sin/cos角度编码，无跳变，追逐权重≈+1，逃离权重≈-1）
-    /// [0-4]   最佳同类: sin(θ), cos(θ), 距离(0~1), 相似度(0~1), 能量(0~1)
-    /// [5-9]   最差同类: sin(θ), cos(θ), 距离(0~1), 相似度(0~1), 能量(0~1)
-    /// [10-14] 最佳异类: sin(θ), cos(θ), 距离(0~1), 相似度(0~1), 能量(0~1)
-    /// [15-19] 最差异类: sin(θ), cos(θ), 距离(0~1), 相似度(0~1), 能量(0~1)
-    /// [20-23] 最佳能量粒子: sin(θ), cos(θ), 距离(0~1), 能量(0~1)
-    /// [24]    自身能量(0~1)
-    pub const INPUT_SIZE: usize = 25;
-    /// 功能池大小
-    /// [0] 移动方向sin   tanh(-1~1)
-    /// [1] 移动方向cos   tanh(-1~1)
-    /// [2] 移动速度      0~1
-    /// [3] 吸收
-    /// [4] 释放
-    /// [5] 繁殖
-    /// [6] 捕食
-    /// [7] 扫描半径      0~1 → 50~200
-    /// [8] 扫描角速度    0~1 → 0~max°/s
-    /// [9] 哺育
-    pub const FUNCTION_POOL_SIZE: usize = 10;
+    /// 输入维度（3只眼 × 3通道 + 自身能量）
+    /// [0-2]  左眼: 食物距离, 同族距离, 异族距离
+    /// [3-5]  中眼: 食物距离, 同族距离, 异族距离
+    /// [6-8]  右眼: 食物距离, 同族距离, 异族距离
+    /// [9]    自身能量(0~1)
+    pub const INPUT_SIZE: usize = 10;
+    /// 输出维度（固定4个）
+    /// [0] 转向角  tanh(-1~1)
+    /// [1] 速度    tanh(-1~1) → abs后映射
+    /// [2] 嘴      tanh(-1~1)  负=咬, 正=喂, 接触食物自动吸收
+    /// [3] 繁殖    tanh(-1~1)  >阈值时触发
+    pub const OUTPUT_SIZE: usize = 4;
 
     /// 创建最小基因组（只有输入输出，无隐藏层）
-    /// 初始功能：方向sin(0)、方向cos(1)、速度(2)、吸收(3)、繁殖(5)、扫描半径(7)、扫描角速度(8)
-    /// 所有连接完全随机，让行为通过进化自然涌现
     pub fn random_minimal(min_connections: usize, max_connections: usize) -> Self {
         let mut rng = rand::thread_rng();
         let mut nodes = Vec::new();
@@ -81,11 +70,8 @@ impl Genome {
             });
         }
 
-        // 核心功能：方向sin/cos(0,1)、速度(2)、吸收(3)、繁殖(5)、扫描控制(7,8)
-        let output_map = vec![0, 1, 2, 3, 5, 7, 8];
-
-        // 为每个输出创建节点和随机连接
-        for (i, &_func_id) in output_map.iter().enumerate() {
+        // 创建4个固定输出节点
+        for i in 0..Self::OUTPUT_SIZE {
             let output_id = Self::INPUT_SIZE + i;
             nodes.push(NodeGene {
                 id: output_id,
@@ -105,11 +91,10 @@ impl Genome {
             }
         }
 
-        let next_node_id = Self::INPUT_SIZE + output_map.len();
+        let next_node_id = Self::INPUT_SIZE + Self::OUTPUT_SIZE;
         Self {
             nodes,
             connections,
-            output_map,
             next_node_id,
         }
     }
@@ -141,11 +126,6 @@ impl Genome {
         // 添加节点变异
         if rng.gen::<f64>() < rate {
             child.mutate_add_node();
-        }
-
-        // 添加输出变异（解锁新功能）
-        if rng.gen::<f64>() < rate {
-            child.mutate_add_output();
         }
 
         // 禁用/启用连接变异
@@ -252,45 +232,6 @@ impl Genome {
         });
     }
 
-    /// 添加输出变异（解锁新功能）
-    fn mutate_add_output(&mut self) {
-        let mut rng = rand::thread_rng();
-
-        // 检查是否还有未解锁的功能
-        let used_functions: Vec<usize> = self.output_map.clone();
-        let available: Vec<usize> = (0..Self::FUNCTION_POOL_SIZE)
-            .filter(|f| !used_functions.contains(f))
-            .collect();
-
-        if available.is_empty() {
-            return;
-        }
-
-        // 随机选择一个新功能
-        let new_func = available[rng.gen_range(0..available.len())];
-        self.output_map.push(new_func);
-
-        // 创建新的输出节点
-        let new_node_id = self.next_node_id;
-        self.next_node_id += 1;
-        self.nodes.push(NodeGene {
-            id: new_node_id,
-            node_type: NodeType::Output,
-        });
-
-        // 随机连接一些输入到新输出
-        let connect_count = rng.gen_range(2..=5);
-        for _ in 0..connect_count {
-            let in_node = rng.gen_range(0..Self::INPUT_SIZE);
-            self.connections.push(ConnectionGene {
-                in_node,
-                out_node: new_node_id,
-                weight: rng.gen_range(-1.0..1.0),
-                enabled: true,
-            });
-        }
-    }
-
     /// 计算基因组哈希
     pub fn hash(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
@@ -299,13 +240,10 @@ impl Genome {
             conn.out_node.hash(&mut hasher);
             ((conn.weight * 1000.0) as i64).hash(&mut hasher);
         }
-        for func in &self.output_map {
-            func.hash(&mut hasher);
-        }
         hasher.finish()
     }
 
-    /// 计算结构哈希（只看连接拓扑和输出映射，忽略权重）
+    /// 计算结构哈希（只看连接拓扑，忽略权重）
     /// 用于种群聚类的快速分桶预过滤
     pub fn structural_hash(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
@@ -317,12 +255,10 @@ impl Genome {
             .collect();
         keys.sort();
         keys.hash(&mut hasher);
-        self.output_map.hash(&mut hasher);
         hasher.finish()
     }
 
     /// 计算与另一个基因组的相似度（排序归并，零 HashMap 分配）
-    /// 要求相同基因类型（连接拓扑）且对应权重近似才算同类
     pub fn similarity(&self, other: &Genome) -> f64 {
         // 收集并排序启用的连接
         let mut self_conns: Vec<(usize, usize, f64)> = self
@@ -345,7 +281,7 @@ impl Genome {
             return 1.0;
         }
 
-        // 归并比较：O(m+n)，零 HashMap 分配
+        // 归并比较
         let mut i = 0;
         let mut j = 0;
         let mut total = 0usize;
@@ -356,18 +292,17 @@ impl Genome {
             let k2 = (other_conns[j].0, other_conns[j].1);
             match k1.cmp(&k2) {
                 std::cmp::Ordering::Equal => {
-                    // 双方都有此连接：计算权重相似度
                     similarity_sum += 1.0 - (self_conns[i].2 - other_conns[j].2).abs() / 4.0;
                     total += 1;
                     i += 1;
                     j += 1;
                 }
                 std::cmp::Ordering::Less => {
-                    total += 1; // 仅 self 有
+                    total += 1;
                     i += 1;
                 }
                 std::cmp::Ordering::Greater => {
-                    total += 1; // 仅 other 有
+                    total += 1;
                     j += 1;
                 }
             }
@@ -378,10 +313,6 @@ impl Genome {
     }
 
     /// NEAT 有性繁殖：两个父代基因交叉产生子代
-    /// - 匹配连接（相同 in_node, out_node）：随机从一方继承
-    /// - 不匹配连接：从适应度高的一方（fitter）继承
-    /// - 节点：取两方并集
-    /// - 输出映射：从 fitter 继承
     pub fn crossover(parent_a: &Genome, parent_b: &Genome, a_is_fitter: bool) -> Genome {
         let mut rng = rand::thread_rng();
         let (fitter, weaker) = if a_is_fitter { (parent_a, parent_b) } else { (parent_b, parent_a) };
@@ -398,14 +329,12 @@ impl Genome {
         for conn in &fitter.connections {
             let key = (conn.in_node, conn.out_node);
             if let Some(&weaker_conn) = weaker_conns.get(&key) {
-                // 匹配连接：随机从一方继承
                 if rng.gen_bool(0.5) {
                     child_connections.push(conn.clone());
                 } else {
                     child_connections.push(weaker_conn.clone());
                 }
             } else {
-                // 不匹配连接：从 fitter 继承
                 child_connections.push(conn.clone());
             }
         }
@@ -424,16 +353,11 @@ impl Genome {
             }
         }
 
-        // 输出映射：从 fitter 继承
-        let child_output_map = fitter.output_map.clone();
-
-        // next_node_id：取两方最大值
         let next_node_id = fitter.next_node_id.max(weaker.next_node_id);
 
         Genome {
             nodes: child_nodes,
             connections: child_connections,
-            output_map: child_output_map,
             next_node_id,
         }
     }
