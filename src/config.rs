@@ -74,7 +74,7 @@ impl Default for Config {
             volcano_x: 0.0,
             volcano_y: 0.0,
             volcano_interval: 30.0,         // 喷发间隔（秒）
-            volcano_radius: 300.0,          // 喷射半径（内密外疏）
+            volcano_radius: 450.0,          // 喷射半径（内密外疏）
             volcano_count: 60,              // 每次粒子数
             volcano_particle_energy: 35.0,  // 单粒子能量
             meteorite_interval: 12.0,       // 陨石间隔（秒）
