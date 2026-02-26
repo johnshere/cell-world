@@ -647,9 +647,9 @@ impl World {
         self.creatures[idx].x += dx;
         self.creatures[idx].y += dy;
 
-        // 移动消耗
+        // 移动消耗（与速度平方成正比，高速代价更大）
         let distance = (dx * dx + dy * dy).sqrt();
-        self.creatures[idx].energy -= distance * config.move_cost;
+        self.creatures[idx].energy -= distance * config.move_cost * actual_speed;
     }
 
     // 功能 2: 吸收（自动触发，接触即吸收）

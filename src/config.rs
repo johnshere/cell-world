@@ -70,7 +70,7 @@ impl Default for Config {
         Self {
             initial_speed: 1.0,  // 初始倍速，加速演化
 
-            min_creatures: 10,  // 低于此值自动补充
+            min_creatures: 15,  // 低于此值自动补充
 
             initial_energy: 50.0,  // 初始能量更高，确保能繁殖一次
 
@@ -84,16 +84,16 @@ impl Default for Config {
             // 使用质数周期（秒），产生长周期/弱周期效果
             energy_wave_periods: [93.0, 141.0, 219.0, 339.0],
 
-            base_metabolism: 0.1,  // 基础消耗
-            age_metabolism_factor: 0.05,  // 年龄倍率：age=33s时消耗×2.0，age=100s时消耗×4.0
+            base_metabolism: 0.07,  // 基础消耗
+            age_metabolism_factor: 0.04,  // 年龄倍率：age=33s时消耗×2.0，age=100s时消耗×4.0
             move_cost: 0.001,  // 移动消耗极低，移动比待机划算
             reproduce_threshold: 50.0,  // 繁殖阈值
             reproduce_energy_ratio: 0.3,  // 子代获得能量
 
-            scan_free_radius: 50.0,      // 免费扫描半径
+            scan_free_radius: 40.0,      // 免费扫描半径
             scan_max_radius: 200.0,       // 最大扫描半径
             scan_max_angular_velocity: 180.0,  // 最大角速度（度/秒）
-            scan_cost: 0.00002,           // 扫描单位成本
+            scan_cost: 0.0001,           // 扫描单位成本
             contact_range: 15.0,  // 增大接触范围，让吸收更容易
 
             mutation_rate: 0.15,  // 提高变异率，加速结构探索
@@ -101,7 +101,7 @@ impl Default for Config {
             initial_connections_max: 12,
             species_similarity_threshold: 0.9,  // 基因相似度 >= 视为同一种族
             predation_efficiency: 0.8,  // 捕猎转化率
-            dominant_min_age: 700.0,  // 优势种检测：最老成员需达到年龄（秒）
+            dominant_min_age: 500.0,  // 优势种检测：最老成员需达到年龄（秒）
             initial_scale: 0.6,  // 初始世界缩放比例
         }
     }
