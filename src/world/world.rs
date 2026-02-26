@@ -112,6 +112,9 @@ impl World {
             creature_query_buf: Vec::new(),
             energy_query_buf: Vec::new(),
         };
+        // 初始火山喷发一次，提供起始能量
+        world.volcano_erupt(config);
+
         for _ in 0..config.min_creatures {
             world.spawn_creature(config);
         }
