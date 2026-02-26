@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::time::Instant;
 
 use crate::config::Config;
+use crate::neural::Genome;
 use super::{Creature, EnergyParticle, ScanResult, SpatialGrid};
 
 /// 性能统计（单帧）
@@ -54,8 +55,13 @@ pub struct World {
     // 缓存清理计时器
     cache_cleanup_timer: f64,
 
-    // 行为触发次数统计（9个功能）
-    pub action_counts: [usize; 9],
+    // 行为触发次数统计（10个功能）
+    pub action_counts: [usize; 10],
+
+    // 死亡年龄统计
+    death_ages: Vec<f64>,           // 所有死亡生物的年龄（已排序，用于中位数）
+    death_age_sum: f64,             // 死亡年龄累计和（用于平均值）
+    pub death_age_stats: DeathAgeStats, // 缓存的统计结果
 }
 
 impl World {
@@ -80,7 +86,10 @@ impl World {
             perf_stats: PerfStats::default(),
             similarity_cache: RefCell::new(FxHashMap::default()),
             cache_cleanup_timer: 0.0,
-            action_counts: [0; 9],
+            action_counts: [0; 10],
+            death_ages: Vec::new(),
+            death_age_sum: 0.0,
+            death_age_stats: DeathAgeStats::default(),
         };
         // 生成初始生物
         for _ in 0..config.min_creatures {
@@ -555,7 +564,7 @@ impl World {
         self.creatures[creature_idx].perception_cache = input;
     }
 
-    /// 执行动作（9个功能池）
+    /// 执行动作（10个功能池）
     fn execute_actions(&mut self, creature_idx: usize, outputs: &[f64], dt: f64, config: &Config) {
         let output_map = self.creatures[creature_idx].genome.output_map.clone();
 
@@ -590,7 +599,7 @@ impl World {
                     }
                 }
                 6 => {
-                    if self.action_transfer(creature_idx, value, config) {
+                    if self.action_predation(creature_idx, value, config) {
                         self.action_counts[6] += 1;
                     }
                 }
@@ -599,6 +608,11 @@ impl World {
                 }
                 8 => {
                     self.action_set_scan_velocity(creature_idx, value, config);
+                }
+                9 => {
+                    if self.action_nurture(creature_idx, value, config) {
+                        self.action_counts[9] += 1;
+                    }
                 }
                 _ => {}
             }
@@ -758,10 +772,10 @@ impl World {
         None
     }
 
-    // 功能 5: 能量转移
-    // 返回是否成功转移了能量
-    fn action_transfer(&mut self, idx: usize, value: f64, config: &Config) -> bool {
-        if value.abs() < 0.1 {
+    // 功能 6: 捕食（掠夺邻居能量）
+    // 返回是否成功捕食
+    fn action_predation(&mut self, idx: usize, value: f64, config: &Config) -> bool {
+        if value <= 0.1 {
             return false;
         }
 
@@ -777,24 +791,44 @@ impl World {
             let dist = ((other.x - creature.x).powi(2) + (other.y - creature.y).powi(2)).sqrt();
 
             if dist < config.contact_range {
-                // 正值 = 掠夺（按目标能量百分比），负值 = 给予
+                // 掠夺：转移目标能量的 value×20%（最高20%）
+                let transfer_ratio = value * 0.2;
                 let target_energy = self.creatures[other_idx].energy;
+                let transfer_amount = target_energy * transfer_ratio;
+                self.creatures[other_idx].energy -= transfer_amount;
+                self.creatures[idx].energy += transfer_amount;
+                return true;
+            }
+        }
+        false
+    }
 
-                if value > 0.0 {
-                    // 掠夺：转移目标能量的 value*20%（最高20%）
-                    let transfer_ratio = value * 0.2;
-                    let transfer_amount = target_energy * transfer_ratio;
-                    self.creatures[other_idx].energy -= transfer_amount;
-                    self.creatures[idx].energy += transfer_amount;
-                } else {
-                    // 给予：转移自身能量的 |value|*20%
-                    let transfer_ratio = (-value) * 0.2;
-                    let my_energy = self.creatures[idx].energy;
-                    let transfer_amount = my_energy * transfer_ratio;
-                    self.creatures[idx].energy -= transfer_amount;
-                    self.creatures[other_idx].energy += transfer_amount;
-                }
-                return true; // 转移成功
+    // 功能 9: 哺育（给予邻居能量）
+    // 返回是否成功哺育
+    fn action_nurture(&mut self, idx: usize, value: f64, config: &Config) -> bool {
+        if value <= 0.1 {
+            return false;
+        }
+
+        let creature = &self.creatures[idx];
+        let nearby = self.creature_grid.query(creature.x, creature.y, config.contact_range);
+
+        for &other_idx in &nearby {
+            if other_idx == idx || !self.creatures[other_idx].alive {
+                continue;
+            }
+
+            let other = &self.creatures[other_idx];
+            let dist = ((other.x - creature.x).powi(2) + (other.y - creature.y).powi(2)).sqrt();
+
+            if dist < config.contact_range {
+                // 给予：转移自身能量的 value×20%
+                let transfer_ratio = value * 0.2;
+                let my_energy = self.creatures[idx].energy;
+                let transfer_amount = my_energy * transfer_ratio;
+                self.creatures[idx].energy -= transfer_amount;
+                self.creatures[other_idx].energy += transfer_amount;
+                return true;
             }
         }
         false
@@ -825,9 +859,19 @@ impl World {
 
     /// 清理死亡实体
     fn cleanup(&mut self) {
-        // 统计死亡的家族
+        let mut had_deaths = false;
+
+        // 统计死亡的家族 + 收集死亡年龄
         for creature in &self.creatures {
             if !creature.alive {
+                had_deaths = true;
+
+                // 收集死亡年龄（二分插入维持排序）
+                let age = creature.age;
+                let pos = self.death_ages.partition_point(|&x| x < age);
+                self.death_ages.insert(pos, age);
+                self.death_age_sum += age;
+
                 if let Some(count) = self.family_stats.get_mut(&creature.family_id) {
                     *count -= 1;
                     if *count == 0 {
@@ -835,6 +879,23 @@ impl World {
                     }
                 }
             }
+        }
+
+        // 有死亡时更新年龄统计
+        if had_deaths {
+            let n = self.death_ages.len();
+            let median = if n % 2 == 0 {
+                (self.death_ages[n / 2 - 1] + self.death_ages[n / 2]) / 2.0
+            } else {
+                self.death_ages[n / 2]
+            };
+            self.death_age_stats = DeathAgeStats {
+                count: n,
+                avg: self.death_age_sum / n as f64,
+                median,
+                min: self.death_ages[0],
+                max: self.death_ages[n - 1],
+            };
         }
 
         // 移除死亡实体
@@ -883,10 +944,10 @@ impl World {
         };
 
         // 统计每个功能解锁的生物数
-        let mut function_unlocks = [0usize; 9];
+        let mut function_unlocks = [0usize; 10];
         for creature in &alive_creatures {
             for &func_id in &creature.genome.output_map {
-                if func_id < 9 {
+                if func_id < 10 {
                     function_unlocks[func_id] += 1;
                 }
             }
@@ -936,6 +997,14 @@ impl World {
             }
         }
 
+        // 优势种检测
+        let dominant_candidate = self.detect_dominant(
+            &alive_creatures,
+            &creature_species_map,
+            avg_energy,
+            max_generation,
+        );
+
         WorldStats {
             time: self.time,
             creature_count: alive_creatures.len(),
@@ -947,10 +1016,12 @@ impl World {
             avg_energy,
             function_unlocks,
             action_counts: self.action_counts,
+            death_age_stats: self.death_age_stats.clone(),
             species_count,
             top_families,
             top_species,
             creature_species_map: id_species_map,
+            dominant_candidate,
         }
     }
 
@@ -1044,6 +1115,131 @@ impl World {
     }
 
     /// 计算种族分组（使用并查集优化，O(n²·α(n)) 代替 O(n³)）
+    /// 优势种检测：遍历各种群，检测触发条件并计算评分
+    fn detect_dominant(
+        &self,
+        alive_creatures: &[&Creature],
+        creature_species_map: &FxHashMap<usize, usize>,
+        global_avg_energy: f64,
+        global_max_generation: usize,
+    ) -> Option<DominantCandidate> {
+        let total_count = alive_creatures.len();
+        if total_count < 5 {
+            return None;
+        }
+
+        let death_median = self.death_age_stats.median;
+        let has_death_data = self.death_age_stats.count > 0;
+
+        // 按种群聚合成员索引
+        let mut species_members: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
+        for (i, _) in alive_creatures.iter().enumerate() {
+            if let Some(&species_root) = creature_species_map.get(&i) {
+                species_members.entry(species_root).or_default().push(i);
+            }
+        }
+
+        let mut best: Option<DominantCandidate> = None;
+
+        for (_species_root, members) in &species_members {
+            let count = members.len();
+
+            // 条件3: 种群数量 >= 5
+            if count < 5 {
+                continue;
+            }
+
+            // 条件2: 种群占比 >= 30%
+            let ratio = count as f64 / total_count as f64;
+            if ratio < 0.3 {
+                continue;
+            }
+
+            // 聚合种群统计
+            let mut max_age: f64 = 0.0;
+            let mut sum_age: f64 = 0.0;
+            let mut sum_energy: f64 = 0.0;
+            let mut sp_max_gen: usize = 0;
+            let mut best_energy_idx: usize = members[0];
+            let mut best_energy_val: f64 = f64::NEG_INFINITY;
+
+            for &idx in members {
+                let c = alive_creatures[idx];
+                if c.age > max_age {
+                    max_age = c.age;
+                }
+                sum_age += c.age;
+                sum_energy += c.energy;
+                if c.generation > sp_max_gen {
+                    sp_max_gen = c.generation;
+                }
+                if c.energy > best_energy_val {
+                    best_energy_val = c.energy;
+                    best_energy_idx = idx;
+                }
+            }
+
+            let sp_avg_age = sum_age / count as f64;
+            let sp_avg_energy = sum_energy / count as f64;
+
+            // 条件1: 种群最老成员 age >= 800
+            if max_age < 800.0 {
+                continue;
+            }
+
+            // 条件4: 平均年龄 >= 死亡中位数（无死亡数据时跳过）
+            if has_death_data && sp_avg_age < death_median {
+                continue;
+            }
+
+            // 计算评分
+            let ratio_score = ratio;  // 种群数/总数
+            let energy_score = if global_avg_energy > 0.0 {
+                (sp_avg_energy / global_avg_energy).min(2.0) / 2.0
+            } else {
+                0.0
+            };
+            let age_score = if has_death_data && death_median > 0.0 {
+                (sp_avg_age / death_median).min(2.0) / 2.0
+            } else {
+                0.5  // 无死亡数据时给中间值
+            };
+            let gen_score = if global_max_generation > 0 {
+                sp_max_gen as f64 / global_max_generation as f64
+            } else {
+                0.0
+            };
+
+            let score = 0.30 * ratio_score
+                + 0.20 * energy_score
+                + 0.30 * age_score
+                + 0.20 * gen_score;
+
+            if score < 0.6 {
+                continue;
+            }
+
+            // 取种群中能量最高者的 genome 作为代表
+            let representative = alive_creatures[best_energy_idx];
+
+            let candidate = DominantCandidate {
+                genome: representative.genome.clone(),
+                genome_hash: representative.genome_hash,
+                score,
+                population_ratio: ratio,
+                avg_energy: sp_avg_energy,
+                avg_age: sp_avg_age,
+                max_generation: sp_max_gen,
+            };
+
+            if best.as_ref().is_none_or(|b| score > b.score) {
+                best = Some(candidate);
+            }
+        }
+
+        best
+    }
+
     /// 返回: (种族数, 最大种族数, 种族前三, 生物索引->种族根索引映射)
     fn calculate_species(&self, alive_creatures: &[&Creature], threshold: f64) -> (usize, Vec<RankedEntry>, FxHashMap<usize, usize>) {
         if alive_creatures.is_empty() {
@@ -1129,6 +1325,16 @@ impl World {
     }
 }
 
+/// 死亡年龄统计
+#[derive(Default, Clone)]
+pub struct DeathAgeStats {
+    pub count: usize,
+    pub avg: f64,
+    pub median: f64,
+    pub max: f64,
+    pub min: f64,
+}
+
 /// 排名数据
 #[derive(Clone, Default)]
 pub struct RankedEntry {
@@ -1149,12 +1355,28 @@ pub struct WorldStats {
     pub max_generation: usize,
     pub avg_energy: f64,
     // 功能解锁统计（每个功能解锁的生物数）
-    pub function_unlocks: [usize; 9],
+    pub function_unlocks: [usize; 10],
     // 行为触发统计（累计触发次数）
-    pub action_counts: [usize; 9],
+    pub action_counts: [usize; 10],
+    // 死亡年龄统计
+    pub death_age_stats: DeathAgeStats,
     // 种群统计
     pub species_count: usize,      // 种群数量
     pub top_families: Vec<RankedEntry>,   // 前三家族
     pub top_species: Vec<RankedEntry>,    // 前三种群
     pub creature_species_map: FxHashMap<u64, usize>,  // 生物ID -> 种群ID
+    // 优势种候选
+    pub dominant_candidate: Option<DominantCandidate>,
+}
+
+/// 优势种候选
+#[derive(Clone)]
+pub struct DominantCandidate {
+    pub genome: Genome,
+    pub genome_hash: u64,
+    pub score: f64,
+    pub population_ratio: f64,
+    pub avg_energy: f64,
+    pub avg_age: f64,
+    pub max_generation: usize,
 }

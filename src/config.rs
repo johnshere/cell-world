@@ -78,10 +78,10 @@ impl Default for Config {
             energy_wave_enabled: true,  // 启用能量波动
             energy_wave_amplitude: 0.75,  // 波动幅度75%（强度范围 0.25~1.75）
             // 使用质数周期（秒），产生长周期/弱周期效果
-            energy_wave_periods: [62.0, 94.0, 146.0, 226.0],
+            energy_wave_periods: [93.0, 141.0, 219.0, 339.0],
 
-            base_metabolism: 0.2,  // 基础消耗
-            age_metabolism_factor: 0.03,  // 年龄倍率：age=33s时消耗×2.0，age=100s时消耗×4.0
+            base_metabolism: 0.1,  // 基础消耗
+            age_metabolism_factor: 0.05,  // 年龄倍率：age=33s时消耗×2.0，age=100s时消耗×4.0
             move_cost: 0.001,  // 移动消耗极低，移动比待机划算
             reproduce_threshold: 50.0,  // 降低繁殖阈值，更易繁殖
             reproduce_energy_ratio: 0.3,  // 子代获得45%能量，确保子代能存活

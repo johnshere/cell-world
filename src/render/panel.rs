@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::config::Config;
 use crate::store::Store;
-use crate::world::World;
+use crate::world::{World, DeathAgeStats, DominantCandidate};
 use super::Selection;
 
 /// 面板操作结果
@@ -16,6 +16,8 @@ pub struct PanelAction {
     pub delete_selected: bool,
     /// 保存选中的生物（带名称）
     pub save_selected: Option<String>,
+    /// 删除模板
+    pub delete_template: Option<String>,
 }
 
 /// 统计面板
@@ -57,15 +59,19 @@ pub struct CachedStats {
     pub max_generation: usize,
     pub avg_energy: f64,
     // 功能解锁统计（每个功能解锁的生物数）
-    pub function_unlocks: [usize; 9],
+    pub function_unlocks: [usize; 10],
     // 行为触发统计（累计触发次数）
-    pub action_counts: [usize; 9],
+    pub action_counts: [usize; 10],
+    // 死亡年龄统计
+    pub death_age_stats: DeathAgeStats,
     // 种群统计
     pub species_count: usize,
     pub top_families: Vec<RankedEntry>,
     pub top_species: Vec<RankedEntry>,
     // 生物ID -> 种群ID 映射
     pub creature_species_map: FxHashMap<u64, usize>,
+    // 优势种候选
+    pub dominant_candidate: Option<DominantCandidate>,
 }
 
 impl StatsPanel {
@@ -104,6 +110,7 @@ impl StatsPanel {
                 avg_energy: stats.avg_energy,
                 function_unlocks: stats.function_unlocks,
                 action_counts: stats.action_counts,
+                death_age_stats: stats.death_age_stats.clone(),
                 species_count: stats.species_count,
                 top_families: stats.top_families.iter()
                     .map(|e| RankedEntry {
@@ -122,6 +129,7 @@ impl StatsPanel {
                     })
                     .collect(),
                 creature_species_map: stats.creature_species_map.clone(),
+                dominant_candidate: stats.dominant_candidate.clone(),
             };
         }
     }
@@ -129,6 +137,11 @@ impl StatsPanel {
     /// 获取缓存的统计数据
     pub fn stats(&self) -> &CachedStats {
         &self.cached_stats
+    }
+
+    /// 重置模板选择为"随机"
+    pub fn reset_template_selection(&mut self) {
+        self.selected_template = 0;
     }
 
     /// 渲染面板，返回面板操作
@@ -187,6 +200,15 @@ impl StatsPanel {
                     action.spawn = Some(Some(name.to_string())); // 使用模板
                 }
             }
+
+            // 删除按钮（仅选中非"随机"时显示）
+            if self.selected_template > 0 {
+                if ui.button("-").clicked() {
+                    if let Some(name) = template_names.get(self.selected_template - 1) {
+                        action.delete_template = Some(name.to_string());
+                    }
+                }
+            }
         });
 
         // 统计（一行显示）
@@ -220,12 +242,12 @@ impl StatsPanel {
         });
 
         // 功能解锁统计
-        // 索引: 0,1=方向sin/cos, 2=速度, 3=吸收, 4=释放, 5=繁殖, 6=转移, 7=扫描R, 8=扫描V
+        // 索引: 0,1=方向sin/cos, 2=速度, 3=吸收, 4=释放, 5=繁殖, 6=捕食, 7=扫描R, 8=扫描V, 9=哺育
         let func = &self.cached_stats.function_unlocks;
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
-                "功能: 移动:{}│吸收:{}│释放:{}│繁殖:{}│转移:{}",
-                func[0], func[3], func[4], func[5], func[6]
+                "功能: 移动:{}│吸收:{}│释放:{}│繁殖:{}│捕食:{}│哺育:{}",
+                func[0], func[3], func[4], func[5], func[6], func[9]
             ));
         });
 
@@ -242,11 +264,22 @@ impl StatsPanel {
         };
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
-                "行为: 移动:{}│吸收:{}│释放:{}│繁殖:{}│转移:{}",
+                "行为: 移动:{}│吸收:{}│释放:{}│繁殖:{}│捕食:{}│哺育:{}",
                 format_count(acts[0]), format_count(acts[3]), format_count(acts[4]),
-                format_count(acts[5]), format_count(acts[6])
+                format_count(acts[5]), format_count(acts[6]), format_count(acts[9])
             ));
         });
+
+        // 死亡年龄统计
+        let death = &self.cached_stats.death_age_stats;
+        if death.count > 0 {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!(
+                    "寿命: 均:{:.1}│中:{:.1}│最长:{:.1}│最短:{:.1}│死亡:{}",
+                    death.avg, death.median, death.max, death.min, death.count
+                ));
+            });
+        }
 
         // 排行榜
         ui.separator();
@@ -364,7 +397,7 @@ impl StatsPanel {
                         });
 
                         // 功能映射
-                        let func_names = ["方向S", "方向C", "速度", "吸收", "释放", "繁殖", "转移", "扫R", "扫V"];
+                        let func_names = ["方向S", "方向C", "速度", "吸收", "释放", "繁殖", "捕食", "扫R", "扫V", "哺育"];
                         ui.horizontal_wrapped(|ui| {
                             ui.label("功能:");
                             for &func_id in &creature.genome.output_map {

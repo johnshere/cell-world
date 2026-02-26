@@ -14,6 +14,30 @@ pub struct CreatureTemplate {
     pub genome: Genome,
     /// 初始能量
     pub initial_energy: f64,
+    /// 记录时的版本号
+    #[serde(default)]
+    pub version: Option<String>,
+    /// 评分
+    #[serde(default)]
+    pub score: Option<f64>,
+    /// 种群占比
+    #[serde(default)]
+    pub population_ratio: Option<f64>,
+    /// 平均能量
+    #[serde(default)]
+    pub avg_energy: Option<f64>,
+    /// 平均年龄
+    #[serde(default)]
+    pub avg_age: Option<f64>,
+    /// 最大世代
+    #[serde(default)]
+    pub max_generation: Option<usize>,
+    /// 记录时的世界时间
+    #[serde(default)]
+    pub recorded_at: Option<f64>,
+    /// true=自动检测记录, None/false=手动保存
+    #[serde(default)]
+    pub auto_recorded: Option<bool>,
 }
 
 /// 生物模板存储
@@ -94,6 +118,14 @@ impl Store {
     /// 获取模板名称列表
     pub fn names(&self) -> Vec<&str> {
         self.templates.iter().map(|t| t.name.as_str()).collect()
+    }
+
+    /// 删除模板
+    pub fn delete(&mut self, name: &str) {
+        self.templates.retain(|t| t.name != name);
+        let filename = format!("{}.json", sanitize_filename(name));
+        let path = self.dir.join(&filename);
+        let _ = fs::remove_file(path);
     }
 }
 

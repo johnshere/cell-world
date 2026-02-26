@@ -117,8 +117,8 @@ impl CellWorldApp {
                 .open(log_path)
             {
                 let _ = writeln!(file, "# Cell World 运行日志\n");
-                let _ = writeln!(file, "| 时间 | 生物 | 粒子 | 总能 | 家族 | 灭绝 | 代 | 种群 | 功能(移动/吸收/释放/繁殖/转移) | 行为(移动/吸收/释放/繁殖/转移) |");
-                let _ = writeln!(file, "|------|------|------|------|------|------|-----|------|------------------------------|------------------------------|");
+                let _ = writeln!(file, "| 时间 | 生物 | 粒子 | 总能 | 家族 | 灭绝 | 代 | 种群 | 寿命(均/中/长/短/死) | 功能(移动/吸收/释放/繁殖/捕食/哺育) | 行为(移动/吸收/释放/繁殖/捕食/哺育) |");
+                let _ = writeln!(file, "|------|------|------|------|------|------|-----|------|----------------------|--------------------------------------|--------------------------------------|");
             }
             // 性能分析日志
             if let Ok(mut file) = OpenOptions::new()
@@ -142,9 +142,10 @@ impl CellWorldApp {
         {
             let func = &stats.function_unlocks;
             let acts = &stats.action_counts;
+            let death = &stats.death_age_stats;
             let _ = writeln!(
                 file,
-                "| {:.0} | {} | {} | {:.0} | {} | {} | {} | {} | {}/{}/{}/{}/{} | {}/{}/{}/{}/{} |",
+                "| {:.0} | {} | {} | {:.0} | {} | {} | {} | {} | {:.1}/{:.1}/{:.1}/{:.1}/{} | {}/{}/{}/{}/{}/{} | {}/{}/{}/{}/{}/{} |",
                 stats.time,
                 stats.creature_count,
                 stats.energy_particle_count,
@@ -153,8 +154,9 @@ impl CellWorldApp {
                 stats.extinct_families,
                 stats.max_generation,
                 stats.species_count,
-                func[0], func[3], func[4], func[5], func[6],
-                acts[0], acts[3], acts[4], acts[5], acts[6]
+                death.avg, death.median, death.max, death.min, death.count,
+                func[0], func[3], func[4], func[5], func[6], func[9],
+                acts[0], acts[3], acts[4], acts[5], acts[6], acts[9]
             );
         }
 
@@ -181,6 +183,79 @@ impl CellWorldApp {
                 perf.perceive_ms,
                 perf.forward_ms
             );
+        }
+    }
+}
+
+impl CellWorldApp {
+    /// 自动保存优势种
+    fn auto_save_dominant(&mut self) {
+        let candidate = match self.panel.stats().dominant_candidate.clone() {
+            Some(c) => c,
+            None => return,
+        };
+
+        let version = env!("CARGO_PKG_VERSION");
+
+        // 检查是否与已有自动记录的模板相似
+        let mut existing_match: Option<(String, f64)> = None;
+        for template in self.store.templates() {
+            if template.auto_recorded != Some(true) {
+                continue;
+            }
+            let sim = candidate.genome.similarity(&template.genome);
+            if sim >= 0.9 {
+                existing_match = Some((template.name.clone(), template.score.unwrap_or(0.0)));
+                break;
+            }
+        }
+
+        match existing_match {
+            Some((name, old_score)) => {
+                // 同种且 score 更高时覆盖
+                if candidate.score > old_score {
+                    let template = CreatureTemplate {
+                        name,
+                        genome: candidate.genome,
+                        initial_energy: candidate.avg_energy,
+                        version: Some(version.to_string()),
+                        score: Some(candidate.score),
+                        population_ratio: Some(candidate.population_ratio),
+                        avg_energy: Some(candidate.avg_energy),
+                        avg_age: Some(candidate.avg_age),
+                        max_generation: Some(candidate.max_generation),
+                        recorded_at: Some(self.world.time),
+                        auto_recorded: Some(true),
+                    };
+                    if let Err(e) = self.store.save(template) {
+                        eprintln!("自动保存优势种失败: {}", e);
+                    }
+                }
+            }
+            None => {
+                // 新种，创建新记录
+                let name = format!(
+                    "优势种_v{}_{:08X}",
+                    version,
+                    candidate.genome_hash
+                );
+                let template = CreatureTemplate {
+                    name,
+                    genome: candidate.genome,
+                    initial_energy: candidate.avg_energy,
+                    version: Some(version.to_string()),
+                    score: Some(candidate.score),
+                    population_ratio: Some(candidate.population_ratio),
+                    avg_energy: Some(candidate.avg_energy),
+                    avg_age: Some(candidate.avg_age),
+                    max_generation: Some(candidate.max_generation),
+                    recorded_at: Some(self.world.time),
+                    auto_recorded: Some(true),
+                };
+                if let Err(e) = self.store.save(template) {
+                    eprintln!("自动保存优势种失败: {}", e);
+                }
+            }
         }
     }
 }
@@ -221,6 +296,9 @@ impl eframe::App for CellWorldApp {
 
         // 每10秒记录一次日志
         self.log_stats();
+
+        // 自动保存优势种
+        self.auto_save_dominant();
 
         // 侧边栏面板
         let mut panel_action = PanelAction::default();
@@ -269,12 +347,26 @@ impl eframe::App for CellWorldApp {
                         name,
                         genome: creature.genome.clone(),
                         initial_energy: creature.energy,
+                        version: None,
+                        score: None,
+                        population_ratio: None,
+                        avg_energy: None,
+                        avg_age: None,
+                        max_generation: None,
+                        recorded_at: None,
+                        auto_recorded: None,
                     };
                     if let Err(e) = self.store.save(template) {
                         eprintln!("保存失败: {}", e);
                     }
                 }
             }
+        }
+
+        // 处理删除模板
+        if let Some(name) = panel_action.delete_template {
+            self.store.delete(&name);
+            self.panel.reset_template_selection();
         }
 
         // 主画布
