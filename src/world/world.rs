@@ -245,8 +245,8 @@ impl World {
         let mut rng = rand::thread_rng();
         for _ in 0..config.volcano_count {
             let angle = rng.gen_range(0.0..std::f64::consts::TAU);
-            // 内密外疏：不开根，使半径线性分布 → 中心密度更高
-            let r = rng.gen_range(0.0_f64..1.0) * config.volcano_radius;
+            // 内密外疏：立方分布，中心密度远高于边缘
+            let r = rng.gen_range(0.0_f64..1.0).powi(3) * config.volcano_radius;
             let x = config.volcano_x + r * angle.cos();
             let y = config.volcano_y + r * angle.sin();
             let energy_id = self.next_energy_id;
