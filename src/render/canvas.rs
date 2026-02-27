@@ -136,7 +136,7 @@ impl WorldCanvas {
 
                 // 头部方向圆弧（五分之一圆，指示朝向）
                 let heading = creature.heading as f32;
-                draw_heading_arc(&painter, pos, radius + 2.0, heading, Stroke::new(0.5, color));
+                draw_heading_arc(&painter, pos, radius + 2.0, heading, Stroke::new(1.0, color));
 
                 // 选中：半径大2px的白色圆
                 if *selection == Selection::Creature(creature.id) {

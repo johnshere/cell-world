@@ -193,7 +193,7 @@ impl World {
 
         let creature_id = self.next_creature_id;
         self.next_creature_id += 1;
-        let creature = Creature::random(
+        let mut creature = Creature::random(
             creature_id,
             x,
             y,
@@ -201,6 +201,7 @@ impl World {
             config.initial_connections_min,
             config.initial_connections_max,
         );
+        creature.last_warm_time = self.time; // 出生即感温
         self.creatures.push(creature);
     }
 
@@ -215,7 +216,8 @@ impl World {
 
         let creature_id = self.next_creature_id;
         self.next_creature_id += 1;
-        let creature = Creature::new(creature_id, x, y, energy, genome.clone(), 0, None);
+        let mut creature = Creature::new(creature_id, x, y, energy, genome.clone(), 0, None);
+        creature.last_warm_time = self.time; // 出生即感温
         self.creatures.push(creature);
     }
 
@@ -245,8 +247,10 @@ impl World {
         let mut rng = rand::thread_rng();
         for _ in 0..config.volcano_count {
             let angle = rng.gen_range(0.0..std::f64::consts::TAU);
-            // 内密外疏：立方分布，中心密度远高于边缘
-            let r = rng.gen_range(0.0_f64..1.0).powi(3) * config.volcano_radius;
+            // 稀-密-稀分布：三角分布，峰值在 50% 半径处，中心和边缘都稀疏
+            let u1 = rng.gen_range(0.0_f64..1.0);
+            let u2 = rng.gen_range(0.0_f64..1.0);
+            let r = (u1 + u2) * 0.5 * config.volcano_radius;
             let x = config.volcano_x + r * angle.cos();
             let y = config.volcano_y + r * angle.sin();
             let energy_id = self.next_energy_id;
@@ -323,6 +327,13 @@ impl World {
             let age_multiplier = 1.0 + self.creatures[i].age * config.age_metabolism_factor;
             let metabolism_cost = config.base_metabolism * age_multiplier * dt;
             self.creatures[i].energy -= metabolism_cost;
+
+            // 体温逸散：系数 × 冷却时长 × 周长
+            let cold_duration = (self.time - self.creatures[i].last_warm_time).max(0.0);
+            let circumference = (self.creatures[i].energy.max(0.0) * 0.32).sqrt() * std::f64::consts::TAU;
+            let heat_cost = config.heat_dissipation_coefficient * cold_duration * circumference * dt;
+            self.creatures[i].energy -= heat_cost;
+
             self.creatures[i].age += dt;
 
             if self.creatures[i].energy <= 0.0 {
@@ -482,7 +493,10 @@ impl World {
 
         // 转向 + 移动
         let turn_rate = std::f64::consts::PI * 2.0; // 最大每秒一圈
-        self.creatures[creature_idx].heading += turn * turn_rate * dt;
+        let turn_amount = turn * turn_rate * dt;
+        self.creatures[creature_idx].heading += turn_amount;
+        // 转向消耗：与角位移成正比
+        self.creatures[creature_idx].energy -= turn_amount.abs() * config.move_cost;
 
         let actual_speed = speed.abs() * 50.0;
         if actual_speed > 0.1 {
@@ -523,6 +537,9 @@ impl World {
                 if dist < config.contact_range {
                     let energy = self.energy_particles[particle_idx].consume();
                     self.creatures[idx].energy += energy;
+                    // 感温：吃到食物（回暖30%）
+                    let cold = (self.time - self.creatures[idx].last_warm_time).max(0.0);
+                    self.creatures[idx].last_warm_time += cold * 0.3;
                     self.action_counts[1] += 1; // 吸收
                     break; // 每帧吸收一个
                 }
@@ -558,13 +575,27 @@ impl World {
                 self.creatures[idx].energy += transfer_amount * efficiency;
                 self.action_counts[2] += 1; // 咬
             } else {
-                // 喂（哺育）
+                // 喂（哺育）— 只能大喂小，体型差越大损耗越低
+                let my_energy = self.creatures[idx].energy;
+                let other_energy = self.creatures[other_idx].energy;
+                if my_energy <= other_energy {
+                    break; // 不能小喂大
+                }
+                let size_ratio = my_energy / other_energy.max(0.1);
+                let threshold = config.feed_size_ratio_threshold;
+                let efficiency = if size_ratio >= threshold {
+                    1.0
+                } else {
+                    ((size_ratio - 1.0) / (threshold - 1.0)).clamp(0.0, 1.0)
+                };
                 let feed_strength = mouth.min(1.0);
                 let transfer_ratio = feed_strength * 0.2;
-                let my_energy = self.creatures[idx].energy;
                 let transfer_amount = my_energy * transfer_ratio;
                 self.creatures[idx].energy -= transfer_amount;
-                self.creatures[other_idx].energy += transfer_amount;
+                self.creatures[other_idx].energy += transfer_amount * efficiency;
+                // 感温：被哺育（回暖50%）
+                let cold = (self.time - self.creatures[other_idx].last_warm_time).max(0.0);
+                self.creatures[other_idx].last_warm_time += cold * 0.5;
                 self.action_counts[3] += 1; // 喂
             }
             break; // 每帧只对一个目标
@@ -615,6 +646,8 @@ impl World {
             )
         };
 
+        let mut child = child;
+        child.last_warm_time = self.time; // 出生即感温
         self.creatures.push(child);
         true
     }

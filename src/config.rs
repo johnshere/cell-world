@@ -56,6 +56,10 @@ pub struct Config {
     pub initial_connections_max: usize,
     /// 种族相似度阈值（高于此值视为同一种族）
     pub species_similarity_threshold: f64,
+    /// 体温逸散系数（系数 × 冷却时长 × 周长 = 每秒额外消耗）
+    pub heat_dissipation_coefficient: f64,
+    /// 喂食体型比阈值（大于此倍率时无损耗）
+    pub feed_size_ratio_threshold: f64,
     /// 优势种检测：种群最老成员最低年龄
     pub dominant_min_age: f64,
     /// 初始世界缩放比例
@@ -65,18 +69,18 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            initial_speed: 1.0,  // 初始倍速，加速演化
+            initial_speed: 2.0,  // 初始倍速，加速演化
 
-            min_creatures: 15,  // 低于此值自动补充
+            min_creatures: 20,  // 低于此值自动补充
 
             initial_energy: 50.0,  // 初始能量更高，确保能繁殖一次
 
             volcano_x: 0.0,
             volcano_y: 0.0,
-            volcano_interval: 30.0,         // 喷发间隔（秒）
-            volcano_radius: 450.0,          // 喷射半径（内密外疏）
-            volcano_count: 60,              // 每次粒子数
-            volcano_particle_energy: 35.0,  // 单粒子能量
+            volcano_interval: 35.0,         // 喷发间隔（秒）
+            volcano_radius: 600.0,          // 喷射半径（内密外疏）
+            volcano_count: 70,              // 每次粒子数
+            volcano_particle_energy: 40.0,  // 单粒子能量
             meteorite_interval: 12.0,       // 陨石间隔（秒）
             meteorite_count: 15,            // 每颗粒子数
             meteorite_length: 150.0,        // 散布线段长度
@@ -86,6 +90,8 @@ impl Default for Config {
             base_metabolism: 0.07,  // 基础消耗
             age_metabolism_factor: 0.04,  // 年龄倍率：age=33s时消耗×2.0，age=100s时消耗×4.0
             move_cost: 0.001,  // 移动消耗极低，移动比待机划算
+            heat_dissipation_coefficient: 0.005,  // 体温逸散系数
+            feed_size_ratio_threshold: 3.0,  // 喂食无损耗所需体型倍率
             reproduce_threshold: 50.0,  // 繁殖阈值
             reproduce_energy_ratio: 0.3,  // 子代获得能量
 

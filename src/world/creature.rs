@@ -29,6 +29,9 @@ pub struct Creature {
     // 缓存
     pub genome_hash: u64,
 
+    // 体温：上次感温时间（世界时间）
+    pub last_warm_time: f64,
+
     // 感知结果缓存（10维：3眼×3通道 + 自身能量）
     pub perception_cache: [f64; 10],
 }
@@ -51,6 +54,7 @@ impl Creature {
             generation,
             parent_id,
             genome_hash,
+            last_warm_time: 0.0,
             perception_cache: [0.0; 10],
         }
     }
