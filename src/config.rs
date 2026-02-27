@@ -58,17 +58,44 @@ pub struct Config {
     pub species_similarity_threshold: f64,
     /// 体温逸散系数（系数 × 冷却时长 × 周长 = 每秒额外消耗）
     pub heat_dissipation_coefficient: f64,
-    /// 喂食体型比阈值（大于此倍率时无损耗）
-    pub feed_size_ratio_threshold: f64,
+    /// 喂食效率（固定比例，无体型限制）
+    pub feed_efficiency: f64,
+    /// 战力公式：体温权重（越暖越强）
+    pub combat_temp_weight: f64,
+    /// 战力公式：速度权重（越快越强）
+    pub combat_speed_weight: f64,
+    /// 战力公式：同族援助权重（附近同族越多越强）
+    pub combat_ally_weight: f64,
+    /// 战力公式：同族援助范围
+    pub combat_ally_range: f64,
+
     /// 优势种检测：种群最老成员最低年龄
     pub dominant_min_age: f64,
     /// 初始世界缩放比例
     pub initial_scale: f32,
 }
 
+impl Config {
+    /// 战力计算公式
+    /// combat_power = (energy / 100) × (1 + temp_w × warmth) × (1 + speed_w × speed_norm) × (1 + ally_w × ally_norm)
+    ///
+    /// - warmth: 0~1（0=极冷, 1=刚回暖）
+    /// - speed_norm: 0~1（当前速度 / 最大速度）
+    /// - ally_total_energy: 附近同族总能量
+    pub fn combat_power(&self, energy: f64, warmth: f64, speed_norm: f64, ally_total_energy: f64) -> f64 {
+        let energy_factor = energy / 100.0;
+        let temp_factor = 1.0 + self.combat_temp_weight * warmth;
+        let speed_factor = 1.0 + self.combat_speed_weight * speed_norm;
+        let ally_norm = (ally_total_energy / 500.0).min(1.0);
+        let ally_factor = 1.0 + self.combat_ally_weight * ally_norm;
+        energy_factor * temp_factor * speed_factor * ally_factor
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
+            initial_scale: 0.6,  // 初始世界缩放比例
             initial_speed: 2.0,  // 初始倍速，加速演化
 
             min_creatures: 20,  // 低于此值自动补充
@@ -91,7 +118,7 @@ impl Default for Config {
             age_metabolism_factor: 0.04,  // 年龄倍率：age=33s时消耗×2.0，age=100s时消耗×4.0
             move_cost: 0.001,  // 移动消耗极低，移动比待机划算
             heat_dissipation_coefficient: 0.002,  // 体温逸散系数（降低，避免过早冻死）
-            feed_size_ratio_threshold: 1.5,  // 喂食无损耗所需体型倍率（降低门槛促进哺育）
+            feed_efficiency: 0.5,  // 喂食效率50%（无体型限制）
             reproduce_threshold: 60.0,  // 繁殖阈值
             reproduce_energy_ratio: 0.3,  // 子代获得能量
 
@@ -102,8 +129,12 @@ impl Default for Config {
             initial_connections_min: 6,  // 更多初始连接，增加有用组合概率
             initial_connections_max: 12,
             species_similarity_threshold: 0.9,  // 基因相似度 >= 视为同一种族
+            
+            combat_temp_weight: 0.5,   // 暖体温最多+50%战力
+            combat_speed_weight: 0.3,  // 满速最多+30%战力
+            combat_ally_weight: 0.8,   // 同族满援最多+80%战力
+            combat_ally_range: 50.0,   // 同族援助感应范围
             dominant_min_age: 500.0,  // 优势种检测：最老成员需达到年龄（秒）
-            initial_scale: 0.6,  // 初始世界缩放比例
         }
     }
 }

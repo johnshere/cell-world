@@ -32,8 +32,11 @@ pub struct Creature {
     // 体温：上次感温时间（世界时间）
     pub last_warm_time: f64,
 
-    // 感知结果缓存（11维：3眼×3通道 + 自身能量 + 体温状态）
-    pub perception_cache: [f64; 11],
+    // 当前速度（每帧更新，用于战力计算）
+    pub current_speed: f64,
+
+    // 感知结果缓存（16维：2眼×7通道 + 自身能量 + 体温状态）
+    pub perception_cache: [f64; 16],
 }
 
 impl Creature {
@@ -55,7 +58,8 @@ impl Creature {
             parent_id,
             genome_hash,
             last_warm_time: 0.0,
-            perception_cache: [0.0; 11],
+            current_speed: 0.0,
+            perception_cache: [0.0; 16],
         }
     }
 

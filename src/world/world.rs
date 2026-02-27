@@ -341,7 +341,7 @@ impl World {
                 continue;
             }
 
-            // 感知（3眼模型）
+            // 感知（2眼模型）
             let t0 = Instant::now();
             self.compute_eye_perception(i, config);
             perceive_time += t0.elapsed().as_secs_f64() * 1000.0;
@@ -366,11 +366,11 @@ impl World {
         self.perf_stats.creature_count = alive_count;
     }
 
-    // ========== 3眼感知系统 ==========
+    // ========== 2眼感知系统 ==========
 
-    /// 计算 11 维感知输入
-    /// 3只眼（左-45°, 中0°, 右+45°），每只眼3通道:
-    ///   食物接近度, 同族接近度, 异族接近度
+    /// 计算 16 维感知输入
+    /// 2只眼（左-45°, 右+45°），每只眼7通道:
+    ///   食物接近度, 同族接近度, 异族接近度, 同族能量, 异族能量, 同族体温, 异族体温
     /// + 自身能量 + 体温状态
     fn compute_eye_perception(&mut self, creature_idx: usize, config: &Config) {
         let cx = self.creatures[creature_idx].x;
@@ -378,22 +378,27 @@ impl World {
         let heading = self.creatures[creature_idx].heading;
         let vision = config.vision_range;
         let threshold = config.species_similarity_threshold;
+        let world_time = self.time;
 
-        // 3只眼的方向（弧度）
+        // 2只眼的方向（弧度）
         let eye_dirs = [
             heading - std::f64::consts::FRAC_PI_4,  // 左眼 -45°
-            heading,                                  // 中眼
             heading + std::f64::consts::FRAC_PI_4,  // 右眼 +45°
         ];
-        // 每只眼的半角（30°）
-        let half_fov = std::f64::consts::PI / 6.0;
+        // 每只眼的半角（60°）
+        let half_fov = std::f64::consts::PI / 3.0;
 
-        let mut input = [0.0_f64; 11];
+        let mut input = [0.0_f64; 16];
 
-        // 每只眼跟踪最近的食物/同族/异族
-        let mut eye_food = [f64::MAX; 3];
-        let mut eye_ally = [f64::MAX; 3];
-        let mut eye_enemy = [f64::MAX; 3];
+        // 每只眼跟踪最近的食物/同族/异族的距离
+        let mut eye_food = [f64::MAX; 2];
+        let mut eye_ally_dist = [f64::MAX; 2];
+        let mut eye_enemy_dist = [f64::MAX; 2];
+        // 最近同族/异族的能量和体温
+        let mut eye_ally_energy = [0.0_f64; 2];
+        let mut eye_ally_temp = [0.0_f64; 2];
+        let mut eye_enemy_energy = [0.0_f64; 2];
+        let mut eye_enemy_temp = [0.0_f64; 2];
 
         // 临时取出缓冲区
         let mut creature_buf = std::mem::take(&mut self.creature_query_buf);
@@ -443,6 +448,12 @@ impl World {
             );
             let is_ally = similarity >= threshold;
 
+            // 对方能量归一化 (0~1)
+            let other_energy_norm = (other.energy / 200.0).min(1.0);
+            // 对方体温状态（冷却程度，越冷越高）
+            let other_cold = (world_time - other.last_warm_time).max(0.0);
+            let other_temp_norm = (other_cold / 100.0).min(1.0);
+
             for (eye_i, &eye_dir) in eye_dirs.iter().enumerate() {
                 let mut diff = angle - eye_dir;
                 while diff > std::f64::consts::PI { diff -= std::f64::consts::TAU; }
@@ -450,11 +461,15 @@ impl World {
 
                 if diff.abs() <= half_fov {
                     if is_ally {
-                        if dist < eye_ally[eye_i] {
-                            eye_ally[eye_i] = dist;
+                        if dist < eye_ally_dist[eye_i] {
+                            eye_ally_dist[eye_i] = dist;
+                            eye_ally_energy[eye_i] = other_energy_norm;
+                            eye_ally_temp[eye_i] = other_temp_norm;
                         }
-                    } else if dist < eye_enemy[eye_i] {
-                        eye_enemy[eye_i] = dist;
+                    } else if dist < eye_enemy_dist[eye_i] {
+                        eye_enemy_dist[eye_i] = dist;
+                        eye_enemy_energy[eye_i] = other_energy_norm;
+                        eye_enemy_temp[eye_i] = other_temp_norm;
                     }
                 }
             }
@@ -464,20 +479,24 @@ impl World {
         self.creature_query_buf = creature_buf;
         self.energy_query_buf = energy_buf;
 
-        // 转换为接近度 (0~1, 越近越高)
-        for eye_i in 0..3 {
-            let base = eye_i * 3;
-            input[base]     = if eye_food[eye_i] < f64::MAX  { 1.0 - eye_food[eye_i] / vision  } else { 0.0 };
-            input[base + 1] = if eye_ally[eye_i] < f64::MAX  { 1.0 - eye_ally[eye_i] / vision  } else { 0.0 };
-            input[base + 2] = if eye_enemy[eye_i] < f64::MAX { 1.0 - eye_enemy[eye_i] / vision } else { 0.0 };
+        // 转换为接近度 (0~1, 越近越高)，每眼7通道
+        for eye_i in 0..2 {
+            let base = eye_i * 7;
+            input[base]     = if eye_food[eye_i] < f64::MAX       { 1.0 - eye_food[eye_i] / vision       } else { 0.0 };
+            input[base + 1] = if eye_ally_dist[eye_i] < f64::MAX  { 1.0 - eye_ally_dist[eye_i] / vision  } else { 0.0 };
+            input[base + 2] = if eye_enemy_dist[eye_i] < f64::MAX { 1.0 - eye_enemy_dist[eye_i] / vision } else { 0.0 };
+            input[base + 3] = eye_ally_energy[eye_i];   // 最近同族能量 (0~1)
+            input[base + 4] = eye_enemy_energy[eye_i];  // 最近异族能量 (0~1)
+            input[base + 5] = eye_ally_temp[eye_i];     // 最近同族体温 (0~1, 越冷越高)
+            input[base + 6] = eye_enemy_temp[eye_i];    // 最近异族体温 (0~1, 越冷越高)
         }
 
         // 自身能量
-        input[9] = (self.creatures[creature_idx].energy / 200.0).min(1.0);
+        input[14] = (self.creatures[creature_idx].energy / 200.0).min(1.0);
 
         // 体温状态（冷却程度，越冷越高）
         let cold_duration = (self.time - self.creatures[creature_idx].last_warm_time).max(0.0);
-        input[10] = (cold_duration / 100.0).min(1.0);
+        input[15] = (cold_duration / 100.0).min(1.0);
 
         self.creatures[creature_idx].perception_cache = input;
     }
@@ -503,6 +522,7 @@ impl World {
         self.creatures[creature_idx].energy -= turn_amount.abs() * config.move_cost;
 
         let actual_speed = speed.abs() * 50.0;
+        self.creatures[creature_idx].current_speed = actual_speed;
         if actual_speed > 0.1 {
             let heading = self.creatures[creature_idx].heading;
             let dx = heading.cos() * actual_speed * dt;
@@ -568,35 +588,40 @@ impl World {
             }
 
             if mouth < -0.1 {
-                // 咬（捕食）— 相似度越高收益越低（生化兼容性）
-                let similarity = self.get_similarity(&self.creatures[idx], &self.creatures[other_idx]);
+                // 咬（捕食）— 战力比对决定咬伤量，相似度影响消化效率
+                let my_energy = self.creatures[idx].energy;
+                let other_energy = self.creatures[other_idx].energy;
+
+                // 攻击方战力
+                let my_warmth = 1.0 - ((self.time - self.creatures[idx].last_warm_time).max(0.0) / 100.0).min(1.0);
+                let my_speed_norm = (self.creatures[idx].current_speed / 50.0).min(1.0);
+                let my_ally_energy = self.compute_nearby_ally_energy(idx, config);
+                let my_power = config.combat_power(my_energy, my_warmth, my_speed_norm, my_ally_energy);
+
+                // 防御方战力
+                let other_warmth = 1.0 - ((self.time - self.creatures[other_idx].last_warm_time).max(0.0) / 100.0).min(1.0);
+                let other_speed_norm = (self.creatures[other_idx].current_speed / 50.0).min(1.0);
+                let other_ally_energy = self.compute_nearby_ally_energy(other_idx, config);
+                let other_power = config.combat_power(other_energy, other_warmth, other_speed_norm, other_ally_energy);
+
+                // 战力比 → 0~1，等战力时=0.5
+                let power_ratio = my_power / (my_power + other_power + 0.001);
                 let bite_strength = (-mouth).min(1.0);
-                let transfer_ratio = bite_strength * 0.2;
-                let target_energy = self.creatures[other_idx].energy;
-                let transfer_amount = target_energy * transfer_ratio;
+                let transfer_amount = other_energy * bite_strength * 0.2 * power_ratio * 2.0;
+
+                let similarity = self.get_similarity(&self.creatures[idx], &self.creatures[other_idx]);
                 let efficiency = 1.0 - similarity;
                 self.creatures[other_idx].energy -= transfer_amount;
                 self.creatures[idx].energy += transfer_amount * efficiency;
                 self.action_counts[2] += 1; // 咬
             } else {
-                // 喂（哺育）— 只能大喂小，体型差越大损耗越低
+                // 喂（哺育）— 固定效率，无体型限制
                 let my_energy = self.creatures[idx].energy;
-                let other_energy = self.creatures[other_idx].energy;
-                if my_energy <= other_energy {
-                    break; // 不能小喂大
-                }
-                let size_ratio = my_energy / other_energy.max(0.1);
-                let threshold = config.feed_size_ratio_threshold;
-                let efficiency = if size_ratio >= threshold {
-                    1.0
-                } else {
-                    ((size_ratio - 1.0) / (threshold - 1.0)).clamp(0.0, 1.0)
-                };
                 let feed_strength = mouth.min(1.0);
                 let transfer_ratio = feed_strength * 0.2;
                 let transfer_amount = my_energy * transfer_ratio;
                 self.creatures[idx].energy -= transfer_amount;
-                self.creatures[other_idx].energy += transfer_amount * efficiency;
+                self.creatures[other_idx].energy += transfer_amount * config.feed_efficiency;
                 // 感温：被哺育（回暖70%，远强于吃食物的20%）
                 let cold = (self.time - self.creatures[other_idx].last_warm_time).max(0.0);
                 self.creatures[other_idx].last_warm_time += cold * 0.7;
@@ -604,6 +629,23 @@ impl World {
             }
             break; // 每帧只对一个目标
         }
+    }
+
+    /// 计算指定生物附近同族总能量（用于战力计算）
+    fn compute_nearby_ally_energy(&self, creature_idx: usize, config: &Config) -> f64 {
+        let cx = self.creatures[creature_idx].x;
+        let cy = self.creatures[creature_idx].y;
+        let nearby = self.creature_grid.query(cx, cy, config.combat_ally_range);
+        let threshold = config.species_similarity_threshold;
+        let mut total = 0.0;
+        for &other_idx in &nearby {
+            if other_idx == creature_idx || !self.creatures[other_idx].alive { continue; }
+            let similarity = self.get_similarity(&self.creatures[creature_idx], &self.creatures[other_idx]);
+            if similarity >= threshold {
+                total += self.creatures[other_idx].energy;
+            }
+        }
+        total
     }
 
     /// 繁殖（支持有性/无性）
