@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use crate::config::Config;
 use crate::neural::Genome;
-use super::{Creature, EnergyParticle, SpatialGrid};
+use super::{Creature, EnergyParticle, SpatialGrid, TrailPoint};
 
 /// 性能统计（单帧）
 #[derive(Default, Clone)]
@@ -22,10 +22,12 @@ pub struct PerfStats {
 pub struct World {
     pub creatures: Vec<Creature>,
     pub energy_particles: Vec<EnergyParticle>,
+    pub trail_points: Vec<TrailPoint>,
 
     // 空间索引
     creature_grid: SpatialGrid,
     energy_grid: SpatialGrid,
+    trail_grid: SpatialGrid,
 
     // 统计
     pub time: f64,
@@ -66,6 +68,7 @@ pub struct World {
     // 空间查询缓冲区复用
     creature_query_buf: Vec<usize>,
     energy_query_buf: Vec<usize>,
+    trail_query_buf: Vec<usize>,
 }
 
 /// 种族缓存（祖先追溯模型）
@@ -88,8 +91,10 @@ impl World {
         let mut world = Self {
             creatures: Vec::new(),
             energy_particles: Vec::new(),
+            trail_points: Vec::new(),
             creature_grid: SpatialGrid::new(config.vision_range),
             energy_grid: SpatialGrid::new(config.vision_range),
+            trail_grid: SpatialGrid::new(config.vision_range),
             time: 0.0,
             volcano_timer: 0.0,
             meteorite_timer: 0.0,
@@ -111,6 +116,7 @@ impl World {
             clan_cache_time: RefCell::new(-999.0),
             creature_query_buf: Vec::new(),
             energy_query_buf: Vec::new(),
+            trail_query_buf: Vec::new(),
         };
         // 初始火山喷发一次，提供起始能量
         world.volcano_erupt(config);
@@ -160,6 +166,9 @@ impl World {
 
         // 更新能量粒子
         self.update_energy_particles(dt, config);
+
+        // 更新痕迹点
+        self.update_trail_points(dt, config);
 
         // 清理
         self.cleanup();
@@ -293,6 +302,7 @@ impl World {
     fn rebuild_spatial_index(&mut self) {
         self.creature_grid.clear();
         self.energy_grid.clear();
+        self.trail_grid.clear();
 
         for (i, c) in self.creatures.iter().enumerate() {
             if c.alive {
@@ -302,6 +312,11 @@ impl World {
         for (i, e) in self.energy_particles.iter().enumerate() {
             if e.alive {
                 self.energy_grid.insert(i, e.x, e.y);
+            }
+        }
+        for (i, t) in self.trail_points.iter().enumerate() {
+            if t.alive {
+                self.trail_grid.insert(i, t.x, t.y);
             }
         }
     }
@@ -323,16 +338,32 @@ impl World {
             }
             alive_count += 1;
 
-            // 基础代谢
+            // 环境温度
+            let ambient = config.ambient_temperature(self.creatures[i].x, self.creatures[i].y);
+            let env_multiplier = 1.0 + config.heat_metabolism_factor * ambient;
+
+            // 器官消耗
+            let mut organ_cost = 0.0;
+            if self.creatures[i].genome.organ_genes.nose { organ_cost += config.organ_nose_cost; }
+            if self.creatures[i].genome.organ_genes.eyes { organ_cost += config.organ_eye_cost; }
+            if self.creatures[i].genome.organ_genes.mouth { organ_cost += config.organ_mouth_cost; }
+
+            // 基础代谢 + 器官消耗（含环境温度影响）
             let age_multiplier = 1.0 + self.creatures[i].age * config.age_metabolism_factor;
-            let metabolism_cost = config.base_metabolism * age_multiplier * dt;
+            let metabolism_cost = (config.base_metabolism + organ_cost) * age_multiplier * env_multiplier * dt;
             self.creatures[i].energy -= metabolism_cost;
 
-            // 体温逸散：系数 × 冷却时长 × 周长
+            // 体温逸散：系数 × 冷却时长 × 周长 × (1 + (1 - ambient) × cold_loss_factor)
             let cold_duration = (self.time - self.creatures[i].last_warm_time).max(0.0);
             let circumference = (self.creatures[i].energy.max(0.0) * 0.32).sqrt() * std::f64::consts::TAU;
-            let heat_cost = config.heat_dissipation_coefficient * cold_duration * circumference * dt;
+            let cold_env_factor = 1.0 + (1.0 - ambient) * config.cold_loss_factor;
+            let heat_cost = config.heat_dissipation_coefficient * cold_duration * circumference * cold_env_factor * dt;
             self.creatures[i].energy -= heat_cost;
+
+            // 自动回暖（环境热辐射）
+            if ambient > 0.0 {
+                self.creatures[i].last_warm_time += cold_duration * ambient * 0.5 * dt;
+            }
 
             self.creatures[i].age += dt;
 
@@ -341,9 +372,9 @@ impl World {
                 continue;
             }
 
-            // 感知（2眼模型）
+            // 感知（鼻子+双眼模型）
             let t0 = Instant::now();
-            self.compute_eye_perception(i, config);
+            self.compute_perception(i, config);
             perceive_time += t0.elapsed().as_secs_f64() * 1000.0;
 
             // 神经网络决策
@@ -366,45 +397,52 @@ impl World {
         self.perf_stats.creature_count = alive_count;
     }
 
-    // ========== 2眼感知系统 ==========
+    // ========== 感知系统（鼻子+双眼） ==========
 
     /// 计算 16 维感知输入
-    /// 2只眼（左-45°, 右+45°），每只眼7通道:
-    ///   食物接近度, 同族接近度, 异族接近度, 同族能量, 异族能量, 同族体温, 异族体温
-    /// + 自身能量 + 体温状态
-    fn compute_eye_perception(&mut self, creature_idx: usize, config: &Config) {
+    /// 鼻子 [0..4]: 能量粒子强度, 同族强度, 异族强度, 痕迹强度, 痕迹基因相似度
+    /// 左眼 [5..8]: 能量粒子接近度, 同族接近度, 异族接近度, 痕迹接近度
+    /// 右眼 [9..12]: 能量粒子接近度, 同族接近度, 异族接近度, 痕迹接近度
+    /// 自身 [13..15]: 自身能量, 体温状态, 环境温度
+    fn compute_perception(&mut self, creature_idx: usize, config: &Config) {
         let cx = self.creatures[creature_idx].x;
         let cy = self.creatures[creature_idx].y;
         let heading = self.creatures[creature_idx].heading;
         let vision = config.vision_range;
         let threshold = config.species_similarity_threshold;
-        let world_time = self.time;
+        let has_nose = self.creatures[creature_idx].genome.organ_genes.nose;
+        let has_eyes = self.creatures[creature_idx].genome.organ_genes.eyes;
+        let my_hash = self.creatures[creature_idx].genome_hash;
 
-        // 2只眼的方向（弧度）
+        let nose_half = config.nose_half_angle; // 30°
+        let eye_half_fov = std::f64::consts::PI / 3.0; // 60°
         let eye_dirs = [
-            heading - std::f64::consts::FRAC_PI_4,  // 左眼 -45°
-            heading + std::f64::consts::FRAC_PI_4,  // 右眼 +45°
+            heading - std::f64::consts::PI / 3.0,  // 左眼 -60°
+            heading + std::f64::consts::PI / 3.0,  // 右眼 +60°
         ];
-        // 每只眼的半角（60°）
-        let half_fov = std::f64::consts::PI / 3.0;
 
         let mut input = [0.0_f64; 16];
 
-        // 每只眼跟踪最近的食物/同族/异族的距离
+        // 鼻子通道累加
+        let mut nose_food = 0.0_f64;
+        let mut nose_ally = 0.0_f64;
+        let mut nose_enemy = 0.0_f64;
+        let mut nose_trail = 0.0_f64;
+        let mut best_trail_strength = 0.0_f64;
+        let mut best_trail_hash: u64 = 0;
+
+        // 眼睛：最近距离
         let mut eye_food = [f64::MAX; 2];
-        let mut eye_ally_dist = [f64::MAX; 2];
-        let mut eye_enemy_dist = [f64::MAX; 2];
-        // 最近同族/异族的能量和体温
-        let mut eye_ally_energy = [0.0_f64; 2];
-        let mut eye_ally_temp = [0.0_f64; 2];
-        let mut eye_enemy_energy = [0.0_f64; 2];
-        let mut eye_enemy_temp = [0.0_f64; 2];
+        let mut eye_ally = [f64::MAX; 2];
+        let mut eye_enemy = [f64::MAX; 2];
+        let mut eye_trail = [f64::MAX; 2];
 
         // 临时取出缓冲区
         let mut creature_buf = std::mem::take(&mut self.creature_query_buf);
         let mut energy_buf = std::mem::take(&mut self.energy_query_buf);
+        let mut trail_buf = std::mem::take(&mut self.trail_query_buf);
 
-        // 查询邻近能量粒子
+        // === 能量粒子 ===
         self.energy_grid.query_into(cx, cy, vision, &mut energy_buf);
         for &idx in &energy_buf {
             let particle = &self.energy_particles[idx];
@@ -416,20 +454,30 @@ impl World {
             if dist <= 0.0 || dist > vision { continue; }
 
             let angle = dy.atan2(dx);
+            let proximity = 1.0 - dist / vision;
 
-            for (eye_i, &eye_dir) in eye_dirs.iter().enumerate() {
-                let mut diff = angle - eye_dir;
-                // 归一化到 [-π, π]
-                while diff > std::f64::consts::PI { diff -= std::f64::consts::TAU; }
-                while diff < -std::f64::consts::PI { diff += std::f64::consts::TAU; }
+            // 鼻子（正前方，nose_half角）
+            if has_nose {
+                let diff = angle_diff(angle, heading);
+                if diff.abs() <= nose_half {
+                    let strength = proximity * proximity;
+                    let energy_ratio = particle.energy / particle.initial_energy;
+                    nose_food += strength * energy_ratio;
+                }
+            }
 
-                if diff.abs() <= half_fov && dist < eye_food[eye_i] {
-                    eye_food[eye_i] = dist;
+            // 双眼
+            if has_eyes {
+                for (eye_i, &eye_dir) in eye_dirs.iter().enumerate() {
+                    let diff = angle_diff(angle, eye_dir);
+                    if diff.abs() <= eye_half_fov && dist < eye_food[eye_i] {
+                        eye_food[eye_i] = dist;
+                    }
                 }
             }
         }
 
-        // 查询邻近生物
+        // === 生物 ===
         self.creature_grid.query_into(cx, cy, vision, &mut creature_buf);
         for &idx in &creature_buf {
             if idx == creature_idx { continue; }
@@ -442,34 +490,76 @@ impl World {
             if dist <= 0.0 || dist > vision { continue; }
 
             let angle = dy.atan2(dx);
+            let proximity = 1.0 - dist / vision;
             let similarity = self.get_similarity(
                 &self.creatures[creature_idx],
                 &self.creatures[idx],
             );
             let is_ally = similarity >= threshold;
 
-            // 对方能量归一化 (0~1)
-            let other_energy_norm = (other.energy / 200.0).min(1.0);
-            // 对方体温状态（冷却程度，越冷越高）
-            let other_cold = (world_time - other.last_warm_time).max(0.0);
-            let other_temp_norm = (other_cold / 100.0).min(1.0);
-
-            for (eye_i, &eye_dir) in eye_dirs.iter().enumerate() {
-                let mut diff = angle - eye_dir;
-                while diff > std::f64::consts::PI { diff -= std::f64::consts::TAU; }
-                while diff < -std::f64::consts::PI { diff += std::f64::consts::TAU; }
-
-                if diff.abs() <= half_fov {
+            // 鼻子
+            if has_nose {
+                let diff = angle_diff(angle, heading);
+                if diff.abs() <= nose_half {
+                    let strength = proximity * proximity;
                     if is_ally {
-                        if dist < eye_ally_dist[eye_i] {
-                            eye_ally_dist[eye_i] = dist;
-                            eye_ally_energy[eye_i] = other_energy_norm;
-                            eye_ally_temp[eye_i] = other_temp_norm;
+                        nose_ally += strength;
+                    } else {
+                        nose_enemy += strength;
+                    }
+                }
+            }
+
+            // 双眼
+            if has_eyes {
+                for (eye_i, &eye_dir) in eye_dirs.iter().enumerate() {
+                    let diff = angle_diff(angle, eye_dir);
+                    if diff.abs() <= eye_half_fov {
+                        if is_ally {
+                            if dist < eye_ally[eye_i] { eye_ally[eye_i] = dist; }
+                        } else if dist < eye_enemy[eye_i] {
+                            eye_enemy[eye_i] = dist;
                         }
-                    } else if dist < eye_enemy_dist[eye_i] {
-                        eye_enemy_dist[eye_i] = dist;
-                        eye_enemy_energy[eye_i] = other_energy_norm;
-                        eye_enemy_temp[eye_i] = other_temp_norm;
+                    }
+                }
+            }
+        }
+
+        // === 痕迹点 ===
+        self.trail_grid.query_into(cx, cy, vision, &mut trail_buf);
+        for &idx in &trail_buf {
+            let trail = &self.trail_points[idx];
+            if !trail.alive { continue; }
+
+            let dx = trail.x - cx;
+            let dy = trail.y - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist <= 0.0 || dist > vision { continue; }
+
+            let angle = dy.atan2(dx);
+            let proximity = 1.0 - dist / vision;
+
+            // 鼻子
+            if has_nose {
+                let diff = angle_diff(angle, heading);
+                if diff.abs() <= nose_half {
+                    let strength = proximity * proximity;
+                    let energy_ratio = trail.energy / trail.initial_energy;
+                    let s = strength * energy_ratio;
+                    nose_trail += s;
+                    if s > best_trail_strength {
+                        best_trail_strength = s;
+                        best_trail_hash = trail.genome_hash;
+                    }
+                }
+            }
+
+            // 双眼
+            if has_eyes {
+                for (eye_i, &eye_dir) in eye_dirs.iter().enumerate() {
+                    let diff = angle_diff(angle, eye_dir);
+                    if diff.abs() <= eye_half_fov && dist < eye_trail[eye_i] {
+                        eye_trail[eye_i] = dist;
                     }
                 }
             }
@@ -478,25 +568,38 @@ impl World {
         // 归还缓冲区
         self.creature_query_buf = creature_buf;
         self.energy_query_buf = energy_buf;
+        self.trail_query_buf = trail_buf;
 
-        // 转换为接近度 (0~1, 越近越高)，每眼7通道
-        for eye_i in 0..2 {
-            let base = eye_i * 7;
-            input[base]     = if eye_food[eye_i] < f64::MAX       { 1.0 - eye_food[eye_i] / vision       } else { 0.0 };
-            input[base + 1] = if eye_ally_dist[eye_i] < f64::MAX  { 1.0 - eye_ally_dist[eye_i] / vision  } else { 0.0 };
-            input[base + 2] = if eye_enemy_dist[eye_i] < f64::MAX { 1.0 - eye_enemy_dist[eye_i] / vision } else { 0.0 };
-            input[base + 3] = eye_ally_energy[eye_i];   // 最近同族能量 (0~1)
-            input[base + 4] = eye_enemy_energy[eye_i];  // 最近异族能量 (0~1)
-            input[base + 5] = eye_ally_temp[eye_i];     // 最近同族体温 (0~1, 越冷越高)
-            input[base + 6] = eye_enemy_temp[eye_i];    // 最近异族体温 (0~1, 越冷越高)
+        // === 写入通道 ===
+
+        // 鼻子 [0..4]
+        if has_nose {
+            input[0] = nose_food.min(1.0);
+            input[1] = nose_ally.min(1.0);
+            input[2] = nose_enemy.min(1.0);
+            input[3] = nose_trail.min(1.0);
+            input[4] = if best_trail_hash == my_hash { 1.0 } else { 0.0 };
         }
 
-        // 自身能量
-        input[14] = (self.creatures[creature_idx].energy / 200.0).min(1.0);
+        // 左眼 [5..8]
+        if has_eyes {
+            input[5] = if eye_food[0] < f64::MAX { 1.0 - eye_food[0] / vision } else { 0.0 };
+            input[6] = if eye_ally[0] < f64::MAX { 1.0 - eye_ally[0] / vision } else { 0.0 };
+            input[7] = if eye_enemy[0] < f64::MAX { 1.0 - eye_enemy[0] / vision } else { 0.0 };
+            input[8] = if eye_trail[0] < f64::MAX { 1.0 - eye_trail[0] / vision } else { 0.0 };
 
-        // 体温状态（冷却程度，越冷越高）
+            // 右眼 [9..12]
+            input[9]  = if eye_food[1] < f64::MAX { 1.0 - eye_food[1] / vision } else { 0.0 };
+            input[10] = if eye_ally[1] < f64::MAX { 1.0 - eye_ally[1] / vision } else { 0.0 };
+            input[11] = if eye_enemy[1] < f64::MAX { 1.0 - eye_enemy[1] / vision } else { 0.0 };
+            input[12] = if eye_trail[1] < f64::MAX { 1.0 - eye_trail[1] / vision } else { 0.0 };
+        }
+
+        // 自身状态 [13..15]
+        input[13] = (self.creatures[creature_idx].energy / 200.0).min(1.0);
         let cold_duration = (self.time - self.creatures[creature_idx].last_warm_time).max(0.0);
-        input[15] = (cold_duration / 100.0).min(1.0);
+        input[14] = (cold_duration / 100.0).min(1.0);
+        input[15] = config.ambient_temperature(cx, cy);
 
         self.creatures[creature_idx].perception_cache = input;
     }
@@ -527,12 +630,21 @@ impl World {
             let heading = self.creatures[creature_idx].heading;
             let dx = heading.cos() * actual_speed * dt;
             let dy = heading.sin() * actual_speed * dt;
+            let old_x = self.creatures[creature_idx].x;
+            let old_y = self.creatures[creature_idx].y;
             self.creatures[creature_idx].x += dx;
             self.creatures[creature_idx].y += dy;
 
             let distance = (dx * dx + dy * dy).sqrt();
-            self.creatures[creature_idx].energy -= distance * config.move_cost * actual_speed;
+            let move_cost = distance * config.move_cost * actual_speed;
+            self.creatures[creature_idx].energy -= move_cost;
             self.action_counts[0] += 1; // 移动
+
+            // 生成痕迹点（能量守恒：移动消耗转化为痕迹）
+            if move_cost > 0.001 {
+                let genome_hash = self.creatures[creature_idx].genome_hash;
+                self.trail_points.push(TrailPoint::new(old_x, old_y, move_cost, genome_hash));
+            }
         }
 
         // 嘴：接触食物自动吸收 + 对生物咬/喂
@@ -547,7 +659,11 @@ impl World {
     }
 
     /// 嘴动作：接触食物自动吸收，对生物根据mouth值咬或喂
+    /// 无嘴生物：不能吃/咬/喂（但可以被喂 → 寄生可能）
     fn action_mouth(&mut self, idx: usize, mouth: f64, config: &Config) {
+        let has_mouth = self.creatures[idx].genome.organ_genes.mouth;
+        if !has_mouth { return; }
+
         let cx = self.creatures[idx].x;
         let cy = self.creatures[idx].y;
 
@@ -566,6 +682,23 @@ impl World {
                     self.creatures[idx].last_warm_time += cold * 0.2;
                     self.action_counts[1] += 1; // 吸收
                     break; // 每帧吸收一个
+                }
+            }
+        }
+
+        // 接触痕迹点自动吸收（需有嘴）
+        if self.creatures[idx].genome.organ_genes.mouth {
+            let nearby_trails = self.trail_grid.query(cx, cy, config.contact_range);
+            for &trail_idx in &nearby_trails {
+                if self.trail_points[trail_idx].alive {
+                    let tx = self.trail_points[trail_idx].x;
+                    let ty = self.trail_points[trail_idx].y;
+                    let dist = ((tx - cx).powi(2) + (ty - cy).powi(2)).sqrt();
+                    if dist < config.contact_range {
+                        let energy = self.trail_points[trail_idx].consume();
+                        self.creatures[idx].energy += energy;
+                        break; // 每帧吸收一个
+                    }
                 }
             }
         }
@@ -724,6 +857,14 @@ impl World {
         }
     }
 
+    fn update_trail_points(&mut self, dt: f64, config: &Config) {
+        for trail in &mut self.trail_points {
+            if trail.alive {
+                trail.update(dt, config.trail_decay_rate);
+            }
+        }
+    }
+
     fn cleanup(&mut self) {
         let mut had_deaths = false;
 
@@ -755,6 +896,7 @@ impl World {
 
         self.creatures.retain(|c| c.alive);
         self.energy_particles.retain(|e| e.alive);
+        self.trail_points.retain(|t| t.alive);
 
         // 每10秒清理一次相似度缓存
         if self.time - self.cache_cleanup_timer >= 10.0 {
@@ -779,7 +921,10 @@ impl World {
         let creature_energy: f64 = alive_creatures.iter().map(|c| c.energy).sum();
         let particle_energy: f64 = self.energy_particles.iter()
             .filter(|e| e.alive).map(|e| e.energy).sum();
-        let total_energy = creature_energy + particle_energy;
+        let trail_energy: f64 = self.trail_points.iter()
+            .filter(|t| t.alive).map(|t| t.energy).sum();
+        let trail_count = self.trail_points.iter().filter(|t| t.alive).count();
+        let total_energy = creature_energy + particle_energy + trail_energy;
         let avg_energy = if alive_creatures.is_empty() { 0.0 }
             else { creature_energy / alive_creatures.len() as f64 };
 
@@ -812,6 +957,7 @@ impl World {
             time: self.time,
             creature_count: alive_creatures.len(),
             energy_particle_count: self.energy_particles.iter().filter(|e| e.alive).count(),
+            trail_count,
             total_energy,
             max_generation,
             avg_energy,
@@ -1056,6 +1202,15 @@ impl World {
     }
 }
 
+/// 角度差归一化到 [-π, π]
+#[inline]
+fn angle_diff(a: f64, b: f64) -> f64 {
+    let mut d = a - b;
+    while d > std::f64::consts::PI { d -= std::f64::consts::TAU; }
+    while d < -std::f64::consts::PI { d += std::f64::consts::TAU; }
+    d
+}
+
 // ========== 数据结构 ==========
 
 #[derive(Default, Clone)]
@@ -1077,6 +1232,7 @@ pub struct WorldStats {
     pub time: f64,
     pub creature_count: usize,
     pub energy_particle_count: usize,
+    pub trail_count: usize,
     pub total_energy: f64,
     pub max_generation: usize,
     pub avg_energy: f64,

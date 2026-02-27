@@ -39,6 +39,7 @@ pub struct CachedStats {
     pub fps: f64,
     pub creature_count: usize,
     pub energy_particle_count: usize,
+    pub trail_count: usize,
     pub total_energy: f64,
     pub volcano_countdown: f64,
     pub max_generation: usize,
@@ -94,6 +95,7 @@ impl StatsPanel {
                 fps,
                 creature_count: stats.creature_count,
                 energy_particle_count: stats.energy_particle_count,
+                trail_count: stats.trail_count,
                 total_energy: stats.total_energy,
                 volcano_countdown: self.cached_stats.volcano_countdown,
                 max_generation: stats.max_generation,
@@ -187,6 +189,8 @@ impl StatsPanel {
             ui.label(format!("生物:{}", self.cached_stats.creature_count));
             ui.label("│");
             ui.label(format!("粒子:{}", self.cached_stats.energy_particle_count));
+            ui.label("│");
+            ui.label(format!("痕迹:{}", self.cached_stats.trail_count));
             ui.label("│");
             ui.label(format!("总能:{:.0}", self.cached_stats.total_energy));
             ui.label("│");
@@ -311,6 +315,19 @@ impl StatsPanel {
                     ui.horizontal(|ui| {
                         ui.label("基因哈希:");
                         ui.label(format!("{:08X}", creature.genome_hash));
+                    });
+
+                    // 器官状态
+                    ui.separator();
+                    ui.label("器官");
+                    let organs = &creature.genome.organ_genes;
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "鼻:{} 眼:{} 嘴:{}",
+                            if organs.nose { "✓" } else { "✗" },
+                            if organs.eyes { "✓" } else { "✗" },
+                            if organs.mouth { "✓" } else { "✗" },
+                        ));
                     });
 
                     // 神经网络信息

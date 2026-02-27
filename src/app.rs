@@ -117,8 +117,8 @@ impl CellWorldApp {
                 .open(log_path)
             {
                 let _ = writeln!(file, "# Cell World 运行日志\n");
-                let _ = writeln!(file, "| 时间 | 生物 | 粒子 | 总能 | 代 | 种群 | 寿命(均/中/长/短/死) | 行为(移动/吸收/咬/喂/繁殖) |");
-                let _ = writeln!(file, "|------|------|------|------|----|------|----------------------|----------------------------|");
+                let _ = writeln!(file, "| 时间 | 生物 | 粒子 | 痕迹 | 总能 | 代 | 种群 | 寿命(均/中/长/短/死) | 行为(移动/吸收/咬/喂/繁殖) |");
+                let _ = writeln!(file, "|------|------|------|------|------|----|------|----------------------|----------------------------|");
             }
             // 性能分析日志
             if let Ok(mut file) = OpenOptions::new()
@@ -144,10 +144,11 @@ impl CellWorldApp {
             let death = &stats.death_age_stats;
             let _ = writeln!(
                 file,
-                "| {:.0} | {} | {} | {:.0} | {} | {} | {:.1}/{:.1}/{:.1}/{:.1}/{} | {}/{}/{}/{}/{} |",
+                "| {:.0} | {} | {} | {} | {:.0} | {} | {} | {:.1}/{:.1}/{:.1}/{:.1}/{} | {}/{}/{}/{}/{} |",
                 stats.time,
                 stats.creature_count,
                 stats.energy_particle_count,
+                stats.trail_count,
                 stats.total_energy,
                 stats.max_generation,
                 stats.species_count,
@@ -382,7 +383,7 @@ impl eframe::App for CellWorldApp {
             }
             let render_ctx = self.render_ctx_cache.as_ref().unwrap();
             let t_render = std::time::Instant::now();
-            let bounds = self.canvas.render(ui, &self.world, &mut self.selection, render_ctx);
+            let bounds = self.canvas.render(ui, &self.world, &mut self.selection, render_ctx, &self.config);
             render_time = t_render.elapsed().as_secs_f64() * 1000.0;
             self.last_visible_bounds = Some(bounds);
         });

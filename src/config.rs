@@ -73,6 +73,30 @@ pub struct Config {
     pub dominant_min_age: f64,
     /// 初始世界缩放比例
     pub initial_scale: f32,
+
+    // === 器官消耗 ===
+    /// 鼻子消耗（/秒）
+    pub organ_nose_cost: f64,
+    /// 双眼消耗（/秒，总计）
+    pub organ_eye_cost: f64,
+    /// 嘴巴消耗（/秒）
+    pub organ_mouth_cost: f64,
+
+    // === 环境温度 ===
+    /// 火山热辐射范围
+    pub volcano_heat_range: f64,
+    /// 火山口代谢加成系数（+50%）
+    pub heat_metabolism_factor: f64,
+    /// 远离火山温度流失加成系数（+100%）
+    pub cold_loss_factor: f64,
+
+    // === 痕迹点 ===
+    /// 痕迹点能量衰减率（/秒）
+    pub trail_decay_rate: f64,
+
+    // === 鼻子 ===
+    /// 鼻子半角（弧度）
+    pub nose_half_angle: f64,
 }
 
 impl Config {
@@ -82,6 +106,12 @@ impl Config {
     /// - warmth: 0~1（0=极冷, 1=刚回暖）
     /// - speed_norm: 0~1（当前速度 / 最大速度）
     /// - ally_total_energy: 附近同族总能量
+    /// 环境温度：距火山越近越高 (0~1)
+    pub fn ambient_temperature(&self, x: f64, y: f64) -> f64 {
+        let dist = ((x - self.volcano_x).powi(2) + (y - self.volcano_y).powi(2)).sqrt();
+        (1.0 - dist / self.volcano_heat_range).clamp(0.0, 1.0)
+    }
+
     pub fn combat_power(&self, energy: f64, warmth: f64, speed_norm: f64, ally_total_energy: f64) -> f64 {
         let energy_factor = energy / 100.0;
         let temp_factor = 1.0 + self.combat_temp_weight * warmth;
@@ -136,6 +166,22 @@ impl Default for Config {
             combat_ally_range: 50.0,   // 同族援助感应范围
             
             dominant_min_age: 500.0,  // 优势种检测：最老成员需达到年龄（秒）
+
+            // 器官消耗
+            organ_nose_cost: 0.005,
+            organ_eye_cost: 0.008,
+            organ_mouth_cost: 0.003,
+
+            // 环境温度
+            volcano_heat_range: 800.0,
+            heat_metabolism_factor: 0.5,
+            cold_loss_factor: 1.0,
+
+            // 痕迹点
+            trail_decay_rate: 0.03,
+
+            // 鼻子
+            nose_half_angle: std::f64::consts::PI / 6.0,
         }
     }
 }

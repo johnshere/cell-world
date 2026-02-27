@@ -6,6 +6,25 @@ use std::hash::{Hash, Hasher};
 #[cfg(feature = "persistence")]
 use serde::{Deserialize, Serialize};
 
+/// 器官基因
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
+pub struct OrganGenes {
+    pub nose: bool,   // 鼻子
+    pub eyes: bool,   // 双眼（一个基因控制左右两只）
+    pub mouth: bool,  // 嘴巴
+}
+
+impl Default for OrganGenes {
+    fn default() -> Self {
+        Self {
+            nose: true,
+            eyes: true,
+            mouth: true,
+        }
+    }
+}
+
 /// 节点类型
 #[derive(Clone, Copy, PartialEq, Debug)]
 #[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
@@ -40,14 +59,15 @@ pub struct Genome {
     pub nodes: Vec<NodeGene>,
     pub connections: Vec<ConnectionGene>,
     next_node_id: usize,
+    pub organ_genes: OrganGenes,
 }
 
 impl Genome {
-    /// 输入维度（2只眼 × 7通道 + 自身能量 + 体温状态）
-    /// [0-6]  左眼: 食物距离, 同族距离, 异族距离, 同族能量, 异族能量, 同族体温, 异族体温
-    /// [7-13] 右眼: 食物距离, 同族距离, 异族距离, 同族能量, 异族能量, 同族体温, 异族体温
-    /// [14]   自身能量(0~1)
-    /// [15]   体温状态(0~1, 越冷越高)
+    /// 输入维度 = 16（鼻子5 + 左眼4 + 右眼4 + 自身3）
+    /// 鼻子 [0..4]: 能量粒子强度, 同族强度, 异族强度, 痕迹强度, 痕迹基因相似度
+    /// 左眼 [5..8]: 能量粒子接近度, 同族接近度, 异族接近度, 痕迹接近度
+    /// 右眼 [9..12]: 能量粒子接近度, 同族接近度, 异族接近度, 痕迹接近度
+    /// 自身 [13..15]: 自身能量, 体温状态, 环境温度
     pub const INPUT_SIZE: usize = 16;
     /// 输出维度（固定4个）
     /// [0] 转向角  tanh(-1~1)
@@ -96,6 +116,7 @@ impl Genome {
             nodes,
             connections,
             next_node_id,
+            organ_genes: OrganGenes::default(),
         }
     }
 
@@ -132,6 +153,15 @@ impl Genome {
         if rng.gen::<f64>() < rate {
             if let Some(conn) = child.connections.choose_mut(&mut rng) {
                 conn.enabled = !conn.enabled;
+            }
+        }
+
+        // 器官变异（概率 rate * 0.1，约1.5%）
+        if rng.gen::<f64>() < rate * 0.1 {
+            match rng.gen_range(0..3) {
+                0 => child.organ_genes.nose = !child.organ_genes.nose,
+                1 => child.organ_genes.eyes = !child.organ_genes.eyes,
+                _ => child.organ_genes.mouth = !child.organ_genes.mouth,
             }
         }
 
@@ -240,6 +270,9 @@ impl Genome {
             conn.out_node.hash(&mut hasher);
             ((conn.weight * 1000.0) as i64).hash(&mut hasher);
         }
+        self.organ_genes.nose.hash(&mut hasher);
+        self.organ_genes.eyes.hash(&mut hasher);
+        self.organ_genes.mouth.hash(&mut hasher);
         hasher.finish()
     }
 
@@ -309,7 +342,15 @@ impl Genome {
         }
         total += (self_conns.len() - i) + (other_conns.len() - j);
 
-        if total == 0 { 1.0 } else { similarity_sum / total as f64 }
+        let base_sim = if total == 0 { 1.0 } else { similarity_sum / total as f64 };
+
+        // 器官差异惩罚：每个不同器官扣 0.05
+        let mut organ_penalty = 0.0;
+        if self.organ_genes.nose != other.organ_genes.nose { organ_penalty += 0.05; }
+        if self.organ_genes.eyes != other.organ_genes.eyes { organ_penalty += 0.05; }
+        if self.organ_genes.mouth != other.organ_genes.mouth { organ_penalty += 0.05; }
+
+        (base_sim - organ_penalty).max(0.0)
     }
 
     /// NEAT 有性繁殖：两个父代基因交叉产生子代
@@ -358,6 +399,7 @@ impl Genome {
             nodes: child_nodes,
             connections: child_connections,
             next_node_id,
+            organ_genes: fitter.organ_genes.clone(),
         }
     }
 }

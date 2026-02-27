@@ -54,7 +54,7 @@ impl WorldCanvas {
     }
 
     /// 渲染世界，返回当前可见的世界坐标范围
-    pub fn render(&mut self, ui: &mut Ui, world: &World, selection: &mut Selection, ctx: &RenderContext) -> VisibleWorldBounds {
+    pub fn render(&mut self, ui: &mut Ui, world: &World, selection: &mut Selection, ctx: &RenderContext, config: &crate::config::Config) -> VisibleWorldBounds {
         let available_size = ui.available_size();
         let (response, painter) =
             ui.allocate_painter(available_size, Sense::click_and_drag());
@@ -108,6 +108,33 @@ impl WorldCanvas {
             }
         }
 
+        // 绘制痕迹点
+        for trail in &world.trail_points {
+            if !trail.alive { continue; }
+            let pos = self.world_to_screen(Pos2::new(trail.x as f32, trail.y as f32), rect);
+            if rect.contains(pos) {
+                let energy_ratio = (trail.energy / trail.initial_energy).clamp(0.0, 1.0) as f32;
+                let alpha = (60.0 * energy_ratio) as u8;
+                let color = species_to_color(trail.genome_hash);
+                let trail_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
+                let radius = 0.5 * self.scale;
+                painter.circle_filled(pos, radius, trail_color);
+            }
+        }
+
+        // 绘制火山热辐射圈
+        {
+            let volcano_pos = self.world_to_screen(Pos2::new(config.volcano_x as f32, config.volcano_y as f32), rect);
+            let heat_radius = config.volcano_heat_range as f32 * self.scale;
+            if heat_radius > 5.0 {
+                painter.circle_stroke(
+                    volcano_pos,
+                    heat_radius,
+                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 100, 50, 20)),
+                );
+            }
+        }
+
         // 绘制火山标记（原点 0,0）
         {
             let volcano_pos = self.world_to_screen(Pos2::new(0.0, 0.0), rect);
@@ -137,6 +164,67 @@ impl WorldCanvas {
                 // 头部方向圆弧（五分之一圆，指示朝向）
                 let heading = creature.heading as f32;
                 draw_heading_arc(&painter, pos, radius + 2.0, heading, Stroke::new(1.0, color));
+
+                // 器官绘制（缩放足够大时）
+                if self.scale > 0.3 {
+                    let organs = &creature.genome.organ_genes;
+
+                    // 鼻子（正前方线段，淡蓝色）
+                    if organs.nose {
+                        let nose_len = (radius * 0.8).max(2.0);
+                        let nose_start = Pos2::new(
+                            pos.x + radius * heading.cos(),
+                            pos.y + radius * heading.sin(),
+                        );
+                        let nose_end = Pos2::new(
+                            pos.x + (radius + nose_len) * heading.cos(),
+                            pos.y + (radius + nose_len) * heading.sin(),
+                        );
+                        painter.line_segment(
+                            [nose_start, nose_end],
+                            Stroke::new(1.0, Color32::from_rgb(200, 200, 255)),
+                        );
+                    }
+
+                    // 双眼（白圆+黑瞳）
+                    if organs.eyes {
+                        let eye_r = (radius * 0.25).max(1.0).min(3.0 * self.scale);
+                        let pupil_r = eye_r * 0.5;
+                        let eye_offset = std::f32::consts::PI / 3.0; // ±60°
+                        for &sign in &[-1.0_f32, 1.0] {
+                            let eye_angle = heading + sign * eye_offset;
+                            let eye_pos = Pos2::new(
+                                pos.x + radius * eye_angle.cos(),
+                                pos.y + radius * eye_angle.sin(),
+                            );
+                            painter.circle_filled(eye_pos, eye_r, Color32::WHITE);
+                            painter.circle_filled(eye_pos, pupil_r, Color32::BLACK);
+                        }
+                    }
+
+                    // 嘴巴（小弧线，粉红色）
+                    if organs.mouth {
+                        let mouth_r = (radius * 0.4).max(1.5);
+                        let mouth_angle = heading + std::f32::consts::PI * 0.05; // 略偏下
+                        let mouth_center = Pos2::new(
+                            pos.x + (radius * 0.7) * mouth_angle.cos(),
+                            pos.y + (radius * 0.7) * mouth_angle.sin(),
+                        );
+                        let half_arc = 0.4;
+                        let segments = 6;
+                        let points: Vec<Pos2> = (0..=segments)
+                            .map(|i| {
+                                let t = i as f32 / segments as f32;
+                                let a = heading - half_arc + t * half_arc * 2.0;
+                                Pos2::new(
+                                    mouth_center.x + mouth_r * a.cos(),
+                                    mouth_center.y + mouth_r * a.sin(),
+                                )
+                            })
+                            .collect();
+                        painter.add(PathShape::line(points, Stroke::new(0.8, Color32::from_rgb(255, 100, 100))));
+                    }
+                }
 
                 // 选中：半径大2px的白色圆
                 if *selection == Selection::Creature(creature.id) {

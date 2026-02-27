@@ -35,7 +35,7 @@ pub struct Creature {
     // 当前速度（每帧更新，用于战力计算）
     pub current_speed: f64,
 
-    // 感知结果缓存（16维：2眼×7通道 + 自身能量 + 体温状态）
+    // 感知结果缓存（16维：鼻子5 + 左眼4 + 右眼4 + 自身3）
     pub perception_cache: [f64; 16],
 }
 
