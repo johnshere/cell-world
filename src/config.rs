@@ -1,4 +1,9 @@
+use serde::{Serialize, Deserialize};
+
+const CONFIG_PATH: &str = "config.json";
+
 /// 世界配置
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     /// 初始模拟速度
     pub initial_speed: f64,
@@ -100,18 +105,42 @@ pub struct Config {
 }
 
 impl Config {
-    /// 战力计算公式
-    /// combat_power = (energy / 100) × (1 + temp_w × warmth) × (1 + speed_w × speed_norm) × (1 + ally_w × ally_norm)
-    ///
-    /// - warmth: 0~1（0=极冷, 1=刚回暖）
-    /// - speed_norm: 0~1（当前速度 / 最大速度）
-    /// - ally_total_energy: 附近同族总能量
+    /// 从 config.json 加载，失败则用默认值
+    pub fn load() -> Self {
+        match std::fs::read_to_string(CONFIG_PATH) {
+            Ok(content) => {
+                match serde_json::from_str(&content) {
+                    Ok(config) => config,
+                    Err(e) => {
+                        eprintln!("配置解析失败，使用默认值: {}", e);
+                        let config = Self::default();
+                        config.save();
+                        config
+                    }
+                }
+            }
+            Err(_) => {
+                let config = Self::default();
+                config.save();
+                config
+            }
+        }
+    }
+
+    /// 保存到 config.json
+    pub fn save(&self) {
+        if let Ok(json) = serde_json::to_string_pretty(self) {
+            let _ = std::fs::write(CONFIG_PATH, json);
+        }
+    }
+
     /// 环境温度：距火山越近越高 (0~1)
     pub fn ambient_temperature(&self, x: f64, y: f64) -> f64 {
         let dist = ((x - self.volcano_x).powi(2) + (y - self.volcano_y).powi(2)).sqrt();
         (1.0 - dist / self.volcano_heat_range).clamp(0.0, 1.0)
     }
 
+    /// 战力计算公式
     pub fn combat_power(&self, energy: f64, warmth: f64, speed_norm: f64, ally_total_energy: f64) -> f64 {
         let energy_factor = energy / 100.0;
         let temp_factor = 1.0 + self.combat_temp_weight * warmth;
@@ -125,62 +154,58 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            initial_scale: 0.6,  // 初始世界缩放比例
-            initial_speed: 2.0,  // 初始倍速，加速演化
+            initial_scale: 0.6,
+            initial_speed: 2.0,
 
-            min_creatures: 20,  // 低于此值自动补充
+            min_creatures: 20,
 
-            initial_energy: 50.0,  // 初始能量更高，确保能繁殖一次
+            initial_energy: 50.0,
 
             volcano_x: 0.0,
             volcano_y: 0.0,
-            volcano_interval: 30.0,         // 喷发间隔（秒）
-            volcano_radius: 600.0,          // 喷射半径（内密外疏）
-            volcano_count: 60,              // 每次粒子数
-            volcano_particle_energy: 30.0,  // 单粒子能量
-            meteorite_interval: 12.0,       // 陨石间隔（秒）
-            meteorite_count: 18,            // 每颗粒子数
-            meteorite_length: 180.0,        // 散布线段长度
+            volcano_interval: 30.0,
+            volcano_radius: 600.0,
+            volcano_count: 60,
+            volcano_particle_energy: 30.0,
+            meteorite_interval: 12.0,
+            meteorite_count: 18,
+            meteorite_length: 180.0,
             meteorite_particle_energy: 40.0,
-            particle_decay_rate: 0.005,     // 每秒 energy *= (1 - rate)
+            particle_decay_rate: 0.005,
 
-            base_metabolism: 0.07,  // 基础消耗
-            age_metabolism_factor: 0.04,  // 年龄倍率：age=33s时消耗×2.0，age=100s时消耗×4.0
-            move_cost: 0.001,  // 移动消耗极低，移动比待机划算
-            heat_dissipation_coefficient: 0.002,  // 体温逸散系数（降低，避免过早冻死）
-            feed_efficiency: 0.5,  // 喂食效率50%（无体型限制）
-            reproduce_threshold: 60.0,  // 繁殖阈值
-            reproduce_energy_ratio: 0.3,  // 子代获得能量
+            base_metabolism: 0.07,
+            age_metabolism_factor: 0.04,
+            move_cost: 0.002,
+            heat_dissipation_coefficient: 0.002,
+            feed_efficiency: 0.5,
+            reproduce_threshold: 60.0,
+            reproduce_energy_ratio: 0.3,
 
-            vision_range: 150.0,  // 视觉半径
-            contact_range: 15.0,  // 接触判定距离
+            vision_range: 150.0,
+            contact_range: 15.0,
 
-            mutation_rate: 0.15,  // 提高变异率，加速结构探索
-            initial_connections_min: 6,  // 更多初始连接，增加有用组合概率
+            mutation_rate: 0.15,
+            initial_connections_min: 6,
             initial_connections_max: 12,
-            species_similarity_threshold: 0.9,  // 基因相似度 >= 视为同一种族
+            species_similarity_threshold: 0.9,
 
-            combat_temp_weight: 0.5,   // 暖体温最多+50%战力
-            combat_speed_weight: 0.3,  // 满速最多+30%战力
-            combat_ally_weight: 0.8,   // 同族满援最多+80%战力
-            combat_ally_range: 50.0,   // 同族援助感应范围
-            
-            dominant_min_age: 500.0,  // 优势种检测：最老成员需达到年龄（秒）
+            combat_temp_weight: 0.5,
+            combat_speed_weight: 0.3,
+            combat_ally_weight: 0.8,
+            combat_ally_range: 50.0,
 
-            // 器官消耗
+            dominant_min_age: 500.0,
+
             organ_nose_cost: 0.005,
             organ_eye_cost: 0.008,
             organ_mouth_cost: 0.003,
 
-            // 环境温度
             volcano_heat_range: 800.0,
             heat_metabolism_factor: 0.5,
             cold_loss_factor: 1.0,
 
-            // 痕迹点
-            trail_decay_rate: 0.03,
+            trail_decay_rate: 0.12,
 
-            // 鼻子
             nose_half_angle: std::f64::consts::PI / 6.0,
         }
     }

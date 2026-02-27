@@ -24,6 +24,7 @@ pub struct StatsPanel {
     selected_template: usize,
     save_dialog_open: bool,
     save_name: String,
+    pub settings_open: bool,
 }
 
 /// 排名数据
@@ -80,6 +81,7 @@ impl StatsPanel {
             selected_template: 0,
             save_dialog_open: false,
             save_name: String::new(),
+            settings_open: false,
         }
     }
 
@@ -120,10 +122,17 @@ impl StatsPanel {
         self.selected_template = 0;
     }
 
-    pub fn render(&mut self, ui: &mut Ui, fps: f64, speed: &mut f64, paused: &mut bool, store: &Store) -> PanelAction {
+    pub fn render(&mut self, ui: &mut Ui, fps: f64, speed: &mut f64, paused: &mut bool, store: &Store, _config: &mut Config) -> PanelAction {
         let mut action = PanelAction::default();
 
-        ui.heading("Cell World");
+        ui.horizontal(|ui| {
+            ui.heading("Cell World");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("⚙").clicked() {
+                    self.settings_open = !self.settings_open;
+                }
+            });
+        });
         ui.separator();
 
         // FPS 和 时间
@@ -136,11 +145,11 @@ impl StatsPanel {
         // 速度控制
         ui.horizontal(|ui| {
             if ui.button("⏪").clicked() {
-                *speed = (*speed - 0.2).max(0.1);
+                *speed = (*speed - 0.5).max(0.1);
             }
             ui.add(egui::Slider::new(speed, 0.1..=10.0).logarithmic(true));
             if ui.button("⏩").clicked() {
-                *speed = (*speed + 0.2).min(10.0);
+                *speed = (*speed + 0.5).min(10.0);
             }
             if ui.button(if *paused { "▶" } else { "⏸" }).clicked() {
                 *paused = !*paused;

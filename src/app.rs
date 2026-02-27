@@ -62,7 +62,7 @@ impl CellWorldApp {
             .push("chinese".to_owned());
         cc.egui_ctx.set_fonts(fonts);
 
-        let config = Config::default();
+        let config = Config::load();
         let world = World::new(&config);
         let store = Store::new();
         let now = std::time::Instant::now();
@@ -257,6 +257,123 @@ impl CellWorldApp {
     }
 }
 
+/// 配置项辅助：f64 拖拽值
+fn config_drag_f64(ui: &mut egui::Ui, label: &str, value: &mut f64, speed: f64, range: std::ops::RangeInclusive<f64>) -> bool {
+    ui.horizontal(|ui| {
+        ui.label(label);
+        ui.add(egui::DragValue::new(value).speed(speed).range(range)).changed()
+    }).inner
+}
+
+/// 配置项辅助：usize 拖拽值
+fn config_drag_usize(ui: &mut egui::Ui, label: &str, value: &mut usize, range: std::ops::RangeInclusive<usize>) -> bool {
+    ui.horizontal(|ui| {
+        ui.label(label);
+        ui.add(egui::DragValue::new(value).speed(0.1).range(range)).changed()
+    }).inner
+}
+
+impl CellWorldApp {
+    fn render_settings_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.panel.settings_open;
+        let screen = ctx.screen_rect();
+        let win_height = 500.0;
+        let win_width = 350.0;
+        let center_x = (screen.width() - win_width) / 2.0;
+        let center_y = (screen.height() - win_height) / 2.0;
+        egui::Window::new("设置")
+            .open(&mut open)
+            .default_width(win_width)
+            .fixed_size([win_width, win_height])
+            .default_pos([center_x, center_y])
+            .resizable(false)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let c = &mut self.config;
+                    let mut changed = false;
+
+                    ui.collapsing("能量源", |ui| {
+                        changed |= config_drag_f64(ui, "火山间隔(秒)", &mut c.volcano_interval, 0.1, 5.0..=120.0);
+                        changed |= config_drag_f64(ui, "火山半径", &mut c.volcano_radius, 1.0, 100.0..=2000.0);
+                        changed |= config_drag_usize(ui, "火山粒子数", &mut c.volcano_count, 10..=200);
+                        changed |= config_drag_f64(ui, "火山粒子能量", &mut c.volcano_particle_energy, 0.1, 5.0..=100.0);
+                        changed |= config_drag_f64(ui, "陨石间隔(秒)", &mut c.meteorite_interval, 0.1, 2.0..=60.0);
+                        changed |= config_drag_usize(ui, "陨石粒子数", &mut c.meteorite_count, 5..=100);
+                        changed |= config_drag_f64(ui, "陨石长度", &mut c.meteorite_length, 1.0, 50.0..=500.0);
+                        changed |= config_drag_f64(ui, "陨石粒子能量", &mut c.meteorite_particle_energy, 0.1, 5.0..=100.0);
+                        changed |= config_drag_f64(ui, "粒子衰减率", &mut c.particle_decay_rate, 0.001, 0.001..=0.1);
+                    });
+
+                    ui.collapsing("代谢", |ui| {
+                        changed |= config_drag_f64(ui, "基础代谢", &mut c.base_metabolism, 0.001, 0.01..=0.5);
+                        changed |= config_drag_f64(ui, "年龄代谢倍率", &mut c.age_metabolism_factor, 0.001, 0.0..=0.2);
+                        changed |= config_drag_f64(ui, "移动消耗", &mut c.move_cost, 0.0001, 0.0001..=0.01);
+                        changed |= config_drag_f64(ui, "体温逸散系数", &mut c.heat_dissipation_coefficient, 0.0001, 0.0..=0.01);
+                        changed |= config_drag_f64(ui, "喂食效率", &mut c.feed_efficiency, 0.01, 0.1..=1.0);
+                    });
+
+                    ui.collapsing("繁殖", |ui| {
+                        changed |= config_drag_f64(ui, "繁殖阈值能量", &mut c.reproduce_threshold, 1.0, 20.0..=200.0);
+                        changed |= config_drag_f64(ui, "子代能量比例", &mut c.reproduce_energy_ratio, 0.01, 0.1..=0.5);
+                        changed |= config_drag_f64(ui, "初始能量", &mut c.initial_energy, 1.0, 10.0..=200.0);
+                        changed |= config_drag_usize(ui, "最小生物数", &mut c.min_creatures, 5..=100);
+                    });
+
+                    ui.collapsing("感知", |ui| {
+                        changed |= config_drag_f64(ui, "视觉半径", &mut c.vision_range, 1.0, 50.0..=500.0);
+                        changed |= config_drag_f64(ui, "接触距离", &mut c.contact_range, 0.5, 5.0..=50.0);
+                        changed |= config_drag_f64(ui, "鼻子半角(弧度)", &mut c.nose_half_angle, 0.01, 0.1..=1.5);
+                    });
+
+                    ui.collapsing("进化", |ui| {
+                        changed |= config_drag_f64(ui, "变异率", &mut c.mutation_rate, 0.01, 0.01..=0.5);
+                        changed |= config_drag_usize(ui, "初始连接数min", &mut c.initial_connections_min, 1..=20);
+                        changed |= config_drag_usize(ui, "初始连接数max", &mut c.initial_connections_max, 2..=30);
+                        changed |= config_drag_f64(ui, "种族相似度阈值", &mut c.species_similarity_threshold, 0.01, 0.5..=1.0);
+                    });
+
+                    ui.collapsing("战力", |ui| {
+                        changed |= config_drag_f64(ui, "体温权重", &mut c.combat_temp_weight, 0.01, 0.0..=2.0);
+                        changed |= config_drag_f64(ui, "速度权重", &mut c.combat_speed_weight, 0.01, 0.0..=2.0);
+                        changed |= config_drag_f64(ui, "同族援助权重", &mut c.combat_ally_weight, 0.01, 0.0..=2.0);
+                        changed |= config_drag_f64(ui, "同族援助范围", &mut c.combat_ally_range, 1.0, 10.0..=200.0);
+                    });
+
+                    ui.collapsing("器官消耗", |ui| {
+                        changed |= config_drag_f64(ui, "鼻子消耗(/秒)", &mut c.organ_nose_cost, 0.001, 0.0..=0.05);
+                        changed |= config_drag_f64(ui, "双眼消耗(/秒)", &mut c.organ_eye_cost, 0.001, 0.0..=0.05);
+                        changed |= config_drag_f64(ui, "嘴巴消耗(/秒)", &mut c.organ_mouth_cost, 0.001, 0.0..=0.05);
+                    });
+
+                    ui.collapsing("环境温度", |ui| {
+                        changed |= config_drag_f64(ui, "热辐射范围", &mut c.volcano_heat_range, 1.0, 200.0..=2000.0);
+                        changed |= config_drag_f64(ui, "热代谢加成", &mut c.heat_metabolism_factor, 0.01, 0.0..=2.0);
+                        changed |= config_drag_f64(ui, "冷流失加成", &mut c.cold_loss_factor, 0.01, 0.0..=3.0);
+                    });
+
+                    ui.collapsing("痕迹点", |ui| {
+                        changed |= config_drag_f64(ui, "衰减率(/秒)", &mut c.trail_decay_rate, 0.01, 0.01..=0.5);
+                    });
+
+                    ui.collapsing("其他", |ui| {
+                        changed |= config_drag_f64(ui, "优势种最低年龄", &mut c.dominant_min_age, 10.0, 100.0..=2000.0);
+                    });
+
+                    ui.separator();
+                    if ui.button("重置默认").clicked() {
+                        *c = Config::default();
+                        changed = true;
+                    }
+
+                    if changed {
+                        c.save();
+                    }
+                });
+            });
+        self.panel.settings_open = open;
+    }
+}
+
 impl eframe::App for CellWorldApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // 计算 delta time
@@ -304,7 +421,7 @@ impl eframe::App for CellWorldApp {
         egui::SidePanel::right("panel")
             .min_width(250.0)
             .show(ctx, |ui| {
-                panel_action = self.panel.render(ui, self.fps, &mut self.speed, &mut self.paused, &self.store);
+                panel_action = self.panel.render(ui, self.fps, &mut self.speed, &mut self.paused, &self.store, &mut self.config);
 
                 // 显示选中信息
                 selection_action = self.panel.render_selection(ui, &self.selection, &self.world);
@@ -364,6 +481,11 @@ impl eframe::App for CellWorldApp {
         if let Some(name) = panel_action.delete_template {
             self.store.delete(&name);
             self.panel.reset_template_selection();
+        }
+
+        // 设置窗口
+        if self.panel.settings_open {
+            self.render_settings_window(ctx);
         }
 
         // 主画布

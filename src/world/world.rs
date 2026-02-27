@@ -40,11 +40,15 @@ pub struct World {
     next_creature_id: u64,
     next_energy_id: u64,
 
-    // 视窗范围（世界坐标）
+    // 视窗范围（世界坐标，动态跟随）
     viewport_min_x: f64,
     viewport_min_y: f64,
     viewport_max_x: f64,
     viewport_max_y: f64,
+
+    // 初始世界范围（固定，用于陨石坠落）
+    pub initial_bounds: (f64, f64, f64, f64),  // (min_x, min_y, max_x, max_y)
+    initial_bounds_set: bool,
 
     // 性能统计
     pub perf_stats: PerfStats,
@@ -69,6 +73,9 @@ pub struct World {
     creature_query_buf: Vec<usize>,
     energy_query_buf: Vec<usize>,
     trail_query_buf: Vec<usize>,
+
+    // 痕迹点生成频率控制（每四帧生成一次）
+    trail_emit_counter: u8,
 }
 
 /// 种族缓存（祖先追溯模型）
@@ -105,6 +112,9 @@ impl World {
             viewport_min_y: -300.0,
             viewport_max_x: 400.0,
             viewport_max_y: 300.0,
+            // 初始世界范围（首帧 set_viewport 时锁定）
+            initial_bounds: (-400.0, -300.0, 400.0, 300.0),
+            initial_bounds_set: false,
             perf_stats: PerfStats::default(),
             similarity_cache: RefCell::new(FxHashMap::default()),
             cache_cleanup_timer: 0.0,
@@ -117,6 +127,7 @@ impl World {
             creature_query_buf: Vec::new(),
             energy_query_buf: Vec::new(),
             trail_query_buf: Vec::new(),
+            trail_emit_counter: 0,
         };
         // 初始火山喷发一次，提供起始能量
         world.volcano_erupt(config);
@@ -140,6 +151,11 @@ impl World {
 
     /// 设置视窗范围
     pub fn set_viewport(&mut self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) {
+        // 首次调用时锁定初始世界范围
+        if !self.initial_bounds_set {
+            self.initial_bounds = (min_x, min_y, max_x, max_y);
+            self.initial_bounds_set = true;
+        }
         self.viewport_min_x = min_x;
         self.viewport_min_y = min_y;
         self.viewport_max_x = max_x;
@@ -149,6 +165,7 @@ impl World {
     /// 更新世界
     pub fn update(&mut self, dt: f64, config: &Config) {
         self.time += dt;
+        self.trail_emit_counter = self.trail_emit_counter.wrapping_add(1);
 
         // 生成能量粒子
         self.spawn_energy(dt, config);
@@ -272,8 +289,9 @@ impl World {
 
     fn meteorite_fall(&mut self, config: &Config) {
         let mut rng = rand::thread_rng();
-        let cx = rng.gen_range(self.viewport_min_x..self.viewport_max_x);
-        let cy = rng.gen_range(self.viewport_min_y..self.viewport_max_y);
+        let (ib_min_x, ib_min_y, ib_max_x, ib_max_y) = self.initial_bounds;
+        let cx = rng.gen_range(ib_min_x..ib_max_x);
+        let cy = rng.gen_range(ib_min_y..ib_max_y);
         let angle = rng.gen_range(0.0..std::f64::consts::TAU);
         let dx = angle.cos();
         let dy = angle.sin();
@@ -355,7 +373,7 @@ impl World {
 
             // 体温逸散：系数 × 冷却时长 × 周长 × (1 + (1 - ambient) × cold_loss_factor)
             let cold_duration = (self.time - self.creatures[i].last_warm_time).max(0.0);
-            let circumference = (self.creatures[i].energy.max(0.0) * 0.32).sqrt() * std::f64::consts::TAU;
+            let circumference = (self.creatures[i].energy.max(0.0) * 1.28).cbrt() * std::f64::consts::TAU;
             let cold_env_factor = 1.0 + (1.0 - ambient) * config.cold_loss_factor;
             let heat_cost = config.heat_dissipation_coefficient * cold_duration * circumference * cold_env_factor * dt;
             self.creatures[i].energy -= heat_cost;
@@ -624,9 +642,9 @@ impl World {
         // 转向消耗：与角位移成正比
         self.creatures[creature_idx].energy -= turn_amount.abs() * config.move_cost;
 
-        let actual_speed = speed.abs() * 50.0;
+        let actual_speed = speed.abs() * 25.0;
         self.creatures[creature_idx].current_speed = actual_speed;
-        if actual_speed > 0.1 {
+        if actual_speed > 0.05 {
             let heading = self.creatures[creature_idx].heading;
             let dx = heading.cos() * actual_speed * dt;
             let dy = heading.sin() * actual_speed * dt;
@@ -640,10 +658,12 @@ impl World {
             self.creatures[creature_idx].energy -= move_cost;
             self.action_counts[0] += 1; // 移动
 
-            // 生成痕迹点（能量守恒：移动消耗转化为痕迹）
-            if move_cost > 0.001 {
+            // 生成痕迹点（能量守恒：移动消耗转化为痕迹，每两帧生成一次）
+            if self.trail_emit_counter % 16 == 0 {
                 let genome_hash = self.creatures[creature_idx].genome_hash;
-                self.trail_points.push(TrailPoint::new(old_x, old_y, move_cost, genome_hash));
+                let creator_id = self.creatures[creature_idx].id;
+                let creature_radius = (self.creatures[creature_idx].energy * 1.28).cbrt();
+                self.trail_points.push(TrailPoint::new(old_x, old_y, move_cost, genome_hash, creator_id, creature_radius));
             }
         }
 
@@ -659,22 +679,30 @@ impl World {
     }
 
     /// 嘴动作：接触食物自动吸收，对生物根据mouth值咬或喂
+    /// 所有能量交互以嘴巴位置为检测中心（嘴巴碰到才触发）
     /// 无嘴生物：不能吃/咬/喂（但可以被喂 → 寄生可能）
     fn action_mouth(&mut self, idx: usize, mouth: f64, config: &Config) {
         let has_mouth = self.creatures[idx].genome.organ_genes.mouth;
         if !has_mouth { return; }
 
-        let cx = self.creatures[idx].x;
-        let cy = self.creatures[idx].y;
+        // 嘴巴位置 = 生物中心 + heading方向 × 半径 × 1.05
+        let body_radius = (self.creatures[idx].energy * 1.28).cbrt();
+        let heading = self.creatures[idx].heading;
+        let mx = self.creatures[idx].x + heading.cos() * body_radius * 1.05;
+        let my = self.creatures[idx].y + heading.sin() * body_radius * 1.05;
+        // 嘴巴接触范围 = 嘴巴弧度覆盖的大致半径
+        let mouth_range = body_radius * 0.5;
+        // 空间查询范围要稍大以确保能查到目标
+        let query_range = mouth_range + config.contact_range;
 
         // 接触食物自动吸收
-        let nearby_energy = self.energy_grid.query(cx, cy, config.contact_range);
+        let nearby_energy = self.energy_grid.query(mx, my, query_range);
         for &particle_idx in &nearby_energy {
             if self.energy_particles[particle_idx].alive {
                 let px = self.energy_particles[particle_idx].x;
                 let py = self.energy_particles[particle_idx].y;
-                let dist = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
-                if dist < config.contact_range {
+                let dist = ((px - mx).powi(2) + (py - my).powi(2)).sqrt();
+                if dist < mouth_range {
                     let energy = self.energy_particles[particle_idx].consume();
                     self.creatures[idx].energy += energy;
                     // 感温：吃到食物（回暖20%）
@@ -686,19 +714,19 @@ impl World {
             }
         }
 
-        // 接触痕迹点自动吸收（需有嘴）
-        if self.creatures[idx].genome.organ_genes.mouth {
-            let nearby_trails = self.trail_grid.query(cx, cy, config.contact_range);
-            for &trail_idx in &nearby_trails {
-                if self.trail_points[trail_idx].alive {
-                    let tx = self.trail_points[trail_idx].x;
-                    let ty = self.trail_points[trail_idx].y;
-                    let dist = ((tx - cx).powi(2) + (ty - cy).powi(2)).sqrt();
-                    if dist < config.contact_range {
-                        let energy = self.trail_points[trail_idx].consume();
-                        self.creatures[idx].energy += energy;
-                        break; // 每帧吸收一个
-                    }
+        // 接触痕迹点自动吸收（痕迹点存在超过2秒后才可被吸收，同族痕迹不能吃）
+        let my_genome_hash = self.creatures[idx].genome_hash;
+        let nearby_trails = self.trail_grid.query(mx, my, query_range);
+        for &trail_idx in &nearby_trails {
+            let trail = &self.trail_points[trail_idx];
+            if trail.alive && trail.age > 2.0 && trail.genome_hash != my_genome_hash {
+                let tx = trail.x;
+                let ty = trail.y;
+                let dist = ((tx - mx).powi(2) + (ty - my).powi(2)).sqrt();
+                if dist < mouth_range {
+                    let energy = self.trail_points[trail_idx].consume();
+                    self.creatures[idx].energy += energy;
+                    break; // 每帧吸收一个
                 }
             }
         }
@@ -708,15 +736,17 @@ impl World {
             return;
         }
 
-        let nearby_creatures = self.creature_grid.query(cx, cy, config.contact_range);
+        let nearby_creatures = self.creature_grid.query(mx, my, query_range);
         for &other_idx in &nearby_creatures {
             if other_idx == idx || !self.creatures[other_idx].alive {
                 continue;
             }
             let ox = self.creatures[other_idx].x;
             let oy = self.creatures[other_idx].y;
-            let dist = ((ox - cx).powi(2) + (oy - cy).powi(2)).sqrt();
-            if dist >= config.contact_range {
+            let other_radius = (self.creatures[other_idx].energy * 1.28).cbrt();
+            // 嘴巴碰到对方身体：距离 < 嘴巴范围 + 对方半径
+            let dist = ((ox - mx).powi(2) + (oy - my).powi(2)).sqrt();
+            if dist >= mouth_range + other_radius {
                 continue;
             }
 
@@ -892,6 +922,18 @@ impl World {
                 min: self.death_ages[0],
                 max: self.death_ages[n - 1],
             };
+        }
+
+        // 死亡生物的痕迹点也消失
+        for creature in &self.creatures {
+            if !creature.alive {
+                let dead_id = creature.id;
+                for trail in &mut self.trail_points {
+                    if trail.alive && trail.creator_id == dead_id {
+                        trail.alive = false;
+                    }
+                }
+            }
         }
 
         self.creatures.retain(|c| c.alive);

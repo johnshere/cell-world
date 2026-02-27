@@ -113,11 +113,12 @@ impl WorldCanvas {
             if !trail.alive { continue; }
             let pos = self.world_to_screen(Pos2::new(trail.x as f32, trail.y as f32), rect);
             if rect.contains(pos) {
-                let energy_ratio = (trail.energy / trail.initial_energy).clamp(0.0, 1.0) as f32;
-                let alpha = (60.0 * energy_ratio) as u8;
+                // 透明度和半径都随时间线性衰减（decay_rate=0.12，约38秒消失）
+                let age_ratio = (1.0 - trail.age / 38.0).max(0.0) as f32;
+                let alpha = (80.0 * age_ratio) as u8;
                 let color = species_to_color(trail.genome_hash);
                 let trail_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
-                let radius = 0.5 * self.scale;
+                let radius = (trail.visual_radius as f32 * 0.2 * age_ratio * self.scale).max(0.3 * self.scale);
                 painter.circle_filled(pos, radius, trail_color);
             }
         }
@@ -133,6 +134,19 @@ impl WorldCanvas {
                     Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 100, 50, 20)),
                 );
             }
+        }
+
+        // 绘制初始世界范围矩形
+        {
+            let (ib_min_x, ib_min_y, ib_max_x, ib_max_y) = world.initial_bounds;
+            let top_left = self.world_to_screen(Pos2::new(ib_min_x as f32, ib_min_y as f32), rect);
+            let bottom_right = self.world_to_screen(Pos2::new(ib_max_x as f32, ib_max_y as f32), rect);
+            let bounds_rect = Rect::from_min_max(top_left, bottom_right);
+            painter.rect_stroke(
+                bounds_rect,
+                0.0,
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 25)),
+            );
         }
 
         // 绘制火山标记（原点 0,0）
@@ -158,20 +172,38 @@ impl WorldCanvas {
                 let species_hash = ctx.creature_species.get(&idx).copied().unwrap_or(0);
                 let color = species_to_color(species_hash);
 
-                let radius = ((creature.energy as f32 * 0.32).sqrt()).clamp(1.5, 8.0) * self.scale;
+                let radius = ((creature.energy as f32 * 1.28).cbrt()).clamp(1.5, 8.0) * self.scale;
                 painter.circle_filled(pos, radius, color);
 
-                // 头部方向圆弧（五分之一圆，指示朝向）
                 let heading = creature.heading as f32;
-                draw_heading_arc(&painter, pos, radius + 2.0, heading, Stroke::new(1.0, color));
 
                 // 器官绘制（缩放足够大时）
                 if self.scale > 0.3 {
                     let organs = &creature.genome.organ_genes;
 
+                    // 嘴巴（弧线，粉红色，以生物中心为圆心，从1.1倍半径向外加厚）
+                    // 先绘制嘴巴，使其图层在鼻子下面
+                    if organs.mouth {
+                        let mouth_stroke = radius * 0.25;
+                        let mouth_arc_r = radius * 1.05 + mouth_stroke * 0.5; // stroke中线，内边缘在1.05倍半径
+                        let half_arc = 0.4;
+                        let segments = 8;
+                        let points: Vec<Pos2> = (0..=segments)
+                            .map(|i| {
+                                let t = i as f32 / segments as f32;
+                                let a = heading - half_arc + t * half_arc * 2.0;
+                                Pos2::new(
+                                    pos.x + mouth_arc_r * a.cos(),
+                                    pos.y + mouth_arc_r * a.sin(),
+                                )
+                            })
+                            .collect();
+                        painter.add(PathShape::line(points, Stroke::new(mouth_stroke, Color32::from_rgb(255, 100, 100))));
+                    }
+
                     // 鼻子（正前方线段，淡蓝色）
                     if organs.nose {
-                        let nose_len = (radius * 0.8).max(2.0);
+                        let nose_len = radius * 0.45;
                         let nose_start = Pos2::new(
                             pos.x + radius * heading.cos(),
                             pos.y + radius * heading.sin(),
@@ -182,7 +214,7 @@ impl WorldCanvas {
                         );
                         painter.line_segment(
                             [nose_start, nose_end],
-                            Stroke::new(1.0, Color32::from_rgb(200, 200, 255)),
+                            Stroke::new(radius * 0.15, Color32::from_rgb(200, 200, 255)),
                         );
                     }
 
@@ -200,29 +232,6 @@ impl WorldCanvas {
                             painter.circle_filled(eye_pos, eye_r, Color32::WHITE);
                             painter.circle_filled(eye_pos, pupil_r, Color32::BLACK);
                         }
-                    }
-
-                    // 嘴巴（小弧线，粉红色）
-                    if organs.mouth {
-                        let mouth_r = (radius * 0.4).max(1.5);
-                        let mouth_angle = heading + std::f32::consts::PI * 0.05; // 略偏下
-                        let mouth_center = Pos2::new(
-                            pos.x + (radius * 0.7) * mouth_angle.cos(),
-                            pos.y + (radius * 0.7) * mouth_angle.sin(),
-                        );
-                        let half_arc = 0.4;
-                        let segments = 6;
-                        let points: Vec<Pos2> = (0..=segments)
-                            .map(|i| {
-                                let t = i as f32 / segments as f32;
-                                let a = heading - half_arc + t * half_arc * 2.0;
-                                Pos2::new(
-                                    mouth_center.x + mouth_r * a.cos(),
-                                    mouth_center.y + mouth_r * a.sin(),
-                                )
-                            })
-                            .collect();
-                        painter.add(PathShape::line(points, Stroke::new(0.8, Color32::from_rgb(255, 100, 100))));
                     }
                 }
 
@@ -245,7 +254,7 @@ impl WorldCanvas {
                 continue;
             }
             let pos = self.world_to_screen(Pos2::new(creature.x as f32, creature.y as f32), rect);
-            let radius = ((creature.energy as f32 * 0.32).sqrt()).clamp(1.5, 8.0) * self.scale;
+            let radius = ((creature.energy as f32 * 1.28).cbrt()).clamp(1.5, 8.0) * self.scale;
             let dist = click_pos.distance(pos);
             if dist <= radius + 5.0 {
                 return Selection::Creature(creature.id);
@@ -295,9 +304,12 @@ impl WorldCanvas {
             self.offset += delta;
         }
 
-        // 滚轮缩放（以鼠标位置为中心）
+        // 滚轮缩放（以鼠标位置为中心，仅当鼠标在画布区域且无其他窗口遮挡时）
         let scroll_delta = ui.input(|i| i.raw_scroll_delta.y);
-        if scroll_delta != 0.0 {
+        let pointer_over_canvas = ui.input(|i| {
+            i.pointer.hover_pos().map_or(false, |p| rect.contains(p))
+        }) && !ui.ctx().is_pointer_over_area();
+        if scroll_delta != 0.0 && pointer_over_canvas {
             if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
                 // 鼠标相对于画布的位置
                 let mouse_in_canvas = mouse_pos - rect.min;
@@ -368,27 +380,6 @@ impl Default for WorldCanvas {
     fn default() -> Self {
         Self::new(0.6)
     }
-}
-
-/// 绘制头部方向圆弧（五分之一圆，以 heading 为中心）
-fn draw_heading_arc(painter: &egui::Painter, center: Pos2, radius: f32, heading: f32, stroke: Stroke) {
-    let half_arc = std::f32::consts::PI * 0.2;  // 36° 半角
-    let start_angle = heading - half_arc;
-    let end_angle = heading + half_arc;
-
-    let segments = 12;
-    let points: Vec<Pos2> = (0..=segments)
-        .map(|i| {
-            let t = i as f32 / segments as f32;
-            let angle = start_angle + t * (end_angle - start_angle);
-            Pos2::new(
-                center.x + radius * angle.cos(),
-                center.y + radius * angle.sin(),
-            )
-        })
-        .collect();
-
-    painter.add(PathShape::line(points, stroke));
 }
 
 /// HSL 转 RGB
