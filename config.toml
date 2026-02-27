@@ -1,0 +1,108 @@
+# 初始模拟速度
+initial_speed = 3.0
+# 最小生物数量（低于此值自动补充）
+min_creatures = 20
+# 初始能量
+initial_energy = 50.0
+# 初始世界缩放比例
+initial_scale = 0.6000000238418579
+
+# === 火山 ===
+# 火山坐标 X
+volcano_x = 0.0
+# 火山坐标 Y
+volcano_y = 0.0
+# 火山喷发间隔（秒）
+volcano_interval = 50.0
+# 火山喷射半径
+volcano_radius = 600.0
+# 每次喷发粒子数
+volcano_count = 60
+# 火山粒子能量
+volcano_particle_energy = 60.0
+
+# === 陨石 ===
+# 陨石降落间隔（秒）
+meteorite_interval = 24.0
+# 每颗陨石粒子数
+meteorite_count = 18
+# 陨石散布线段长度
+meteorite_length = 180.0
+# 陨石粒子能量
+meteorite_particle_energy = 80.0
+
+# 粒子能量衰减率（每秒 energy *= (1 - rate)）
+particle_decay_rate = 0.005
+
+# === 代谢 ===
+# 基础代谢率（每秒固定消耗）
+base_metabolism = 0.07
+# 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
+age_metabolism_factor = 0.04
+# 移动消耗（每单位距离）
+move_cost = 0.002
+
+# === 繁殖 ===
+# 繁殖所需最低能量
+reproduce_threshold = 60.0
+# 子代获得的能量比例
+reproduce_energy_ratio = 0.3
+
+# === 感知 ===
+# 视觉半径（眼睛能看到的最大距离）
+vision_range = 150.0
+# 接触判定距离
+contact_range = 15.0
+
+# === 进化 ===
+# 变异率（所有变异逻辑共用）
+mutation_rate = 0.15
+# 初始连接数最小值
+initial_connections_min = 6
+# 初始连接数最大值
+initial_connections_max = 12
+# 种族相似度阈值（高于此值视为同一种族）
+species_similarity_threshold = 0.9
+
+# === 体温 ===
+# 体温逸散系数（系数 × 冷却时长 × 周长 = 每秒额外消耗）
+heat_dissipation_coefficient = 0.002
+# 喂食效率（固定比例）
+feed_efficiency = 0.5
+
+# === 战力 ===
+# 战力公式：体温权重（越暖越强）
+combat_temp_weight = 0.5
+# 战力公式：速度权重（越快越强）
+combat_speed_weight = 0.3
+# 战力公式：同族援助权重（附近同族越多越强）
+combat_ally_weight = 0.8
+# 战力公式：同族援助范围
+combat_ally_range = 50.0
+
+# 优势种检测：种群最老成员最低年龄
+dominant_min_age = 500.0
+
+# === 器官消耗 ===
+# 鼻子消耗（/秒）
+organ_nose_cost = 0.005
+# 双眼消耗（/秒，总计）
+organ_eye_cost = 0.008
+# 嘴巴消耗（/秒）
+organ_mouth_cost = 0.003
+
+# === 环境温度 ===
+# 火山热辐射范围
+volcano_heat_range = 800.0
+# 火山口代谢加成系数（+50%）
+heat_metabolism_factor = 0.5
+# 远离火山温度流失加成系数（+100%）
+cold_loss_factor = 1.0
+
+# === 痕迹点 ===
+# 痕迹点能量衰减率（/秒）
+trail_decay_rate = 0.12
+
+# === 鼻子 ===
+# 鼻子半角（弧度，PI/6 ≈ 30°）
+nose_half_angle = 0.5235987755982988

@@ -128,7 +128,7 @@ impl StatsPanel {
         ui.horizontal(|ui| {
             ui.heading("Cell World");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("⚙").clicked() {
+                if ui.button("⚙").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     self.settings_open = !self.settings_open;
                 }
             });
@@ -144,14 +144,14 @@ impl StatsPanel {
 
         // 速度控制
         ui.horizontal(|ui| {
-            if ui.button("⏪").clicked() {
+            if ui.button("⏪").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 *speed = (*speed - 0.5).max(0.1);
             }
             ui.add(egui::Slider::new(speed, 0.1..=10.0).logarithmic(true));
-            if ui.button("⏩").clicked() {
+            if ui.button("⏩").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 *speed = (*speed + 0.5).min(10.0);
             }
-            if ui.button(if *paused { "▶" } else { "⏸" }).clicked() {
+            if ui.button(if *paused { "▶" } else { "⏸" }).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 *paused = !*paused;
             }
         });
@@ -176,7 +176,7 @@ impl StatsPanel {
                     }
                 });
 
-            if ui.button("+").clicked() {
+            if ui.button("+").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 if self.selected_template == 0 {
                     action.spawn = Some(None);
                 } else if let Some(name) = template_names.get(self.selected_template - 1) {
@@ -185,7 +185,7 @@ impl StatsPanel {
             }
 
             if self.selected_template > 0 {
-                if ui.button("-").clicked() {
+                if ui.button("-").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     if let Some(name) = template_names.get(self.selected_template - 1) {
                         action.delete_template = Some(name.to_string());
                     }
@@ -273,10 +273,10 @@ impl StatsPanel {
                     ui.label("选中生物");
 
                     ui.horizontal(|ui| {
-                        if ui.button("🗑 删除").clicked() {
+                        if ui.button("🗑 删除").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                             action.delete_selected = true;
                         }
-                        if ui.button("💾 保存").clicked() {
+                        if ui.button("💾 保存").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                             self.save_dialog_open = true;
                             self.save_name = format!("生物_{:08X}", creature.genome_hash);
                         }
@@ -288,11 +288,11 @@ impl StatsPanel {
                             ui.text_edit_singleline(&mut self.save_name);
                         });
                         ui.horizontal(|ui| {
-                            if ui.button("确认保存").clicked() {
+                            if ui.button("确认保存").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                                 action.save_selected = Some(self.save_name.clone());
                                 self.save_dialog_open = false;
                             }
-                            if ui.button("取消").clicked() {
+                            if ui.button("取消").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                                 self.save_dialog_open = false;
                             }
                         });

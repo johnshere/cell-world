@@ -129,8 +129,10 @@ impl World {
             trail_query_buf: Vec::new(),
             trail_emit_counter: 0,
         };
-        // 初始火山喷发一次，提供起始能量
-        world.volcano_erupt(config);
+        // 初始连喷三波，提供充足起始能量
+        for _ in 0..3 {
+            world.volcano_erupt(config);
+        }
 
         for _ in 0..config.min_creatures {
             world.spawn_creature(config);

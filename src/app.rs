@@ -360,7 +360,7 @@ impl CellWorldApp {
                     });
 
                     ui.separator();
-                    if ui.button("重置默认").clicked() {
+                    if ui.button("重置默认").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                         *c = Config::default();
                         changed = true;
                     }
@@ -418,6 +418,7 @@ impl eframe::App for CellWorldApp {
         let mut panel_action = PanelAction::default();
         let mut selection_action = PanelAction::default();
 
+        let old_speed = self.speed;
         egui::SidePanel::right("panel")
             .min_width(250.0)
             .show(ctx, |ui| {
@@ -426,6 +427,12 @@ impl eframe::App for CellWorldApp {
                 // 显示选中信息
                 selection_action = self.panel.render_selection(ui, &self.selection, &self.world);
             });
+
+        // 速度变化时同步到配置文件
+        if (self.speed - old_speed).abs() > f64::EPSILON {
+            self.config.initial_speed = self.speed;
+            self.config.save();
+        }
 
         // 处理添加生物按钮（每次添加5个）
         if let Some(template_name) = panel_action.spawn {

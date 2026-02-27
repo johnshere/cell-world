@@ -1,6 +1,6 @@
 use serde::{Serialize, Deserialize};
 
-const CONFIG_PATH: &str = "config.json";
+const CONFIG_PATH: &str = "config.toml";
 
 /// 世界配置
 #[derive(Clone, Serialize, Deserialize)]
@@ -105,11 +105,11 @@ pub struct Config {
 }
 
 impl Config {
-    /// 从 config.json 加载，失败则用默认值
+    /// 从 config.toml 加载，失败则用默认值
     pub fn load() -> Self {
         match std::fs::read_to_string(CONFIG_PATH) {
             Ok(content) => {
-                match serde_json::from_str(&content) {
+                match toml::from_str(&content) {
                     Ok(config) => config,
                     Err(e) => {
                         eprintln!("配置解析失败，使用默认值: {}", e);
@@ -127,11 +127,23 @@ impl Config {
         }
     }
 
-    /// 保存到 config.json
+    /// 保存到 config.toml（保留注释）
     pub fn save(&self) {
-        if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = std::fs::write(CONFIG_PATH, json);
+        let existing = std::fs::read_to_string(CONFIG_PATH).unwrap_or_default();
+        let mut doc = existing.parse::<toml_edit::DocumentMut>().unwrap_or_else(|_| {
+            toml_edit::DocumentMut::new()
+        });
+
+        // 序列化当前值，逐字段更新到已有文档（保留注释和排版）
+        if let Ok(new_str) = toml::to_string(self) {
+            if let Ok(new_doc) = new_str.parse::<toml_edit::DocumentMut>() {
+                for (key, item) in new_doc.iter() {
+                    doc[key] = item.clone();
+                }
+            }
         }
+
+        let _ = std::fs::write(CONFIG_PATH, doc.to_string());
     }
 
     /// 环境温度：距火山越近越高 (0~1)
@@ -153,60 +165,8 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            initial_scale: 0.6,
-            initial_speed: 2.0,
-
-            min_creatures: 20,
-
-            initial_energy: 50.0,
-
-            volcano_x: 0.0,
-            volcano_y: 0.0,
-            volcano_interval: 30.0,
-            volcano_radius: 600.0,
-            volcano_count: 60,
-            volcano_particle_energy: 30.0,
-            meteorite_interval: 12.0,
-            meteorite_count: 18,
-            meteorite_length: 180.0,
-            meteorite_particle_energy: 40.0,
-            particle_decay_rate: 0.005,
-
-            base_metabolism: 0.07,
-            age_metabolism_factor: 0.04,
-            move_cost: 0.002,
-            heat_dissipation_coefficient: 0.002,
-            feed_efficiency: 0.5,
-            reproduce_threshold: 60.0,
-            reproduce_energy_ratio: 0.3,
-
-            vision_range: 150.0,
-            contact_range: 15.0,
-
-            mutation_rate: 0.15,
-            initial_connections_min: 6,
-            initial_connections_max: 12,
-            species_similarity_threshold: 0.9,
-
-            combat_temp_weight: 0.5,
-            combat_speed_weight: 0.3,
-            combat_ally_weight: 0.8,
-            combat_ally_range: 50.0,
-
-            dominant_min_age: 500.0,
-
-            organ_nose_cost: 0.005,
-            organ_eye_cost: 0.008,
-            organ_mouth_cost: 0.003,
-
-            volcano_heat_range: 800.0,
-            heat_metabolism_factor: 0.5,
-            cold_loss_factor: 1.0,
-
-            trail_decay_rate: 0.12,
-
-            nose_half_angle: std::f64::consts::PI / 6.0,
-        }
+        // 唯一配置源：config.toml（编译时嵌入）
+        toml::from_str(include_str!("../config.toml"))
+            .expect("config.toml 格式错误")
     }
 }
