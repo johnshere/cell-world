@@ -8,12 +8,14 @@
 
 - **语言**：Rust
 - **渲染**：egui + eframe
+- **哈希**：FxHashMap（rustc-hash）
+- **序列化**：serde + serde_json（可选 persistence feature）
 
 ### 世界特性
 
 - **无限世界**：没有边界，生物可自由移动
 - **动态视窗**：支持拖拽平移、鼠标滚轮缩放（以鼠标位置为中心）
-- **视窗内生成**：能量粒子仅在当前可见视窗范围内生成
+- **火山能量源**：火山定期喷发，陨石随机降落，粒子随时间衰减
 
 ---
 
@@ -38,105 +40,83 @@
 ## 三、物理约束（仅此三条）
 
 ```
-1. 存在消耗：活着每秒消耗能量（基础消耗 + 百分比消耗）
-2. 繁殖成本：繁殖时分走 45% 能量给子代
+1. 存在消耗：基础代谢 + 年龄倍率消耗 + 体温逸散
+2. 繁殖成本：繁殖时分走 30% 能量给子代
 3. 死亡条件：能量 ≤ 0 → 死亡
 ```
 
 ---
 
-## 四、功能池
+## 四、神经网络设计
 
-生物通过神经网络输出控制的功能。初始时只有基础功能，其他功能通过进化"解锁"。
+### 3眼感知系统
+
+生物拥有三只眼睛，分别朝向不同方向：
+
+```
+左眼(-45°)    中眼(0°)    右眼(+45°)
+    \          |          /
+     \  FOV   |   FOV   /  （半角 = 30°）
+      \30°    |   30°  /
+       \      |      /
+        \     |     /
+         \    |    /
+          \   |   /
+           \  |  /  ← 视觉半径（150单位）
+            \ | /
+             \|/
+              ○ (生物)
+```
+
+- **左眼**：朝向 heading - 45°，FOV 半角 30°
+- **中眼**：朝向 heading，FOV 半角 30°
+- **右眼**：朝向 heading + 45°，FOV 半角 30°
+- **视觉半径**：固定 150 单位
+- **距离编码**：接近度 = `1.0 - dist / vision_range`（越近越大）
+
+### 输入（11维）
+
+```
+[0-2]   左眼: 食物距离, 同族距离, 异族距离
+[3-5]   中眼: 食物距离, 同族距离, 异族距离
+[6-8]   右眼: 食物距离, 同族距离, 异族距离
+[9]     自身能量 (0~1, energy / 200)
+[10]    体温状态 (0~1, 冷却时长 / 100，越冷越高)
+```
+
+每只眼跟踪最近的食物/同族/异族目标，值为接近度（0=无目标，1=紧贴）。
+
+### 输出（4维，固定）
 
 | 编号 | 功能 | 输出范围 | 说明 |
 |------|------|---------|------|
-| 0 | 移动方向sin | tanh(-1~1) | sin/cos 编码方向角 |
-| 1 | 移动方向cos | tanh(-1~1) | sin/cos 编码方向角 |
-| 2 | 移动速度 | 0 ~ 1 | 绝对值为速度 |
-| 3 | 吸收 | - | 接触能量粒子即吸收 |
-| 4 | 释放 | 0 ~ 1 | 释放自身能量到环境 |
-| 5 | 繁殖 | 0 ~ 1 | >0.2 且能量足够时分裂 |
-| 6 | 捕食 | 0 ~ 1 | >0.1 掠夺邻居能量的 value×20% |
-| 7 | 扫描半径 | 0 ~ 1 | 映射到 50~200 单位 |
-| 8 | 扫描角速度 | 0 ~ 1 | 映射到 0~180°/秒 |
-| 9 | 哺育 | 0 ~ 1 | >0.1 给予自身能量的 value×20% |
-
-### 初始状态
-
-所有生物初始拥有：
-- 输出[0] → 移动方向sin
-- 输出[1] → 移动方向cos
-- 输出[2] → 移动速度
-- 输出[3] → 吸收
-- 输出[4] → 繁殖
-- 输出[5] → 扫描半径
-- 输出[6] → 扫描角速度
-
-释放(4)、捕食(6)、哺育(9)需要通过变异解锁。
-
----
-
-## 五、神经网络设计
-
-### 雷达扫描感知系统
-
-生物通过雷达扫描方式感知周围环境：
-- **扫描方式**：线性雷达扫描，每扫描1度结算一次
-- **扫描半径**：50~200单位（50以内免费，超出部分耗能）
-- **角速度**：0~180°/秒（可通过神经网络控制）
-- **耗能公式**：`max(0, r-50)² × π/360 × cost` 每度
-
-### 输入（25维）
-
-```
-[0-4]   最佳同类: sin(θ), cos(θ), 距离(0~1), 相似度(0~1), 能量(0~1)
-[5-9]   最差同类: sin(θ), cos(θ), 距离(0~1), 相似度(0~1), 能量(0~1)
-[10-14] 最佳异类: sin(θ), cos(θ), 距离(0~1), 相似度(0~1), 能量(0~1)
-[15-19] 最差异类: sin(θ), cos(θ), 距离(0~1), 相似度(0~1), 能量(0~1)
-[20-23] 最佳能量粒子: sin(θ), cos(θ), 距离(0~1), 能量(0~1)
-[24]    自身能量(0~1)
-```
-
-- **评分函数**：`score = energy / distance`（能量大且近的目标优先）
-- **同类/异类判定**：基因相似度 >= 0.9 为同类，否则为异类
-- **能量粒子**：相似度=0，视为异类
-
-### 输出（可变维度）
-
-初始：7维 [移动方向sin, 移动方向cos, 移动速度, 吸收, 繁殖, 扫描半径, 扫描角速度]
-
-进化后可能扩展到 8~10 维，每个输出映射到功能池中的一个功能。
+| 0 | 转向角 | tanh(-1~1) | × π/2 = 每秒转向弧度 |
+| 1 | 速度 | tanh(-1~1) | abs × 50 = 每秒移动距离 |
+| 2 | 嘴 | tanh(-1~1) | <-0.1 咬（捕食）；>+0.1 喂（哺育）；接触食物自动吸收 |
+| 3 | 繁殖 | tanh(-1~1) | >0.2 且能量≥阈值时触发 |
 
 ### 激活函数
 
-- 隐藏层：ReLU 或 tanh
-- 输出层：tanh（范围 -1 ~ +1）
+- 隐藏层 + 输出层：tanh（范围 -1 ~ +1）
 
 ---
 
-## 六、NEAT 算法
+## 五、NEAT 算法
 
 ### 结构进化
 
 传统神经网络只进化权重，NEAT 同时进化：
-- 权重
+- 权重（微调或重置）
 - 连接（可新增、可禁用）
-- 节点（可新增）
-- 输出维度（可扩展）
+- 节点（可新增隐藏层）
 
 ### 基因组结构
 
 ```rust
 struct Genome {
-    /// 节点基因
-    nodes: Vec<NodeGene>,
-
-    /// 连接基因
-    connections: Vec<ConnectionGene>,
-
-    /// 输出映射：output_map[i] = 功能编号
-    output_map: Vec<usize>,
+    nodes: Vec<NodeGene>,        // 节点基因
+    connections: Vec<ConnectionGene>, // 连接基因
+    next_node_id: usize,
 }
 
 struct NodeGene {
@@ -154,73 +134,102 @@ struct ConnectionGene {
 
 ### 变异类型
 
-所有变异使用统一的 `mutation_rate`（默认 5%）：
+所有变异使用统一的 `mutation_rate`（默认 15%）：
 
 | 变异 | 触发概率 | 说明 |
 |------|----------|------|
-| 权重变异 | 5% 每条连接 | 90% 微调 ±0.5，10% 重置 |
-| 新增连接 | 5% | 随机连接两个节点 |
-| 新增节点 | 5% | 拆分现有连接，插入隐藏节点 |
-| 新增输出 | 5% | 解锁新功能（从功能池选择） |
-| 开关连接 | 5% | 启用/禁用随机连接 |
+| 权重变异 | 15% 每条连接 | 90% 微调 ±0.5，10% 重置 [-1,1] |
+| 新增连接 | 15% | 随机连接两个节点 |
+| 新增节点 | 15% | 拆分现有连接，插入隐藏节点 |
+| 开关连接 | 15% | 启用/禁用随机连接 |
+
+### 繁殖方式
+
+- **无性繁殖**：基因组带变异复制
+- **有性繁殖**：寻找接触范围内同种配偶（相似度≥阈值），`crossover()` 权重平均取交集
+
+### 相似度计算
+
+使用排序归并算法，零分配 O(n log n)：
+
+```rust
+fn similarity(&self, other: &Genome) -> f64 {
+    // 提取启用连接的 (in_node, out_node, weight)
+    // 排序后双指针归并
+    // 匹配连接：1.0 - |w1-w2|/4.0
+    // 不匹配连接：0分
+    // 返回 similarity_sum / total
+}
+```
+
+相似度 ≥ 0.9 视为同一种族（同类）。
 
 ---
 
-## 七、生物结构
+## 六、生物结构
 
 ```rust
 struct Creature {
-    // 位置
-    x: f64,
-    y: f64,
-
-    // 状态
-    energy: f64,
-    age: f64,
+    id: u64,
+    x: f64, y: f64,              // 位置
+    energy: f64,                  // 能量
+    age: f64,                     // 年龄（秒）
     alive: bool,
+    heading: f64,                 // 朝向（弧度）
 
-    // 遗传
-    genome: Genome,
-    brain: Network,  // 从 Genome 构建
-    family_id: usize,
+    genome: Genome,               // 基因组
+    brain: Network,               // 神经网络（从 Genome 构建）
+    generation: usize,            // 世代数
+    parent_id: Option<u64>,       // 父代ID（None = 自然生成）
 
-    // 缓存
-    genome_hash: u64,  // 用于快速比较
+    genome_hash: u64,             // 基因哈希（快速比较）
+    last_warm_time: f64,          // 上次感温时间
+    perception_cache: [f64; 11],  // 感知缓存
 }
 ```
 
 ---
 
-## 八、世界结构
+## 七、世界结构
 
 ```rust
 struct World {
-    // 实体
     creatures: Vec<Creature>,
     energy_particles: Vec<EnergyParticle>,
 
-    // 空间索引（加速邻居查询）
-    creature_grid: SpatialGrid,
-    energy_grid: SpatialGrid,
+    creature_grid: SpatialGrid,   // 生物空间索引
+    energy_grid: SpatialGrid,     // 粒子空间索引
 
-    // 视窗范围（世界坐标，用于能量生成）
-    viewport_min_x: f64,
-    viewport_min_y: f64,
-    viewport_max_x: f64,
-    viewport_max_y: f64,
+    time: f64,                    // 世界时间
+
+    // 能量生成计时器
+    volcano_timer: f64,
+    meteorite_timer: f64,
+
+    // ID 计数器
+    next_creature_id: u64,
+    next_energy_id: u64,
+
+    // 视窗范围
+    viewport_min_x: f64, viewport_min_y: f64,
+    viewport_max_x: f64, viewport_max_y: f64,
+
+    // 缓存
+    similarity_cache: FxHashMap<(u64, u64), f64>,  // 相似度缓存
+    clan_cache: Option<ClanCache>,                  // 种族聚类缓存（每秒更新）
 
     // 统计
-    time: f64,
-    family_stats: HashMap<usize, usize>,
-    extinct_families: usize,
+    action_counts: [usize; 5],     // 行为计数：移动/吸收/咬/喂/繁殖
+    death_ages: Vec<f64>,          // 死亡年龄记录
+    death_age_stats: DeathAgeStats,
 }
 
 struct EnergyParticle {
     id: u64,
-    x: f64,
-    y: f64,
+    x: f64, y: f64,
     energy: f64,
-    lifetime: f64,
+    initial_energy: f64,   // 初始能量（用于透明度计算）
+    lifetime: f64,         // 存活时间上限
     age: f64,
     alive: bool,
 }
@@ -228,148 +237,158 @@ struct EnergyParticle {
 
 ---
 
-## 九、交互规则
+## 八、交互规则
 
 ### 吸收环境能量
 
 ```
-条件：当前位置有能量粒子 且 输出"吸收" > 0.5
-效果：获得能量，粒子消失
+条件：接触能量粒子（距离 < contact_range）
+效果：自动吸收，获得粒子剩余能量，粒子消失
 ```
 
-### 释放能量
+### 咬（捕食）
 
 ```
-条件：输出"释放" > 0
-效果：释放 (输出值 × 系数) 能量到当前位置，生成能量粒子
+条件：嘴输出 < -0.1，且接触到其他生物
+效果：转移目标 20% 能量 × 相似度补偿（异类更好咬）
 ```
 
-### 捕食
+### 喂（哺育）
 
 ```
-条件：与邻居接触（距离 < 阈值）且输出值 > 0.1
-效果：掠夺目标能量的 value×20%（最高20%）
-```
-
-### 哺育
-
-```
-条件：与邻居接触（距离 < 阈值）且输出值 > 0.1
-效果：给予自身能量的 value×20%
+条件：嘴输出 > +0.1，且接触到其他生物
+效果：转移自身 20% 能量给目标
+      体型差 > feed_size_ratio_threshold 时无损耗
 ```
 
 ### 繁殖
 
 ```
-条件：输出"繁殖" > 0.2 且 能量 > 繁殖阈值(35)
+条件：繁殖输出 > 0.2 且 能量 ≥ reproduce_threshold (60)
 效果：
-  - 创建子代，位置在父代附近 ±10 像素
-  - 子代继承父代基因组（带变异，变异率 5%）
-  - 子代获得父代 45% 能量
-  - 子代继承父代 family_id
+  - 优先有性繁殖（寻找接触范围内同种配偶，crossover + 变异）
+  - 无配偶时无性繁殖（变异复制）
+  - 子代位置在父代附近
+  - 子代获得父代 30% 能量
+  - 子代 generation = 父代 + 1
+  - 子代 parent_id = 父代 id
 ```
 
 ---
 
-## 十、能量系统
+## 九、能量系统
 
 ### 消耗
 
-| 行为 | 消耗 |
-|------|------|
-| 存在（基础代谢） | 0.05 / 秒 |
-| 存在（百分比代谢） | 0.2% × 当前能量 / 秒 |
-| 移动 | 0.1 × 距离 |
-| 繁殖 | 分 40% 给子代 |
-| 扫描（超出免费半径） | `max(0, r-50)² × π/360 × 0.00001` 每度 |
-| 吸收/释放/转移 | 无额外消耗 |
-
-> 百分比代谢防止高能量个体过于懒惰
+| 行为 | 消耗公式 |
+|------|----------|
+| 基础代谢 | 0.07 / 秒 |
+| 年龄倍率 | base × (1 + age × 0.04)，年龄越大消耗越高 |
+| 移动 | 0.001 × 距离 |
+| 体温逸散 | 系数 × 冷却时长 × 体表面积 / 秒 |
+| 繁殖 | 分 30% 能量给子代 |
 
 ### 来源
 
-- 阳光：视窗内定期生成能量粒子（每 0.6 秒生成 2 个，每个 40 能量）
-- 掠夺：从其他生物获取
+#### 火山喷发
+- 位置：原点 (0, 0)
+- 间隔：30 秒
+- 每次：60 个粒子，每个 30 能量
+- 分布：三角分布，半径 600 内（内密外疏）
 
-### 能量波动
+#### 陨石降落
+- 位置：视窗范围内随机
+- 间隔：12 秒
+- 每次：18 个粒子，每个 40 能量
+- 分布：沿随机方向线段散布（长度 180）
 
-能量粒子生成受能量波影响，产生弱周期或无规律的环境变化：
-
-```
-强度 = 1.0 + Σ(sin(time × 2π / period[i]) × weight[i]) × amplitude
-```
-
-- **周期**：使用互质数 [31, 47, 73, 113] 秒，产生超长总周期
-- **幅度**：默认 0.5（强度范围 0.5~1.5）
-- **影响**：
-  - 粒子生成数量 × 强度
-  - 粒子能量值 × 强度
-  - 粒子存活时间 × 强度
+#### 粒子衰减
+- 粒子能量随时间衰减：`energy *= (1 - 0.005)` 每秒
+- 粒子有生命周期上限，超时消失
 
 ---
 
-## 十一、感知系统
+## 十、种族系统
 
-### 雷达扫描
+### 祖先追溯聚类
 
-生物使用线性雷达扫描感知周围环境：
+不使用固定 family_id，而是动态计算种族归属：
 
-```
-    扫描方向 →
-   ╱
-  ╱  扫描范围（扇形）
- ╱
-○ ─────────────────
-生物中心
-```
+1. 沿 `parent_id` 向上追溯，找到最老的活祖先（族长）
+2. 检查与族长的基因相似度 ≥ 0.9
+3. 满足则归入该族群，否则自立门户
 
-- **扫描角度**：0°~360°，每度结算一次
-- **扫描半径**：神经网络可控（50~200单位）
-- **角速度**：神经网络可控（0~180°/秒）
-- **感知更新**：每1秒更新一次17维感知输入
+### 优势种检测
 
-### 扫描耗能
+满足以下条件时标记为优势种：
+- 种群人口占比 ≥ 30%
+- 族长年龄 ≥ `dominant_min_age`（500秒）
+- 平均年龄 ≥ 全局死亡年龄中位数
 
-```
-cost = max(0, r - 50)² × (π/360) × scan_cost
-```
-
-- 50单位以内免费
-- 超出部分按面积计费，远距离扫描更贵
-
-### 基因相似度计算
-
-使用Jaccard-like比较连接特征：
-
-```rust
-fn similarity(genome_a: &Genome, genome_b: &Genome) -> f64 {
-    // 比较连接特征（输入节点、输出节点、权重符号）
-    // 返回 0.0~1.0
-}
-```
-
-相似度 >= 0.9 视为同一种群（同类）
+优势种自动保存到 `store/` 目录。
 
 ---
 
-## 十二、渲染
+## 十一、渲染
 
 ### 使用 egui + eframe
 
-- 主画布：显示世界、生物、能量粒子
-- 侧边栏：统计信息、参数调节
-- 控制：暂停、加速、重置
+- 主画布：显示世界、生物、能量粒子、火山标记
+- 侧边栏：统计信息、速度控制、模板管理
+- 控制：暂停、加速/减速
 
-### 生物颜色
+### 生物渲染
 
 ```rust
-fn creature_color(creature: &Creature) -> Color32 {
-    let hue = (creature.genome_hash % 360) as f32;  // 基因决定色相
-    let saturation = 0.3 + (creature.age / 10000.0).min(1.0) * 0.7;  // 年龄决定饱和度
-    let lightness = 0.2 + (creature.energy / 200.0).min(1.0) * 0.5;  // 能量决定亮度
-    hsv_to_rgb(hue, saturation, lightness)
+fn creature_color(creature: &Creature, clan_leader_hash: Option<u64>) -> Color32 {
+    let hue = (hash % 360) as f32;      // 基因/族长决定色相
+    let saturation = ...;                 // 年龄决定饱和度
+    let lightness = ...;                  // 能量决定亮度
 }
 ```
+
+- 大小：∝ √能量
+- 朝向：五分之一圆弧标识
+- 选中：白色高亮
+- 同族生物共享族长色相
+
+### 侧边栏面板
+
+- 速度控制：⏪ 减速 / 滑块 / ⏩ 加速 / ▶ 暂停
+- 统计：生物数、粒子数、总能量、平均能量、世代数、种群数
+- 火山倒计时
+- 行为计数：移动/吸收/咬/喂/繁殖
+- 寿命统计：中位数/均值/最大/最小
+- 种群排行：Top种族及占比
+- 优势种候选
+- 生物模板管理：选择/添加/删除
+
+---
+
+## 十二、存储系统
+
+### 生物模板（store/）
+
+```rust
+struct CreatureTemplate {
+    name: String,
+    genome: Genome,
+    initial_energy: f64,
+    version: Option<String>,
+    score: Option<f64>,
+    population_ratio: Option<f64>,  // 保存时的人口占比
+    avg_energy: Option<f64>,
+    avg_age: Option<f64>,
+    max_generation: Option<usize>,
+    recorded_at: Option<f64>,       // 保存时的世界时间
+    auto_recorded: Option<bool>,    // 是否自动保存的优势种
+}
+```
+
+- 存储目录：`store/`
+- 格式：JSON
+- 自动保存：优势种检测到时自动存档
+- 手动操作：通过侧边栏选择模板，点击 "添加" 投放到世界
 
 ---
 
@@ -380,25 +399,29 @@ cell-world/
 ├── Cargo.toml
 ├── CLAUDE.md              # Claude Code 开发指南
 ├── docs/
-│   └── DESIGN.md          # 本文档
+│   ├── DESIGN.md          # 本文档
+│   ├── LOG.md             # 统计日志（自动生成）
+│   └── run.log            # 性能日志（自动生成）
+├── store/                 # 生物模板存档（JSON）
 └── src/
     ├── main.rs            # 入口
-    ├── app.rs             # egui 应用
+    ├── app.rs             # egui 应用主循环、日志、选中
     ├── config.rs          # 配置参数
+    ├── store.rs           # 生物模板存储
     ├── world/
     │   ├── mod.rs
-    │   ├── world.rs       # 世界管理
-    │   ├── creature.rs    # 生物
+    │   ├── world.rs       # 世界管理、感知、动作执行
+    │   ├── creature.rs    # 生物结构
     │   ├── energy.rs      # 能量粒子
-    │   └── spatial.rs     # 空间索引
+    │   └── spatial.rs     # 空间索引（FxHashMap 网格）
     ├── neural/
     │   ├── mod.rs
-    │   ├── network.rs     # 神经网络
+    │   ├── network.rs     # 神经网络前向传播
     │   └── genome.rs      # 基因组 + NEAT 变异
     └── render/
         ├── mod.rs
-        ├── canvas.rs      # 主画布（拖拽缩放）
-        └── panel.rs       # 信息面板
+        ├── canvas.rs      # 主画布（拖拽缩放、实体渲染）
+        └── panel.rs       # 侧边栏统计面板
 ```
 
 ---
@@ -407,93 +430,135 @@ cell-world/
 
 ```rust
 pub struct Config {
-    // 初始化
-    pub initial_energy: f64,           // 70.0
-    pub min_creatures: usize,          // 40
+    // 速度与初始化
+    pub initial_speed: f64,            // 2.0 (初始倍速)
+    pub initial_scale: f32,            // 0.6 (世界缩放)
+    pub min_creatures: usize,          // 20 (最小生物数)
+    pub initial_energy: f64,           // 50.0
 
-    // 能量生成
-    pub energy_spawn_interval: f64,    // 0.6 秒
-    pub energy_spawn_count: usize,     // 2 个
-    pub energy_particle_value: f64,    // 40.0
-    pub energy_particle_lifetime: f64, // 40.0 秒
+    // 火山
+    pub volcano_x: f64,                // 0.0
+    pub volcano_y: f64,                // 0.0
+    pub volcano_interval: f64,         // 30.0 秒
+    pub volcano_radius: f64,           // 600.0
+    pub volcano_count: usize,          // 60 粒子/次
+    pub volcano_particle_energy: f64,  // 30.0
 
-    // 能量波动
-    pub energy_wave_enabled: bool,     // true
-    pub energy_wave_amplitude: f64,    // 0.5 (强度范围 0.5~1.5)
-    pub energy_wave_periods: [f64; 4], // [31, 47, 73, 113] 秒
+    // 陨石
+    pub meteorite_interval: f64,       // 12.0 秒
+    pub meteorite_count: usize,        // 18 粒子/次
+    pub meteorite_length: f64,         // 180.0 散布长度
+    pub meteorite_particle_energy: f64, // 40.0
+    pub particle_decay_rate: f64,      // 0.005
 
     // 代谢
-    pub base_metabolism: f64,          // 0.05 / 秒
-    pub percent_metabolism: f64,       // 0.002 (0.2% / 秒)
-    pub move_cost: f64,                // 0.1 / 距离
+    pub base_metabolism: f64,          // 0.07 / 秒
+    pub age_metabolism_factor: f64,    // 0.04 (age × 此值 = 倍率)
+    pub move_cost: f64,                // 0.001 / 距离
+    pub heat_dissipation_coefficient: f64, // 0.002
+    pub feed_size_ratio_threshold: f64,    // 1.5
 
     // 繁殖
-    pub reproduce_threshold: f64,      // 28.0
-    pub reproduce_energy_ratio: f64,   // 0.4 (40%)
+    pub reproduce_threshold: f64,      // 60.0
+    pub reproduce_energy_ratio: f64,   // 0.3 (30%)
 
-    // 感知（雷达扫描）
-    pub scan_free_radius: f64,         // 50.0 (免费半径)
-    pub scan_max_radius: f64,          // 200.0 (最大半径)
-    pub scan_max_angular_velocity: f64, // 180.0 (度/秒)
-    pub scan_cost: f64,                // 0.00001 (扫描单位成本)
-    pub contact_range: f64,            // 8.0
+    // 感知
+    pub vision_range: f64,             // 150.0
+    pub contact_range: f64,            // 15.0
 
     // 进化
     pub mutation_rate: f64,            // 0.15 (15%)
     pub initial_connections_min: usize, // 6
     pub initial_connections_max: usize, // 12
-    pub species_similarity_threshold: f64, // 0.9 (种群相似度阈值)
+    pub species_similarity_threshold: f64, // 0.9
+
+    // 优势种
+    pub dominant_min_age: f64,         // 500.0 秒
 }
 ```
 
 ---
 
-## 十五、预期进化路径
+## 十五、性能优化
+
+| 优化 | 位置 | 效果 |
+|------|------|------|
+| FxHashMap | 全项目 | 比标准 HashMap 快 2-3 倍 |
+| 空间索引网格 | `spatial.rs` | O(1) 邻居查询 |
+| 相似度缓存 | `world.rs` | 避免重复计算基因相似度 |
+| 种族缓存 | `world.rs` | 每秒更新一次聚类结果 |
+| 拓扑排序 | `network.rs` | 一次性排序，前向传播线性评估 |
+| 零分配相似度 | `genome.rs` | 排序归并算法，无 HashMap 分配 |
+| 缓冲区复用 | `world.rs` | 空间查询复用 Vec |
+| 渲染上下文缓存 | `app.rs` | 1 秒更新一次族群颜色 |
+| Release 优化 | `Cargo.toml` | LTO + opt-level=3 |
+
+---
+
+## 十六、日志系统
+
+### 统计日志（docs/LOG.md）
+
+每 10 秒输出一行：
 
 ```
-第 1 代：随机移动，靠运气碰到阳光
+| 时间 | 生物 | 粒子 | 总能 | 代 | 种群 | 寿命(中/均/大/小/数) | 行为(移/吸/咬/喂/殖) |
+```
 
-第 N 代：某些网络变异出"吸收"功能
-        → 能主动吸收的存活率更高
+### 性能日志（docs/run.log）
 
-第 M 代：某些网络变异出"繁殖"功能
+```
+| 时间 | FPS | 生物 | 世界ms | 面板ms | 聚类ms | 渲染ms | egui | 帧总ms |
+```
+
+---
+
+## 十七、预期进化路径
+
+```
+第 1 代：随机移动，靠运气碰到能量粒子
+
+第 N 代：网络变异出更有效的转向/速度组合
+        → 能朝食物方向移动的存活率更高
+
+第 M 代：繁殖信号开始被利用
         → 能主动繁殖的家族扩张
 
-第 K 代：某些网络利用"基因相似度"输入
+第 K 代：利用同族/异族距离输入
         → 对同类和异类有不同行为
         → 种群分化开始
 
-更后期：掠夺、给予、集群、领地...
+更后期：咬（捕食）、喂（哺育）、集群、领地...
         → 复杂生态涌现
 ```
 
 ---
 
-## 十六、里程碑
+## 十八、里程碑
 
 ### v0.1 - 基础框架 ✅
 - [x] Rust 项目结构
 - [x] egui 窗口和基本渲染
 - [x] 世界、生物、能量粒子基础类
 
-### v0.2 - 简单神经网络 ✅
-- [x] 固定结构神经网络（17→隐藏→输出）
-- [x] 基因组 = 节点 + 连接
-- [x] 基础进化（权重变异）
+### v0.2 - 神经网络 + NEAT ✅
+- [x] NEAT 基因组（节点 + 连接）
+- [x] 结构进化（新增节点、连接、权重变异）
+- [x] 3眼感知系统（11维输入）
+- [x] 4输出动作（转向、速度、嘴、繁殖）
+- [x] 有性/无性繁殖
+- [x] 火山 + 陨石能量系统
+- [x] 祖先追溯种族聚类
+- [x] 优势种自动保存
+- [x] 空间索引（FxHashMap 网格）
+- [x] 相似度/聚类缓存
+- [x] 侧边栏统计面板
+- [x] 生物模板存储系统
+- [x] 日志系统（统计 + 性能）
+- [x] 性能优化（零分配、缓冲区复用、LTO）
 
-### v0.3 - NEAT ✅
-- [x] 结构进化（新增节点、连接）
-- [x] 输出维度扩展
-- [x] 功能池映射
-
-### v0.4 - 完整系统 ✅
-- [x] 所有功能池实现（6 个功能）
-- [x] 交互规则完善
-- [x] 统计和可视化
-- [x] 无限世界 + 视窗缩放
-
-### v1.0 - 优化
-- [x] 空间索引（FxHashMap）
+### 未来方向
 - [ ] 并行计算（rayon）
-- [ ] 参数调优
-- [ ] 长时间运行稳定性
+- [ ] 参数调优与进化实验
+- [ ] 长时间运行稳定性验证
+- [ ] 可视化增强（进化树、基因拓扑）
