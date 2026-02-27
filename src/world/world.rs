@@ -368,10 +368,10 @@ impl World {
 
     // ========== 3眼感知系统 ==========
 
-    /// 计算 10 维感知输入
+    /// 计算 11 维感知输入
     /// 3只眼（左-45°, 中0°, 右+45°），每只眼3通道:
     ///   食物接近度, 同族接近度, 异族接近度
-    /// + 自身能量
+    /// + 自身能量 + 体温状态
     fn compute_eye_perception(&mut self, creature_idx: usize, config: &Config) {
         let cx = self.creatures[creature_idx].x;
         let cy = self.creatures[creature_idx].y;
@@ -388,7 +388,7 @@ impl World {
         // 每只眼的半角（30°）
         let half_fov = std::f64::consts::PI / 6.0;
 
-        let mut input = [0.0_f64; 10];
+        let mut input = [0.0_f64; 11];
 
         // 每只眼跟踪最近的食物/同族/异族
         let mut eye_food = [f64::MAX; 3];
@@ -475,6 +475,10 @@ impl World {
         // 自身能量
         input[9] = (self.creatures[creature_idx].energy / 200.0).min(1.0);
 
+        // 体温状态（冷却程度，越冷越高）
+        let cold_duration = (self.time - self.creatures[creature_idx].last_warm_time).max(0.0);
+        input[10] = (cold_duration / 100.0).min(1.0);
+
         self.creatures[creature_idx].perception_cache = input;
     }
 
@@ -537,9 +541,9 @@ impl World {
                 if dist < config.contact_range {
                     let energy = self.energy_particles[particle_idx].consume();
                     self.creatures[idx].energy += energy;
-                    // 感温：吃到食物（回暖30%）
+                    // 感温：吃到食物（回暖20%）
                     let cold = (self.time - self.creatures[idx].last_warm_time).max(0.0);
-                    self.creatures[idx].last_warm_time += cold * 0.3;
+                    self.creatures[idx].last_warm_time += cold * 0.2;
                     self.action_counts[1] += 1; // 吸收
                     break; // 每帧吸收一个
                 }
@@ -593,9 +597,9 @@ impl World {
                 let transfer_amount = my_energy * transfer_ratio;
                 self.creatures[idx].energy -= transfer_amount;
                 self.creatures[other_idx].energy += transfer_amount * efficiency;
-                // 感温：被哺育（回暖50%）
+                // 感温：被哺育（回暖70%，远强于吃食物的20%）
                 let cold = (self.time - self.creatures[other_idx].last_warm_time).max(0.0);
-                self.creatures[other_idx].last_warm_time += cold * 0.5;
+                self.creatures[other_idx].last_warm_time += cold * 0.7;
                 self.action_counts[3] += 1; // 喂
             }
             break; // 每帧只对一个目标

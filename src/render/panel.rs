@@ -52,6 +52,24 @@ pub struct CachedStats {
     pub dominant_candidate: Option<DominantCandidate>,
 }
 
+/// 将秒数格式化为 d h m s
+fn format_dhms(seconds: f64) -> String {
+    let total = seconds as u64;
+    let d = total / 86400;
+    let h = (total % 86400) / 3600;
+    let m = (total % 3600) / 60;
+    let s = total % 60;
+    if d > 0 {
+        format!("{}d{}h{}m{}s", d, h, m, s)
+    } else if h > 0 {
+        format!("{}h{}m{}s", h, m, s)
+    } else if m > 0 {
+        format!("{}m{}s", m, s)
+    } else {
+        format!("{}s", s)
+    }
+}
+
 impl StatsPanel {
     pub fn new() -> Self {
         Self {
@@ -110,7 +128,7 @@ impl StatsPanel {
         ui.horizontal(|ui| {
             ui.label(format!("FPS: {:.0}", fps));
             ui.separator();
-            ui.label(format!("时间: {:.0}s", self.cached_stats.time));
+            ui.label(format!("时间: {}", format_dhms(self.cached_stats.time)));
         });
 
         // 速度控制

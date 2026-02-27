@@ -77,22 +77,22 @@ impl Default for Config {
 
             volcano_x: 0.0,
             volcano_y: 0.0,
-            volcano_interval: 35.0,         // 喷发间隔（秒）
+            volcano_interval: 30.0,         // 喷发间隔（秒）
             volcano_radius: 600.0,          // 喷射半径（内密外疏）
-            volcano_count: 70,              // 每次粒子数
-            volcano_particle_energy: 40.0,  // 单粒子能量
+            volcano_count: 60,              // 每次粒子数
+            volcano_particle_energy: 30.0,  // 单粒子能量
             meteorite_interval: 12.0,       // 陨石间隔（秒）
-            meteorite_count: 15,            // 每颗粒子数
-            meteorite_length: 150.0,        // 散布线段长度
-            meteorite_particle_energy: 35.0,
+            meteorite_count: 18,            // 每颗粒子数
+            meteorite_length: 180.0,        // 散布线段长度
+            meteorite_particle_energy: 40.0,
             particle_decay_rate: 0.005,     // 每秒 energy *= (1 - rate)
 
             base_metabolism: 0.07,  // 基础消耗
             age_metabolism_factor: 0.04,  // 年龄倍率：age=33s时消耗×2.0，age=100s时消耗×4.0
             move_cost: 0.001,  // 移动消耗极低，移动比待机划算
-            heat_dissipation_coefficient: 0.005,  // 体温逸散系数
-            feed_size_ratio_threshold: 3.0,  // 喂食无损耗所需体型倍率
-            reproduce_threshold: 50.0,  // 繁殖阈值
+            heat_dissipation_coefficient: 0.002,  // 体温逸散系数（降低，避免过早冻死）
+            feed_size_ratio_threshold: 1.5,  // 喂食无损耗所需体型倍率（降低门槛促进哺育）
+            reproduce_threshold: 60.0,  // 繁殖阈值
             reproduce_energy_ratio: 0.3,  // 子代获得能量
 
             vision_range: 150.0,  // 视觉半径
