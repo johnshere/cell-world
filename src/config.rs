@@ -129,11 +129,12 @@ impl Default for Config {
             initial_connections_min: 6,  // 更多初始连接，增加有用组合概率
             initial_connections_max: 12,
             species_similarity_threshold: 0.9,  // 基因相似度 >= 视为同一种族
-            
+
             combat_temp_weight: 0.5,   // 暖体温最多+50%战力
             combat_speed_weight: 0.3,  // 满速最多+30%战力
             combat_ally_weight: 0.8,   // 同族满援最多+80%战力
             combat_ally_range: 50.0,   // 同族援助感应范围
+            
             dominant_min_age: 500.0,  // 优势种检测：最老成员需达到年龄（秒）
         }
     }
