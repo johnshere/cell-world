@@ -301,7 +301,14 @@ impl CellWorldApp {
                         changed |= config_drag_usize(ui, "陨石粒子数", &mut c.meteorite_count, 5..=100);
                         changed |= config_drag_f64(ui, "陨石长度", &mut c.meteorite_length, 1.0, 50.0..=500.0);
                         changed |= config_drag_f64(ui, "陨石粒子能量", &mut c.meteorite_particle_energy, 0.1, 5.0..=100.0);
-                        changed |= config_drag_f64(ui, "粒子衰减率", &mut c.particle_decay_rate, 0.001, 0.001..=0.1);
+                        changed |= config_drag_f64(ui, "火山衰减率", &mut c.volcano_decay_rate, 0.001, 0.001..=0.1);
+                        changed |= config_drag_f64(ui, "陨石衰减率", &mut c.meteorite_decay_rate, 0.001, 0.001..=0.1);
+                        changed |= config_drag_f64(ui, "火山杀伤半径", &mut c.volcano_kill_radius, 0.5, 1.0..=50.0);
+                        changed |= config_drag_f64(ui, "陨石杀伤半径", &mut c.meteorite_kill_radius, 0.5, 1.0..=50.0);
+                        let v_max = c.volcano_interval;
+                        changed |= config_drag_f64(ui, "火山下落时长", &mut c.volcano_fall_duration, 0.1, 0.0..=v_max);
+                        let m_max = c.meteorite_interval;
+                        changed |= config_drag_f64(ui, "陨石下落时长", &mut c.meteorite_fall_duration, 0.1, 0.0..=m_max);
                     });
 
                     ui.collapsing("代谢", |ui| {
@@ -312,9 +319,7 @@ impl CellWorldApp {
                         changed |= config_drag_f64(ui, "喂食效率", &mut c.feed_efficiency, 0.01, 0.1..=1.0);
                     });
 
-                    ui.collapsing("繁殖", |ui| {
-                        changed |= config_drag_f64(ui, "繁殖阈值能量", &mut c.reproduce_threshold, 1.0, 20.0..=200.0);
-                        changed |= config_drag_f64(ui, "子代能量比例", &mut c.reproduce_energy_ratio, 0.01, 0.1..=0.5);
+                    ui.collapsing("生物", |ui| {
                         changed |= config_drag_f64(ui, "初始能量", &mut c.initial_energy, 1.0, 10.0..=200.0);
                         changed |= config_drag_usize(ui, "最小生物数", &mut c.min_creatures, 5..=100);
                     });
@@ -339,15 +344,18 @@ impl CellWorldApp {
                         changed |= config_drag_f64(ui, "同族援助范围", &mut c.combat_ally_range, 1.0, 10.0..=200.0);
                     });
 
-                    ui.collapsing("器官消耗", |ui| {
-                        changed |= config_drag_f64(ui, "鼻子消耗(/秒)", &mut c.organ_nose_cost, 0.001, 0.0..=0.05);
-                        changed |= config_drag_f64(ui, "双眼消耗(/秒)", &mut c.organ_eye_cost, 0.001, 0.0..=0.05);
-                        changed |= config_drag_f64(ui, "嘴巴消耗(/秒)", &mut c.organ_mouth_cost, 0.001, 0.0..=0.05);
+                    ui.collapsing("器官系统", |ui| {
+                        changed |= config_drag_f64(ui, "鼻子冷却(秒)", &mut c.nose_cooldown, 0.01, 0.05..=2.0);
+                        changed |= config_drag_f64(ui, "眼睛冷却(秒)", &mut c.eye_cooldown, 0.01, 0.05..=1.0);
+                        changed |= config_drag_f64(ui, "嘴巴冷却(秒)", &mut c.mouth_cooldown, 0.01, 0.1..=5.0);
+                        changed |= config_drag_f64(ui, "鼻子扫描成本", &mut c.nose_scan_cost, 0.001, 0.0..=0.2);
+                        changed |= config_drag_f64(ui, "眼睛扫描成本", &mut c.eye_scan_cost, 0.001, 0.0..=0.2);
+                        changed |= config_drag_f64(ui, "咬消耗", &mut c.bite_cost, 0.01, 0.0..=2.0);
+                        changed |= config_drag_f64(ui, "咬转移率", &mut c.bite_transfer_rate, 0.01, 0.01..=0.5);
                     });
 
                     ui.collapsing("环境温度", |ui| {
                         changed |= config_drag_f64(ui, "热辐射范围", &mut c.volcano_heat_range, 1.0, 200.0..=2000.0);
-                        changed |= config_drag_f64(ui, "热代谢加成", &mut c.heat_metabolism_factor, 0.01, 0.0..=2.0);
                         changed |= config_drag_f64(ui, "冷流失加成", &mut c.cold_loss_factor, 0.01, 0.0..=3.0);
                     });
 

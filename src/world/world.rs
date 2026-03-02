@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use crate::config::Config;
 use crate::neural::Genome;
-use super::{Creature, EnergyParticle, SpatialGrid, TrailPoint};
+use super::{Creature, EnergyParticle, ParticleSource, SpatialGrid, TrailPoint};
 
 /// 性能统计（单帧）
 #[derive(Default, Clone)]
@@ -99,9 +99,9 @@ impl World {
             creatures: Vec::new(),
             energy_particles: Vec::new(),
             trail_points: Vec::new(),
-            creature_grid: SpatialGrid::new(config.vision_range),
-            energy_grid: SpatialGrid::new(config.vision_range),
-            trail_grid: SpatialGrid::new(config.vision_range),
+            creature_grid: SpatialGrid::new(config.vision_range * 1.5),
+            energy_grid: SpatialGrid::new(config.vision_range * 1.5),
+            trail_grid: SpatialGrid::new(config.vision_range * 1.5),
             time: 0.0,
             volcano_timer: 0.0,
             meteorite_timer: 0.0,
@@ -129,9 +129,13 @@ impl World {
             trail_query_buf: Vec::new(),
             trail_emit_counter: 0,
         };
-        // 初始连喷三波，提供充足起始能量
+        // 初始连喷三波，提供充足起始能量（直接落地，不杀伤）
         for _ in 0..3 {
             world.volcano_erupt(config);
+        }
+        // 初始粒子直接落地
+        for p in &mut world.energy_particles {
+            p.falling_timer = 0.0;
         }
 
         for _ in 0..config.min_creatures {
@@ -179,6 +183,9 @@ impl World {
         let spatial_start = Instant::now();
         self.rebuild_spatial_index();
         self.perf_stats.spatial_ms = spatial_start.elapsed().as_secs_f64() * 1000.0;
+
+        // 落地杀伤（下落粒子倒计时 + 落地时砸死附近生物）
+        self.process_landings(dt, config);
 
         // 更新生物
         self.update_creatures(dt, config);
@@ -275,16 +282,17 @@ impl World {
         let mut rng = rand::thread_rng();
         for _ in 0..config.volcano_count {
             let angle = rng.gen_range(0.0..std::f64::consts::TAU);
-            // 稀-密-稀分布：三角分布，峰值在 50% 半径处，中心和边缘都稀疏
-            let u1 = rng.gen_range(0.0_f64..1.0);
-            let u2 = rng.gen_range(0.0_f64..1.0);
-            let r = (u1 + u2) * 0.5 * config.volcano_radius;
+            // 中心富集：u² 分布，50%粒子在25%半径内
+            let u: f64 = rng.gen_range(0.0..1.0);
+            let r = u * u * config.volcano_radius;
             let x = config.volcano_x + r * angle.cos();
             let y = config.volcano_y + r * angle.sin();
             let energy_id = self.next_energy_id;
             self.next_energy_id += 1;
+            // 分批落下：falling_timer 在 0 ~ volcano_fall_duration 内均匀分布
+            let fall_t = rng.gen_range(0.0..config.volcano_fall_duration.max(0.01));
             self.energy_particles.push(EnergyParticle::new(
-                energy_id, x, y, config.volcano_particle_energy, f64::MAX,
+                energy_id, x, y, config.volcano_particle_energy, f64::MAX, fall_t, ParticleSource::Volcano,
             ));
         }
     }
@@ -311,8 +319,10 @@ impl World {
 
             let energy_id = self.next_energy_id;
             self.next_energy_id += 1;
+            // 分批落下
+            let fall_t = rng.gen_range(0.0..config.meteorite_fall_duration.max(0.01));
             self.energy_particles.push(EnergyParticle::new(
-                energy_id, x, y, config.meteorite_particle_energy, f64::MAX,
+                energy_id, x, y, config.meteorite_particle_energy, f64::MAX, fall_t, ParticleSource::Meteorite,
             ));
         }
     }
@@ -341,6 +351,38 @@ impl World {
         }
     }
 
+    // ========== 落地杀伤 ==========
+
+    fn process_landings(&mut self, dt: f64, config: &Config) {
+        for i in 0..self.energy_particles.len() {
+            let p = &mut self.energy_particles[i];
+            if !p.alive || p.falling_timer <= 0.0 { continue; }
+
+            p.falling_timer -= dt;
+
+            if p.falling_timer <= 0.0 {
+                // 刚落地 → 杀伤附近生物（需精确距离检查）
+                let kill_r = match p.source {
+                    ParticleSource::Volcano => config.volcano_kill_radius,
+                    ParticleSource::Meteorite => config.meteorite_kill_radius,
+                };
+                let kill_r2 = kill_r * kill_r;
+                let px = p.x;
+                let py = p.y;
+                let nearby = self.creature_grid.query(px, py, kill_r);
+                for &ci in &nearby {
+                    if self.creatures[ci].alive {
+                        let dx = self.creatures[ci].x - px;
+                        let dy = self.creatures[ci].y - py;
+                        if dx * dx + dy * dy < kill_r2 {
+                            self.creatures[ci].alive = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ========== 更新生物 ==========
 
     fn update_creatures(&mut self, dt: f64, config: &Config) {
@@ -360,22 +402,23 @@ impl World {
 
             // 环境温度
             let ambient = config.ambient_temperature(self.creatures[i].x, self.creatures[i].y);
-            let env_multiplier = 1.0 + config.heat_metabolism_factor * ambient;
 
-            // 器官消耗
-            let mut organ_cost = 0.0;
-            if self.creatures[i].genome.organ_genes.nose { organ_cost += config.organ_nose_cost; }
-            if self.creatures[i].genome.organ_genes.eyes { organ_cost += config.organ_eye_cost; }
-            if self.creatures[i].genome.organ_genes.mouth { organ_cost += config.organ_mouth_cost; }
-
-            // 基础代谢 + 器官消耗（含环境温度影响）
+            // 基础代谢（无器官固定消耗，器官按需计费）
             let age_multiplier = 1.0 + self.creatures[i].age * config.age_metabolism_factor;
-            let metabolism_cost = (config.base_metabolism + organ_cost) * age_multiplier * env_multiplier * dt;
+            let metabolism_cost = config.base_metabolism * age_multiplier * dt;
             self.creatures[i].energy -= metabolism_cost;
 
+            // 冷却递减
+            self.creatures[i].nose_cooldown_timer -= dt;
+            self.creatures[i].eye_cooldown_timer -= dt;
+            self.creatures[i].mouth_cooldown_timer -= dt;
+
             // 体温逸散：系数 × 冷却时长 × 周长 × (1 + (1 - ambient) × cold_loss_factor)
-            let cold_duration = (self.time - self.creatures[i].last_warm_time).max(0.0);
-            let circumference = (self.creatures[i].energy.max(0.0) * 1.28).cbrt() * std::f64::consts::TAU;
+            // 冷却上限 = 体型半径 × thermal_mass_factor（热平衡：大体型热惯性高，更抗寒）
+            let body_radius = (self.creatures[i].energy.max(0.0) * 1.28).cbrt();
+            let cold_duration_raw = (self.time - self.creatures[i].last_warm_time).max(0.0);
+            let cold_duration = cold_duration_raw.min(body_radius * config.thermal_mass_factor);
+            let circumference = body_radius * std::f64::consts::TAU;
             let cold_env_factor = 1.0 + (1.0 - ambient) * config.cold_loss_factor;
             let heat_cost = config.heat_dissipation_coefficient * cold_duration * circumference * cold_env_factor * dt;
             self.creatures[i].energy -= heat_cost;
@@ -392,9 +435,9 @@ impl World {
                 continue;
             }
 
-            // 感知（鼻子+双眼模型）
+            // 感知（带冷却的按需扫描）
             let t0 = Instant::now();
-            self.compute_perception(i, config);
+            self.compute_perception_with_cooldown(i, config);
             perceive_time += t0.elapsed().as_secs_f64() * 1000.0;
 
             // 神经网络决策
@@ -417,31 +460,80 @@ impl World {
         self.perf_stats.creature_count = alive_count;
     }
 
-    // ========== 感知系统（鼻子+双眼） ==========
+    // ========== 感知系统（鼻子+双眼，带冷却） ==========
 
-    /// 计算 16 维感知输入
-    /// 鼻子 [0..4]: 能量粒子强度, 同族强度, 异族强度, 痕迹强度, 痕迹基因相似度
-    /// 左眼 [5..8]: 能量粒子接近度, 同族接近度, 异族接近度, 痕迹接近度
-    /// 右眼 [9..12]: 能量粒子接近度, 同族接近度, 异族接近度, 痕迹接近度
-    /// 自身 [13..15]: 自身能量, 体温状态, 环境温度
-    fn compute_perception(&mut self, creature_idx: usize, config: &Config) {
+    /// 带冷却的感知：仅在冷却结束时触发扫描，否则保持缓存
+    fn compute_perception_with_cooldown(&mut self, creature_idx: usize, config: &Config) {
+        let has_nose = self.creatures[creature_idx].genome.organ_genes.nose;
+        let has_eyes = self.creatures[creature_idx].genome.organ_genes.eyes;
+        let nose_ready = has_nose && self.creatures[creature_idx].nose_cooldown_timer <= 0.0;
+        let eyes_ready = has_eyes && self.creatures[creature_idx].eye_cooldown_timer <= 0.0;
+
+        // 自身状态 [11..13] 始终更新
+        let cx = self.creatures[creature_idx].x;
+        let cy = self.creatures[creature_idx].y;
+        self.creatures[creature_idx].perception_cache[11] = (self.creatures[creature_idx].energy / 200.0).min(1.0);
+        let cold_duration = (self.time - self.creatures[creature_idx].last_warm_time).max(0.0);
+        self.creatures[creature_idx].perception_cache[12] = (cold_duration / 100.0).min(1.0);
+        self.creatures[creature_idx].perception_cache[13] = config.ambient_temperature(cx, cy);
+
+        if !nose_ready && !eyes_ready {
+            return; // 两者都在冷却，保持缓存不变
+        }
+
+        // 执行实际扫描
+        self.compute_perception_inner(creature_idx, config, nose_ready, eyes_ready);
+
+        // 扣费并重置冷却
+        if nose_ready {
+            let nose_power = self.creatures[creature_idx].genome.organ_genes.nose_power;
+            self.creatures[creature_idx].energy -= nose_power * nose_power * config.nose_scan_cost;
+            self.creatures[creature_idx].nose_cooldown_timer = config.nose_cooldown;
+        }
+        if eyes_ready {
+            let eye_power = self.creatures[creature_idx].genome.organ_genes.eye_power;
+            self.creatures[creature_idx].energy -= eye_power * eye_power * config.eye_scan_cost;
+            self.creatures[creature_idx].eye_cooldown_timer = config.eye_cooldown;
+        }
+    }
+
+    /// 实际感知扫描（按 scan_nose/scan_eyes 选择性更新通道）
+    fn compute_perception_inner(&mut self, creature_idx: usize, config: &Config, scan_nose: bool, scan_eyes: bool) {
         let cx = self.creatures[creature_idx].x;
         let cy = self.creatures[creature_idx].y;
         let heading = self.creatures[creature_idx].heading;
         let vision = config.vision_range;
         let threshold = config.species_similarity_threshold;
-        let has_nose = self.creatures[creature_idx].genome.organ_genes.nose;
-        let has_eyes = self.creatures[creature_idx].genome.organ_genes.eyes;
         let my_hash = self.creatures[creature_idx].genome_hash;
 
-        let nose_half = config.nose_half_angle; // 30°
-        let eye_half_fov = std::f64::consts::PI / 3.0; // 60°
+        let nose_power = self.creatures[creature_idx].genome.organ_genes.nose_power;
+        let eye_power = self.creatures[creature_idx].genome.organ_genes.eye_power;
+        let nose_range = nose_power * vision * 1.5;
+        let eye_range = eye_power * vision;
+
+        let nose_half = config.nose_half_angle;
+        let eye_half_fov = 70.0_f64.to_radians(); // 70°半角，左右重叠40°（≈鼻子宽度）
+        let eye_offset_angle = 50.0_f64.to_radians();
         let eye_dirs = [
-            heading - std::f64::consts::PI / 3.0,  // 左眼 -60°
-            heading + std::f64::consts::PI / 3.0,  // 右眼 +60°
+            heading - eye_offset_angle,
+            heading + eye_offset_angle,
+        ];
+        // 眼睛世界坐标（用于计算从眼睛出发的距离）
+        let body_radius = (self.creatures[creature_idx].energy * 1.28).cbrt();
+        let eye_positions = [
+            (cx + body_radius * (heading - eye_offset_angle).cos(),
+             cy + body_radius * (heading - eye_offset_angle).sin()),
+            (cx + body_radius * (heading + eye_offset_angle).cos(),
+             cy + body_radius * (heading + eye_offset_angle).sin()),
         ];
 
-        let mut input = [0.0_f64; 16];
+        // 空间查询范围取需要扫描的最大范围
+        let query_range = match (scan_nose, scan_eyes) {
+            (true, true) => nose_range.max(eye_range),
+            (true, false) => nose_range,
+            (false, true) => eye_range,
+            (false, false) => return,
+        };
 
         // 鼻子通道累加
         let mut nose_food = 0.0_f64;
@@ -455,7 +547,6 @@ impl World {
         let mut eye_food = [f64::MAX; 2];
         let mut eye_ally = [f64::MAX; 2];
         let mut eye_enemy = [f64::MAX; 2];
-        let mut eye_trail = [f64::MAX; 2];
 
         // 临时取出缓冲区
         let mut creature_buf = std::mem::take(&mut self.creature_query_buf);
@@ -463,7 +554,7 @@ impl World {
         let mut trail_buf = std::mem::take(&mut self.trail_query_buf);
 
         // === 能量粒子 ===
-        self.energy_grid.query_into(cx, cy, vision, &mut energy_buf);
+        self.energy_grid.query_into(cx, cy, query_range, &mut energy_buf);
         for &idx in &energy_buf {
             let particle = &self.energy_particles[idx];
             if !particle.alive { continue; }
@@ -471,34 +562,40 @@ impl World {
             let dx = particle.x - cx;
             let dy = particle.y - cy;
             let dist = (dx * dx + dy * dy).sqrt();
-            if dist <= 0.0 || dist > vision { continue; }
+            if dist <= 0.0 { continue; }
 
             let angle = dy.atan2(dx);
-            let proximity = 1.0 - dist / vision;
 
-            // 鼻子（正前方，nose_half角）
-            if has_nose {
+            // 鼻子
+            if scan_nose && dist <= nose_range {
                 let diff = angle_diff(angle, heading);
                 if diff.abs() <= nose_half {
+                    let proximity = 1.0 - dist / nose_range;
                     let strength = proximity * proximity;
                     let energy_ratio = particle.energy / particle.initial_energy;
                     nose_food += strength * energy_ratio;
                 }
             }
 
-            // 双眼
-            if has_eyes {
+            // 双眼（从眼睛位置算距离）
+            if scan_eyes {
                 for (eye_i, &eye_dir) in eye_dirs.iter().enumerate() {
                     let diff = angle_diff(angle, eye_dir);
-                    if diff.abs() <= eye_half_fov && dist < eye_food[eye_i] {
-                        eye_food[eye_i] = dist;
+                    if diff.abs() <= eye_half_fov {
+                        let (ex, ey) = eye_positions[eye_i];
+                        let edx = particle.x - ex;
+                        let edy = particle.y - ey;
+                        let eye_dist = (edx * edx + edy * edy).sqrt();
+                        if eye_dist <= eye_range && eye_dist < eye_food[eye_i] {
+                            eye_food[eye_i] = eye_dist;
+                        }
                     }
                 }
             }
         }
 
         // === 生物 ===
-        self.creature_grid.query_into(cx, cy, vision, &mut creature_buf);
+        self.creature_grid.query_into(cx, cy, query_range, &mut creature_buf);
         for &idx in &creature_buf {
             if idx == creature_idx { continue; }
             let other = &self.creatures[idx];
@@ -507,10 +604,9 @@ impl World {
             let dx = other.x - cx;
             let dy = other.y - cy;
             let dist = (dx * dx + dy * dy).sqrt();
-            if dist <= 0.0 || dist > vision { continue; }
+            if dist <= 0.0 { continue; }
 
             let angle = dy.atan2(dx);
-            let proximity = 1.0 - dist / vision;
             let similarity = self.get_similarity(
                 &self.creatures[creature_idx],
                 &self.creatures[idx],
@@ -518,9 +614,10 @@ impl World {
             let is_ally = similarity >= threshold;
 
             // 鼻子
-            if has_nose {
+            if scan_nose && dist <= nose_range {
                 let diff = angle_diff(angle, heading);
                 if diff.abs() <= nose_half {
+                    let proximity = 1.0 - dist / nose_range;
                     let strength = proximity * proximity;
                     if is_ally {
                         nose_ally += strength;
@@ -530,39 +627,43 @@ impl World {
                 }
             }
 
-            // 双眼
-            if has_eyes {
+            // 双眼（从眼睛位置算距离）
+            if scan_eyes {
                 for (eye_i, &eye_dir) in eye_dirs.iter().enumerate() {
                     let diff = angle_diff(angle, eye_dir);
                     if diff.abs() <= eye_half_fov {
-                        if is_ally {
-                            if dist < eye_ally[eye_i] { eye_ally[eye_i] = dist; }
-                        } else if dist < eye_enemy[eye_i] {
-                            eye_enemy[eye_i] = dist;
+                        let (ex, ey) = eye_positions[eye_i];
+                        let edx = other.x - ex;
+                        let edy = other.y - ey;
+                        let eye_dist = (edx * edx + edy * edy).sqrt();
+                        if eye_dist <= eye_range {
+                            if is_ally {
+                                if eye_dist < eye_ally[eye_i] { eye_ally[eye_i] = eye_dist; }
+                            } else if eye_dist < eye_enemy[eye_i] {
+                                eye_enemy[eye_i] = eye_dist;
+                            }
                         }
                     }
                 }
             }
         }
 
-        // === 痕迹点 ===
-        self.trail_grid.query_into(cx, cy, vision, &mut trail_buf);
-        for &idx in &trail_buf {
-            let trail = &self.trail_points[idx];
-            if !trail.alive { continue; }
+        // === 痕迹点（仅鼻子探测） ===
+        if scan_nose {
+            self.trail_grid.query_into(cx, cy, nose_range, &mut trail_buf);
+            for &idx in &trail_buf {
+                let trail = &self.trail_points[idx];
+                if !trail.alive { continue; }
 
-            let dx = trail.x - cx;
-            let dy = trail.y - cy;
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist <= 0.0 || dist > vision { continue; }
+                let dx = trail.x - cx;
+                let dy = trail.y - cy;
+                let dist = (dx * dx + dy * dy).sqrt();
+                if dist <= 0.0 || dist > nose_range { continue; }
 
-            let angle = dy.atan2(dx);
-            let proximity = 1.0 - dist / vision;
-
-            // 鼻子
-            if has_nose {
+                let angle = dy.atan2(dx);
                 let diff = angle_diff(angle, heading);
                 if diff.abs() <= nose_half {
+                    let proximity = 1.0 - dist / nose_range;
                     let strength = proximity * proximity;
                     let energy_ratio = trail.energy / trail.initial_energy;
                     let s = strength * energy_ratio;
@@ -573,16 +674,6 @@ impl World {
                     }
                 }
             }
-
-            // 双眼
-            if has_eyes {
-                for (eye_i, &eye_dir) in eye_dirs.iter().enumerate() {
-                    let diff = angle_diff(angle, eye_dir);
-                    if diff.abs() <= eye_half_fov && dist < eye_trail[eye_i] {
-                        eye_trail[eye_i] = dist;
-                    }
-                }
-            }
         }
 
         // 归还缓冲区
@@ -590,43 +681,29 @@ impl World {
         self.energy_query_buf = energy_buf;
         self.trail_query_buf = trail_buf;
 
-        // === 写入通道 ===
+        // === 写入通道（仅更新已扫描的通道） ===
 
-        // 鼻子 [0..4]
-        if has_nose {
-            input[0] = nose_food.min(1.0);
-            input[1] = nose_ally.min(1.0);
-            input[2] = nose_enemy.min(1.0);
-            input[3] = nose_trail.min(1.0);
-            input[4] = if best_trail_hash == my_hash { 1.0 } else { 0.0 };
+        if scan_nose {
+            self.creatures[creature_idx].perception_cache[0] = nose_food.min(1.0);
+            self.creatures[creature_idx].perception_cache[1] = nose_ally.min(1.0);
+            self.creatures[creature_idx].perception_cache[2] = nose_enemy.min(1.0);
+            self.creatures[creature_idx].perception_cache[3] = nose_trail.min(1.0);
+            self.creatures[creature_idx].perception_cache[4] = if best_trail_hash == my_hash { 1.0 } else { 0.0 };
         }
 
-        // 左眼 [5..8]
-        if has_eyes {
-            input[5] = if eye_food[0] < f64::MAX { 1.0 - eye_food[0] / vision } else { 0.0 };
-            input[6] = if eye_ally[0] < f64::MAX { 1.0 - eye_ally[0] / vision } else { 0.0 };
-            input[7] = if eye_enemy[0] < f64::MAX { 1.0 - eye_enemy[0] / vision } else { 0.0 };
-            input[8] = if eye_trail[0] < f64::MAX { 1.0 - eye_trail[0] / vision } else { 0.0 };
-
-            // 右眼 [9..12]
-            input[9]  = if eye_food[1] < f64::MAX { 1.0 - eye_food[1] / vision } else { 0.0 };
-            input[10] = if eye_ally[1] < f64::MAX { 1.0 - eye_ally[1] / vision } else { 0.0 };
-            input[11] = if eye_enemy[1] < f64::MAX { 1.0 - eye_enemy[1] / vision } else { 0.0 };
-            input[12] = if eye_trail[1] < f64::MAX { 1.0 - eye_trail[1] / vision } else { 0.0 };
+        if scan_eyes {
+            self.creatures[creature_idx].perception_cache[5] = if eye_food[0] < f64::MAX { 1.0 - eye_food[0] / eye_range } else { 0.0 };
+            self.creatures[creature_idx].perception_cache[6] = if eye_ally[0] < f64::MAX { 1.0 - eye_ally[0] / eye_range } else { 0.0 };
+            self.creatures[creature_idx].perception_cache[7] = if eye_enemy[0] < f64::MAX { 1.0 - eye_enemy[0] / eye_range } else { 0.0 };
+            self.creatures[creature_idx].perception_cache[8]  = if eye_food[1] < f64::MAX { 1.0 - eye_food[1] / eye_range } else { 0.0 };
+            self.creatures[creature_idx].perception_cache[9]  = if eye_ally[1] < f64::MAX { 1.0 - eye_ally[1] / eye_range } else { 0.0 };
+            self.creatures[creature_idx].perception_cache[10] = if eye_enemy[1] < f64::MAX { 1.0 - eye_enemy[1] / eye_range } else { 0.0 };
         }
-
-        // 自身状态 [13..15]
-        input[13] = (self.creatures[creature_idx].energy / 200.0).min(1.0);
-        let cold_duration = (self.time - self.creatures[creature_idx].last_warm_time).max(0.0);
-        input[14] = (cold_duration / 100.0).min(1.0);
-        input[15] = config.ambient_temperature(cx, cy);
-
-        self.creatures[creature_idx].perception_cache = input;
     }
 
-    // ========== 动作系统（4输出） ==========
+    // ========== 动作系统（6输出） ==========
 
-    /// 执行动作：转向(0), 速度(1), 嘴(2), 繁殖(3)
+    /// 执行动作：转向(0), 速度(1), 嘴(2), 繁殖(3), 繁殖阈值(4), 子代能量比例(5)
     fn execute_actions(&mut self, creature_idx: usize, outputs: &[f64], dt: f64, config: &Config) {
         // 输出0: 转向
         let turn = outputs.get(0).copied().unwrap_or(0.0);
@@ -634,8 +711,14 @@ impl World {
         let speed = outputs.get(1).copied().unwrap_or(0.0);
         // 输出2: 嘴
         let mouth = outputs.get(2).copied().unwrap_or(0.0);
-        // 输出3: 繁殖
+        // 输出3: 繁殖意愿
         let reproduce = outputs.get(3).copied().unwrap_or(0.0);
+        // 输出4: 繁殖阈值 tanh(-1~1) → sigmoid → 20~200
+        let raw4 = outputs.get(4).copied().unwrap_or(0.0);
+        let reproduce_threshold = 20.0 + (raw4 * 0.5 + 0.5).clamp(0.0, 1.0) * 180.0;
+        // 输出5: 子代能量比例 tanh(-1~1) → sigmoid → 0.1~0.5
+        let raw5 = outputs.get(5).copied().unwrap_or(0.0);
+        let reproduce_ratio = 0.1 + (raw5 * 0.5 + 0.5).clamp(0.0, 1.0) * 0.4;
 
         // 转向 + 移动
         let turn_rate = std::f64::consts::PI * 2.0; // 最大每秒一圈
@@ -660,12 +743,19 @@ impl World {
             self.creatures[creature_idx].energy -= move_cost;
             self.action_counts[0] += 1; // 移动
 
-            // 生成痕迹点（能量守恒：移动消耗转化为痕迹，每两帧生成一次）
+            // 生成痕迹点（能量守恒：移动消耗转化为痕迹，每16帧生成一次）
+            // 气味驳杂抑制：尾端体型半径内存在其他生物的痕迹则不产生
             if self.trail_emit_counter % 16 == 0 {
-                let genome_hash = self.creatures[creature_idx].genome_hash;
-                let creator_id = self.creatures[creature_idx].id;
                 let creature_radius = (self.creatures[creature_idx].energy * 1.28).cbrt();
-                self.trail_points.push(TrailPoint::new(old_x, old_y, move_cost, genome_hash, creator_id, creature_radius));
+                let creator_id = self.creatures[creature_idx].id;
+                let nearby_trails = self.trail_grid.query(old_x, old_y, creature_radius);
+                let has_nearby_trail = nearby_trails.iter().any(|&ti| {
+                    self.trail_points[ti].alive && self.trail_points[ti].creator_id != creator_id
+                });
+                if !has_nearby_trail {
+                    let genome_hash = self.creatures[creature_idx].genome_hash;
+                    self.trail_points.push(TrailPoint::new(old_x, old_y, move_cost, genome_hash, creator_id, creature_radius));
+                }
             }
         }
 
@@ -674,14 +764,13 @@ impl World {
 
         // 繁殖
         if reproduce > 0.2 {
-            if self.action_reproduce(creature_idx, reproduce, config) {
+            if self.action_reproduce(creature_idx, reproduce_threshold, reproduce_ratio, config) {
                 self.action_counts[4] += 1; // 繁殖
             }
         }
     }
 
-    /// 嘴动作：接触食物自动吸收，对生物根据mouth值咬或喂
-    /// 所有能量交互以嘴巴位置为检测中心（嘴巴碰到才触发）
+    /// 嘴动作：接触食物/痕迹自动吸收（不受冷却限制），对生物咬/喂（受冷却限制）
     /// 无嘴生物：不能吃/咬/喂（但可以被喂 → 寄生可能）
     fn action_mouth(&mut self, idx: usize, mouth: f64, config: &Config) {
         let has_mouth = self.creatures[idx].genome.organ_genes.mouth;
@@ -692,31 +781,28 @@ impl World {
         let heading = self.creatures[idx].heading;
         let mx = self.creatures[idx].x + heading.cos() * body_radius * 1.05;
         let my = self.creatures[idx].y + heading.sin() * body_radius * 1.05;
-        // 嘴巴接触范围 = 嘴巴弧度覆盖的大致半径
         let mouth_range = body_radius * 0.5;
-        // 空间查询范围要稍大以确保能查到目标
         let query_range = mouth_range + config.contact_range;
 
-        // 接触食物自动吸收
+        // 接触食物自动吸收（不受冷却限制，跳过下落中的粒子）
         let nearby_energy = self.energy_grid.query(mx, my, query_range);
         for &particle_idx in &nearby_energy {
-            if self.energy_particles[particle_idx].alive {
+            if self.energy_particles[particle_idx].alive && !self.energy_particles[particle_idx].is_falling() {
                 let px = self.energy_particles[particle_idx].x;
                 let py = self.energy_particles[particle_idx].y;
                 let dist = ((px - mx).powi(2) + (py - my).powi(2)).sqrt();
                 if dist < mouth_range {
                     let energy = self.energy_particles[particle_idx].consume();
                     self.creatures[idx].energy += energy;
-                    // 感温：吃到食物（回暖20%）
                     let cold = (self.time - self.creatures[idx].last_warm_time).max(0.0);
                     self.creatures[idx].last_warm_time += cold * 0.2;
-                    self.action_counts[1] += 1; // 吸收
-                    break; // 每帧吸收一个
+                    self.action_counts[1] += 1;
+                    break;
                 }
             }
         }
 
-        // 接触痕迹点自动吸收（痕迹点存在超过2秒后才可被吸收，同族痕迹不能吃）
+        // 接触痕迹点自动吸收（不受冷却限制）
         let my_genome_hash = self.creatures[idx].genome_hash;
         let nearby_trails = self.trail_grid.query(mx, my, query_range);
         for &trail_idx in &nearby_trails {
@@ -728,71 +814,69 @@ impl World {
                 if dist < mouth_range {
                     let energy = self.trail_points[trail_idx].consume();
                     self.creatures[idx].energy += energy;
-                    break; // 每帧吸收一个
+                    break;
                 }
             }
         }
 
-        // 对生物：mouth < -0.1 咬, mouth > 0.1 喂
-        if mouth.abs() <= 0.1 {
-            return;
-        }
+        // 对生物的咬/喂 — 受嘴巴冷却限制
+        if mouth.abs() <= 0.1 { return; }
+        if self.creatures[idx].mouth_cooldown_timer > 0.0 { return; }
+
+        let mouth_power = self.creatures[idx].genome.organ_genes.mouth_power;
 
         let nearby_creatures = self.creature_grid.query(mx, my, query_range);
         for &other_idx in &nearby_creatures {
-            if other_idx == idx || !self.creatures[other_idx].alive {
-                continue;
-            }
+            if other_idx == idx || !self.creatures[other_idx].alive { continue; }
             let ox = self.creatures[other_idx].x;
             let oy = self.creatures[other_idx].y;
             let other_radius = (self.creatures[other_idx].energy * 1.28).cbrt();
-            // 嘴巴碰到对方身体：距离 < 嘴巴范围 + 对方半径
             let dist = ((ox - mx).powi(2) + (oy - my).powi(2)).sqrt();
-            if dist >= mouth_range + other_radius {
-                continue;
-            }
+            if dist >= mouth_range + other_radius { continue; }
 
             if mouth < -0.1 {
-                // 咬（捕食）— 战力比对决定咬伤量，相似度影响消化效率
+                // 咬（捕食）— 咬合力 = |mouth| × mouth_power
+                let bite_force = (-mouth).min(1.0) * mouth_power;
                 let my_energy = self.creatures[idx].energy;
                 let other_energy = self.creatures[other_idx].energy;
 
-                // 攻击方战力
+                // 攻击方战力 × 咬合力
                 let my_warmth = 1.0 - ((self.time - self.creatures[idx].last_warm_time).max(0.0) / 100.0).min(1.0);
                 let my_speed_norm = (self.creatures[idx].current_speed / 50.0).min(1.0);
                 let my_ally_energy = self.compute_nearby_ally_energy(idx, config);
-                let my_power = config.combat_power(my_energy, my_warmth, my_speed_norm, my_ally_energy);
+                let attacker_score = config.combat_power(my_energy, my_warmth, my_speed_norm, my_ally_energy) * bite_force;
 
                 // 防御方战力
                 let other_warmth = 1.0 - ((self.time - self.creatures[other_idx].last_warm_time).max(0.0) / 100.0).min(1.0);
                 let other_speed_norm = (self.creatures[other_idx].current_speed / 50.0).min(1.0);
                 let other_ally_energy = self.compute_nearby_ally_energy(other_idx, config);
-                let other_power = config.combat_power(other_energy, other_warmth, other_speed_norm, other_ally_energy);
+                let defender_score = config.combat_power(other_energy, other_warmth, other_speed_norm, other_ally_energy);
 
-                // 战力比 → 0~1，等战力时=0.5
-                let power_ratio = my_power / (my_power + other_power + 0.001);
-                let bite_strength = (-mouth).min(1.0);
-                let transfer_amount = other_energy * bite_strength * 0.2 * power_ratio * 2.0;
+                let damage_ratio = attacker_score / (attacker_score + defender_score + 0.001);
+                let transfer = other_energy * damage_ratio * config.bite_transfer_rate;
 
                 let similarity = self.get_similarity(&self.creatures[idx], &self.creatures[other_idx]);
                 let efficiency = 1.0 - similarity;
-                self.creatures[other_idx].energy -= transfer_amount;
-                self.creatures[idx].energy += transfer_amount * efficiency;
-                self.action_counts[2] += 1; // 咬
+                self.creatures[other_idx].energy -= transfer;
+                self.creatures[idx].energy += transfer * efficiency;
+                // 咬的能量成本
+                self.creatures[idx].energy -= (-mouth).min(1.0) * mouth_power * config.bite_cost;
+                self.action_counts[2] += 1;
             } else {
-                // 喂（哺育）— 固定效率，无体型限制
+                // 喂（哺育）— 无战力评估
+                let feed_strength = mouth.min(1.0) * mouth_power;
                 let my_energy = self.creatures[idx].energy;
-                let feed_strength = mouth.min(1.0);
-                let transfer_ratio = feed_strength * 0.2;
-                let transfer_amount = my_energy * transfer_ratio;
-                self.creatures[idx].energy -= transfer_amount;
-                self.creatures[other_idx].energy += transfer_amount * config.feed_efficiency;
-                // 感温：被哺育（回暖70%，远强于吃食物的20%）
+                let transfer = my_energy * feed_strength * 0.2;
+                self.creatures[idx].energy -= transfer;
+                self.creatures[other_idx].energy += transfer * config.feed_efficiency;
                 let cold = (self.time - self.creatures[other_idx].last_warm_time).max(0.0);
                 self.creatures[other_idx].last_warm_time += cold * 0.7;
-                self.action_counts[3] += 1; // 喂
+                self.action_counts[3] += 1;
             }
-            break; // 每帧只对一个目标
+
+            // 重置嘴巴冷却
+            self.creatures[idx].mouth_cooldown_timer = config.mouth_cooldown;
+            break; // 每次只对一个目标
         }
     }
 
@@ -814,16 +898,18 @@ impl World {
     }
 
     /// 繁殖（支持有性/无性）
-    fn action_reproduce(&mut self, idx: usize, value: f64, config: &Config) -> bool {
-        if value <= 0.2 { return false; }
-        if self.creatures[idx].energy < config.reproduce_threshold { return false; }
+    fn action_reproduce(&mut self, idx: usize, threshold: f64, ratio: f64, config: &Config) -> bool {
+        if self.creatures[idx].energy < threshold { return false; }
 
-        let child_energy = self.creatures[idx].energy * config.reproduce_energy_ratio;
+        let child_energy = self.creatures[idx].energy * ratio;
         self.creatures[idx].energy -= child_energy;
 
         let mut rng = rand::thread_rng();
-        let offset_x = rng.gen_range(-10.0..10.0);
-        let offset_y = rng.gen_range(-10.0..10.0);
+        let heading = self.creatures[idx].heading;
+        let body_radius = (self.creatures[idx].energy * 1.28).cbrt();
+        let behind_dist = body_radius * 2.0 + rng.gen_range(0.0..5.0);
+        let offset_x = -heading.cos() * behind_dist + rng.gen_range(-3.0..3.0);
+        let offset_y = -heading.sin() * behind_dist + rng.gen_range(-3.0..3.0);
 
         // 尝试找同种配偶
         let mate_genome = self.find_mate(idx, config);
@@ -885,7 +971,11 @@ impl World {
 
     fn update_energy_particles(&mut self, dt: f64, config: &Config) {
         for particle in &mut self.energy_particles {
-            particle.update(dt, config.particle_decay_rate);
+            let decay = match particle.source {
+                ParticleSource::Volcano => config.volcano_decay_rate,
+                ParticleSource::Meteorite => config.meteorite_decay_rate,
+            };
+            particle.update(dt, decay);
         }
     }
 

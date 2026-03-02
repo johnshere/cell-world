@@ -13,7 +13,16 @@ pub struct OrganGenes {
     pub nose: bool,   // 鼻子
     pub eyes: bool,   // 双眼（一个基因控制左右两只）
     pub mouth: bool,  // 嘴巴
+    #[cfg_attr(feature = "persistence", serde(default = "default_organ_power"))]
+    pub nose_power: f64,   // 鼻子功率 0~1
+    #[cfg_attr(feature = "persistence", serde(default = "default_organ_power"))]
+    pub eye_power: f64,    // 眼睛功率 0~1
+    #[cfg_attr(feature = "persistence", serde(default = "default_organ_power"))]
+    pub mouth_power: f64,  // 嘴巴功率 0~1
 }
+
+#[cfg(feature = "persistence")]
+fn default_organ_power() -> f64 { 0.5 }
 
 impl Default for OrganGenes {
     fn default() -> Self {
@@ -21,6 +30,9 @@ impl Default for OrganGenes {
             nose: true,
             eyes: true,
             mouth: true,
+            nose_power: 0.5,
+            eye_power: 0.5,
+            mouth_power: 0.5,
         }
     }
 }
@@ -63,18 +75,20 @@ pub struct Genome {
 }
 
 impl Genome {
-    /// 输入维度 = 16（鼻子5 + 左眼4 + 右眼4 + 自身3）
+    /// 输入维度 = 14（鼻子5 + 左眼3 + 右眼3 + 自身3）
     /// 鼻子 [0..4]: 能量粒子强度, 同族强度, 异族强度, 痕迹强度, 痕迹基因相似度
-    /// 左眼 [5..8]: 能量粒子接近度, 同族接近度, 异族接近度, 痕迹接近度
-    /// 右眼 [9..12]: 能量粒子接近度, 同族接近度, 异族接近度, 痕迹接近度
-    /// 自身 [13..15]: 自身能量, 体温状态, 环境温度
-    pub const INPUT_SIZE: usize = 16;
-    /// 输出维度（固定4个）
+    /// 左眼 [5..7]: 能量粒子接近度, 同族接近度, 异族接近度
+    /// 右眼 [8..10]: 能量粒子接近度, 同族接近度, 异族接近度
+    /// 自身 [11..13]: 自身能量, 体温状态, 环境温度
+    pub const INPUT_SIZE: usize = 14;
+    /// 输出维度（固定6个）
     /// [0] 转向角  tanh(-1~1)
     /// [1] 速度    tanh(-1~1) → abs后映射
     /// [2] 嘴      tanh(-1~1)  负=咬, 正=喂, 接触食物自动吸收
-    /// [3] 繁殖    tanh(-1~1)  >阈值时触发
-    pub const OUTPUT_SIZE: usize = 4;
+    /// [3] 繁殖    tanh(-1~1)  >0.2时触发
+    /// [4] 繁殖阈值 sigmoid(0~1) → 映射到 20~200 能量
+    /// [5] 子代能量比例 sigmoid(0~1) → 映射到 0.1~0.5
+    pub const OUTPUT_SIZE: usize = 6;
 
     /// 创建最小基因组（只有输入输出，无隐藏层）
     pub fn random_minimal(min_connections: usize, max_connections: usize) -> Self {
@@ -162,6 +176,16 @@ impl Genome {
                 0 => child.organ_genes.nose = !child.organ_genes.nose,
                 1 => child.organ_genes.eyes = !child.organ_genes.eyes,
                 _ => child.organ_genes.mouth = !child.organ_genes.mouth,
+            }
+        }
+
+        // 器官功率变异（概率 rate * 0.1，与器官布尔变异同频）
+        if rng.gen::<f64>() < rate * 0.1 {
+            let delta = rng.gen_range(-0.1..0.1);
+            match rng.gen_range(0..3) {
+                0 => child.organ_genes.nose_power = (child.organ_genes.nose_power + delta).clamp(0.0, 1.0),
+                1 => child.organ_genes.eye_power = (child.organ_genes.eye_power + delta).clamp(0.0, 1.0),
+                _ => child.organ_genes.mouth_power = (child.organ_genes.mouth_power + delta).clamp(0.0, 1.0),
             }
         }
 
@@ -273,6 +297,9 @@ impl Genome {
         self.organ_genes.nose.hash(&mut hasher);
         self.organ_genes.eyes.hash(&mut hasher);
         self.organ_genes.mouth.hash(&mut hasher);
+        ((self.organ_genes.nose_power * 100.0) as i32).hash(&mut hasher);
+        ((self.organ_genes.eye_power * 100.0) as i32).hash(&mut hasher);
+        ((self.organ_genes.mouth_power * 100.0) as i32).hash(&mut hasher);
         hasher.finish()
     }
 
@@ -344,11 +371,14 @@ impl Genome {
 
         let base_sim = if total == 0 { 1.0 } else { similarity_sum / total as f64 };
 
-        // 器官差异惩罚：每个不同器官扣 0.05
+        // 器官差异惩罚：每个不同器官扣 0.05，功率差异额外扣分
         let mut organ_penalty = 0.0;
         if self.organ_genes.nose != other.organ_genes.nose { organ_penalty += 0.05; }
         if self.organ_genes.eyes != other.organ_genes.eyes { organ_penalty += 0.05; }
         if self.organ_genes.mouth != other.organ_genes.mouth { organ_penalty += 0.05; }
+        organ_penalty += (self.organ_genes.nose_power - other.organ_genes.nose_power).abs() * 0.02;
+        organ_penalty += (self.organ_genes.eye_power - other.organ_genes.eye_power).abs() * 0.02;
+        organ_penalty += (self.organ_genes.mouth_power - other.organ_genes.mouth_power).abs() * 0.02;
 
         (base_sim - organ_penalty).max(0.0)
     }
@@ -395,11 +425,16 @@ impl Genome {
 
         let next_node_id = fitter.next_node_id.max(weaker.next_node_id);
 
+        let mut child_organs = fitter.organ_genes.clone();
+        child_organs.nose_power = (fitter.organ_genes.nose_power + weaker.organ_genes.nose_power) / 2.0;
+        child_organs.eye_power = (fitter.organ_genes.eye_power + weaker.organ_genes.eye_power) / 2.0;
+        child_organs.mouth_power = (fitter.organ_genes.mouth_power + weaker.organ_genes.mouth_power) / 2.0;
+
         Genome {
             nodes: child_nodes,
             connections: child_connections,
             next_node_id,
-            organ_genes: fitter.organ_genes.clone(),
+            organ_genes: child_organs,
         }
     }
 }

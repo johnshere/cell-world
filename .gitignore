@@ -30,3 +30,4 @@ nul
 src/config.rs
 docs/LOG.md
 store/
+.claude/temp/

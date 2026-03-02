@@ -96,14 +96,28 @@ impl WorldCanvas {
             }
             let pos = self.world_to_screen(Pos2::new(particle.x as f32, particle.y as f32), rect);
             if rect.contains(pos) {
-                let alpha = (particle.energy / particle.initial_energy).clamp(0.0, 1.0) as f32;
-                let color = Color32::from_rgba_unmultiplied(255, 220, 100, (alpha * 200.0) as u8);
-                let radius = 1.064 * self.scale;
-                painter.circle_filled(pos, radius, color);
+                if particle.is_falling() {
+                    // 下落粒子视觉效果：渐大 + 红橙色调
+                    let max_fall = config.volcano_fall_duration.max(config.meteorite_fall_duration).max(0.1) as f32;
+                    let progress = (1.0 - particle.falling_timer as f32 / max_fall).clamp(0.1, 1.0);
+                    let radius = (1.5 + 2.5 * progress) * self.scale;  // 1.5→4.0倍scale
+                    let r = 255u8;
+                    let g = (80.0 + 140.0 * progress) as u8;   // 80→220
+                    let b = (20.0 + 80.0 * progress) as u8;    // 20→100
+                    let alpha = (80.0 + 175.0 * progress) as u8; // 80→255
+                    let color = Color32::from_rgba_unmultiplied(r, g, b, alpha);
+                    painter.circle_filled(pos, radius, color);
+                } else {
+                    // 正常绘制
+                    let alpha = (particle.energy / particle.initial_energy).clamp(0.0, 1.0) as f32;
+                    let color = Color32::from_rgba_unmultiplied(255, 220, 100, (alpha * 200.0) as u8);
+                    let radius = 1.064 * self.scale;
+                    painter.circle_filled(pos, radius, color);
 
-                // 选中描边
-                if *selection == Selection::Energy(particle.id) {
-                    painter.circle_stroke(pos, radius + 2.0, selection_stroke);
+                    // 选中描边
+                    if *selection == Selection::Energy(particle.id) {
+                        painter.circle_stroke(pos, radius + 2.0, selection_stroke);
+                    }
                 }
             }
         }
@@ -186,7 +200,7 @@ impl WorldCanvas {
                     if organs.mouth {
                         let mouth_stroke = radius * 0.25;
                         let mouth_arc_r = radius * 1.05 + mouth_stroke * 0.5; // stroke中线，内边缘在1.05倍半径
-                        let half_arc = 0.4;
+                        let half_arc = 0.4363; // 50°/2 = 25° ≈ 0.4363 rad
                         let segments = 8;
                         let points: Vec<Pos2> = (0..=segments)
                             .map(|i| {
@@ -201,9 +215,9 @@ impl WorldCanvas {
                         painter.add(PathShape::line(points, Stroke::new(mouth_stroke, Color32::from_rgb(255, 100, 100))));
                     }
 
-                    // 鼻子（正前方线段，淡蓝色）
+                    // 鼻子（正前方线段，淡蓝色，长度按 power 缩放）
                     if organs.nose {
-                        let nose_len = radius * 0.45;
+                        let nose_len = radius * 0.4 * organs.nose_power as f32;
                         let nose_start = Pos2::new(
                             pos.x + radius * heading.cos(),
                             pos.y + radius * heading.sin(),
@@ -218,11 +232,11 @@ impl WorldCanvas {
                         );
                     }
 
-                    // 双眼（白圆+黑瞳）
+                    // 双眼（白圆+黑瞳，半径按 power 缩放）
                     if organs.eyes {
-                        let eye_r = (radius * 0.25).max(1.0).min(3.0 * self.scale);
+                        let eye_r = (radius * 0.25 * organs.eye_power as f32).max(radius * 0.12).min(radius * 0.4);
                         let pupil_r = eye_r * 0.5;
-                        let eye_offset = std::f32::consts::PI / 3.0; // ±60°
+                        let eye_offset = 50.0_f32.to_radians(); // ±50°
                         for &sign in &[-1.0_f32, 1.0] {
                             let eye_angle = heading + sign * eye_offset;
                             let eye_pos = Pos2::new(

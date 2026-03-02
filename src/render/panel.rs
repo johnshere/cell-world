@@ -145,9 +145,12 @@ impl StatsPanel {
         // 速度控制
         ui.horizontal(|ui| {
             if ui.button("⏪").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                *speed = (*speed - 0.5).max(0.1);
+                let new_speed = *speed - 0.5;
+                if new_speed > 0.0 {
+                    *speed = new_speed.max(0.1);
+                }
             }
-            ui.add(egui::Slider::new(speed, 0.1..=10.0).logarithmic(true));
+            ui.add(egui::Slider::new(speed, 0.5..=10.0).step_by(0.5));
             if ui.button("⏩").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 *speed = (*speed + 0.5).min(10.0);
             }
@@ -326,16 +329,25 @@ impl StatsPanel {
                         ui.label(format!("{:08X}", creature.genome_hash));
                     });
 
-                    // 器官状态
+                    // 器官状态（含功率）
                     ui.separator();
                     ui.label("器官");
                     let organs = &creature.genome.organ_genes;
                     ui.horizontal(|ui| {
                         ui.label(format!(
                             "鼻:{} 眼:{} 嘴:{}",
-                            if organs.nose { "✓" } else { "✗" },
-                            if organs.eyes { "✓" } else { "✗" },
-                            if organs.mouth { "✓" } else { "✗" },
+                            if organs.nose { format!("✓({:.2})", organs.nose_power) } else { "✗".to_string() },
+                            if organs.eyes { format!("✓({:.2})", organs.eye_power) } else { "✗".to_string() },
+                            if organs.mouth { format!("✓({:.2})", organs.mouth_power) } else { "✗".to_string() },
+                        ));
+                    });
+                    // 冷却状态
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "冷却: 鼻:{:.1}s 眼:{:.1}s 嘴:{:.1}s",
+                            creature.nose_cooldown_timer.max(0.0),
+                            creature.eye_cooldown_timer.max(0.0),
+                            creature.mouth_cooldown_timer.max(0.0),
                         ));
                     });
 

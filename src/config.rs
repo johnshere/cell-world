@@ -34,8 +34,10 @@ pub struct Config {
     pub meteorite_length: f64,
     /// 陨石粒子能量
     pub meteorite_particle_energy: f64,
-    /// 粒子能量衰减率（每秒 energy *= (1 - rate)）
-    pub particle_decay_rate: f64,
+    /// 火山粒子衰减率（每秒）
+    pub volcano_decay_rate: f64,
+    /// 陨石粒子衰减率（每秒）
+    pub meteorite_decay_rate: f64,
 
     /// 基础代谢率（每秒固定消耗）
     pub base_metabolism: f64,
@@ -43,10 +45,6 @@ pub struct Config {
     pub age_metabolism_factor: f64,
     /// 移动消耗（每单位距离）
     pub move_cost: f64,
-    /// 繁殖所需最低能量
-    pub reproduce_threshold: f64,
-    /// 子代获得的能量比例
-    pub reproduce_energy_ratio: f64,
 
     /// 视觉半径（眼睛能看到的最大距离）
     pub vision_range: f64,
@@ -61,7 +59,7 @@ pub struct Config {
     pub initial_connections_max: usize,
     /// 种族相似度阈值（高于此值视为同一种族）
     pub species_similarity_threshold: f64,
-    /// 体温逸散系数（系数 × 冷却时长 × 周长 = 每秒额外消耗）
+    /// 体温逸散系数（系数 × 冷却时长 × 周长 × 环境因子；小体积生物受影响更大，消耗/能量 ∝ energy^(-2/3)）
     pub heat_dissipation_coefficient: f64,
     /// 喂食效率（固定比例，无体型限制）
     pub feed_efficiency: f64,
@@ -79,21 +77,40 @@ pub struct Config {
     /// 初始世界缩放比例
     pub initial_scale: f32,
 
-    // === 器官消耗 ===
-    /// 鼻子消耗（/秒）
-    pub organ_nose_cost: f64,
-    /// 双眼消耗（/秒，总计）
-    pub organ_eye_cost: f64,
-    /// 嘴巴消耗（/秒）
-    pub organ_mouth_cost: f64,
+    // === 器官冷却 ===
+    /// 鼻子冷却时间（秒）
+    pub nose_cooldown: f64,
+    /// 眼睛冷却时间（秒）
+    pub eye_cooldown: f64,
+    /// 嘴巴冷却时间（秒）
+    pub mouth_cooldown: f64,
+    /// 鼻子单次扫描成本（power² × 此值）
+    pub nose_scan_cost: f64,
+    /// 眼睛单次扫描成本（power² × 此值）
+    pub eye_scan_cost: f64,
+    /// 咬合能量成本（|mouth| × mouth_power × 此值）
+    pub bite_cost: f64,
+    /// 咬合能量转移率
+    pub bite_transfer_rate: f64,
 
     // === 环境温度 ===
     /// 火山热辐射范围
     pub volcano_heat_range: f64,
-    /// 火山口代谢加成系数（+50%）
-    pub heat_metabolism_factor: f64,
     /// 远离火山温度流失加成系数（+100%）
     pub cold_loss_factor: f64,
+
+    /// 热容量系数（冷却上限 = 体型半径 × 此值，体型大热惯性高更抗寒）
+    pub thermal_mass_factor: f64,
+
+    // === 落地杀伤 ===
+    /// 火山落地杀伤半径
+    pub volcano_kill_radius: f64,
+    /// 陨石落地杀伤半径
+    pub meteorite_kill_radius: f64,
+    /// 火山粒子下落时长（秒，分批落下总跨度）
+    pub volcano_fall_duration: f64,
+    /// 陨石粒子下落时长（秒）
+    pub meteorite_fall_duration: f64,
 
     // === 痕迹点 ===
     /// 痕迹点能量衰减率（/秒）
@@ -146,10 +163,11 @@ impl Config {
         let _ = std::fs::write(CONFIG_PATH, doc.to_string());
     }
 
-    /// 环境温度：距火山越近越高 (0~1)
+    /// 环境温度：距火山越近越高 (0~1)，三次方衰减使火山口附近更热、远处急剧下降
     pub fn ambient_temperature(&self, x: f64, y: f64) -> f64 {
         let dist = ((x - self.volcano_x).powi(2) + (y - self.volcano_y).powi(2)).sqrt();
-        (1.0 - dist / self.volcano_heat_range).clamp(0.0, 1.0)
+        let linear = (1.0 - dist / self.volcano_heat_range).clamp(0.0, 1.0);
+        linear * linear * linear
     }
 
     /// 战力计算公式

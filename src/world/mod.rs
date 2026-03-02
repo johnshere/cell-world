@@ -5,7 +5,7 @@ mod trail;
 mod world;
 
 pub use creature::Creature;
-pub use energy::EnergyParticle;
+pub use energy::{EnergyParticle, ParticleSource};
 pub use spatial::SpatialGrid;
 pub use trail::TrailPoint;
 pub use world::{World, PerfStats, DeathAgeStats, DominantCandidate};

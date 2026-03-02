@@ -1,7 +1,7 @@
 # 初始模拟速度
-initial_speed = 3.0
+initial_speed = 8.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 20
+min_creatures = 30
 # 初始能量
 initial_energy = 50.0
 # 初始世界缩放比例
@@ -17,36 +17,72 @@ volcano_interval = 50.0
 # 火山喷射半径
 volcano_radius = 600.0
 # 每次喷发粒子数
-volcano_count = 60
+volcano_count = 90
 # 火山粒子能量
-volcano_particle_energy = 60.0
+volcano_particle_energy = 20.0
 
 # === 陨石 ===
 # 陨石降落间隔（秒）
-meteorite_interval = 24.0
+meteorite_interval = 25.0
 # 每颗陨石粒子数
-meteorite_count = 18
+meteorite_count = 20
 # 陨石散布线段长度
-meteorite_length = 180.0
+meteorite_length = 350.0
 # 陨石粒子能量
-meteorite_particle_energy = 80.0
+meteorite_particle_energy = 100.0
 
-# 粒子能量衰减率（每秒 energy *= (1 - rate)）
-particle_decay_rate = 0.005
+# 火山粒子衰减率（每秒）
+volcano_decay_rate = 0.001
+# 陨石粒子衰减率（每秒）
+meteorite_decay_rate = 0.001
+
+# === 落地杀伤 ===
+# 火山落地杀伤半径
+volcano_kill_radius = 25.0
+# 陨石落地杀伤半径
+meteorite_kill_radius = 40.0
+# 火山粒子下落时长（秒，分批落下总跨度）
+volcano_fall_duration = 5.0
+# 陨石粒子下落时长（秒）
+meteorite_fall_duration = 2.0
+
+# === 器官冷却 ===
+# 鼻子冷却时间（秒）
+nose_cooldown = 0.4
+# 眼睛冷却时间（秒）
+eye_cooldown = 0.15
+# 嘴巴冷却时间（秒）
+mouth_cooldown = 1.0
+# 鼻子单次扫描成本（power² × 此值）
+nose_scan_cost = 0.03
+# 眼睛单次扫描成本（power² × 此值）
+eye_scan_cost = 0.02
+# 咬合能量成本（|mouth| × mouth_power × 此值）
+bite_cost = 0.5
+# 咬合能量转移率
+bite_transfer_rate = 0.15
+
+# === 环境温度 ===
+# 火山热辐射范围
+volcano_heat_range = 1300.0
+# 远离火山温度流失加成系数（+100%）
+cold_loss_factor = 1.0
+# 热容量系数（冷却上限 = 体型半径 × 此值，大体型更抗寒）
+thermal_mass_factor = 10.0
 
 # === 代谢 ===
 # 基础代谢率（每秒固定消耗）
-base_metabolism = 0.07
+base_metabolism = 0.035
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
-age_metabolism_factor = 0.04
+age_metabolism_factor = 0.03
 # 移动消耗（每单位距离）
-move_cost = 0.002
+move_cost = 0.0002
+# === 体温 ===
+# 体温逸散系数（系数 × 冷却时长 × 周长 × 环境因子；小体积生物受影响更大，消耗/能量 ∝ energy^(-2/3)）
+heat_dissipation_coefficient = 0.008
+# 喂食效率（固定比例）
+feed_efficiency = 0.85
 
-# === 繁殖 ===
-# 繁殖所需最低能量
-reproduce_threshold = 60.0
-# 子代获得的能量比例
-reproduce_energy_ratio = 0.3
 
 # === 感知 ===
 # 视觉半径（眼睛能看到的最大距离）
@@ -64,12 +100,6 @@ initial_connections_max = 12
 # 种族相似度阈值（高于此值视为同一种族）
 species_similarity_threshold = 0.9
 
-# === 体温 ===
-# 体温逸散系数（系数 × 冷却时长 × 周长 = 每秒额外消耗）
-heat_dissipation_coefficient = 0.002
-# 喂食效率（固定比例）
-feed_efficiency = 0.5
-
 # === 战力 ===
 # 战力公式：体温权重（越暖越强）
 combat_temp_weight = 0.5
@@ -81,28 +111,12 @@ combat_ally_weight = 0.8
 combat_ally_range = 50.0
 
 # 优势种检测：种群最老成员最低年龄
-dominant_min_age = 500.0
-
-# === 器官消耗 ===
-# 鼻子消耗（/秒）
-organ_nose_cost = 0.005
-# 双眼消耗（/秒，总计）
-organ_eye_cost = 0.008
-# 嘴巴消耗（/秒）
-organ_mouth_cost = 0.003
-
-# === 环境温度 ===
-# 火山热辐射范围
-volcano_heat_range = 800.0
-# 火山口代谢加成系数（+50%）
-heat_metabolism_factor = 0.5
-# 远离火山温度流失加成系数（+100%）
-cold_loss_factor = 1.0
+dominant_min_age = 350.0
 
 # === 痕迹点 ===
 # 痕迹点能量衰减率（/秒）
 trail_decay_rate = 0.12
 
 # === 鼻子 ===
-# 鼻子半角（弧度，PI/6 ≈ 30°）
-nose_half_angle = 0.5235987755982988
+# 鼻子半角（弧度，PI/9 ≈ 20°）
+nose_half_angle = 0.3490658503988659
