@@ -84,9 +84,9 @@ pub struct Config {
     pub eye_cooldown: f64,
     /// 嘴巴冷却时间（秒）
     pub mouth_cooldown: f64,
-    /// 鼻子单次扫描成本（power² × 此值）
+    /// 鼻子单次扫描成本（每实体 × 此值，与环境密度正相关）
     pub nose_scan_cost: f64,
-    /// 眼睛单次扫描成本（power² × 此值）
+    /// 眼睛单次扫描成本（每实体 × 此值，与环境密度正相关）
     pub eye_scan_cost: f64,
     /// 咬合能量成本（|mouth| × mouth_power × 此值）
     pub bite_cost: f64,
@@ -115,6 +115,10 @@ pub struct Config {
     // === 痕迹点 ===
     /// 痕迹点能量衰减率（/秒）
     pub trail_decay_rate: f64,
+    /// 痕迹抑制半径（px，范围内有其他生物痕迹则不产生）
+    pub trail_suppress_radius: f64,
+    /// 痕迹生成间隔（秒，每个生物独立计时）
+    pub trail_emit_interval: f64,
 
     // === 鼻子 ===
     /// 鼻子半角（弧度）

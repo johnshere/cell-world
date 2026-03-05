@@ -27,8 +27,8 @@ fn default_organ_power() -> f64 { 0.5 }
 impl Default for OrganGenes {
     fn default() -> Self {
         Self {
-            nose: true,
-            eyes: true,
+            nose: false,
+            eyes: false,
             mouth: true,
             nose_power: 0.5,
             eye_power: 0.5,

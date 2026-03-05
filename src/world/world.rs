@@ -74,8 +74,6 @@ pub struct World {
     energy_query_buf: Vec<usize>,
     trail_query_buf: Vec<usize>,
 
-    // 痕迹点生成频率控制（每四帧生成一次）
-    trail_emit_counter: u8,
 }
 
 /// 种族缓存（祖先追溯模型）
@@ -127,7 +125,6 @@ impl World {
             creature_query_buf: Vec::new(),
             energy_query_buf: Vec::new(),
             trail_query_buf: Vec::new(),
-            trail_emit_counter: 0,
         };
         // 初始连喷三波，提供充足起始能量（直接落地，不杀伤）
         for _ in 0..3 {
@@ -171,8 +168,6 @@ impl World {
     /// 更新世界
     pub fn update(&mut self, dt: f64, config: &Config) {
         self.time += dt;
-        self.trail_emit_counter = self.trail_emit_counter.wrapping_add(1);
-
         // 生成能量粒子
         self.spawn_energy(dt, config);
 
@@ -482,23 +477,21 @@ impl World {
         }
 
         // 执行实际扫描
-        self.compute_perception_inner(creature_idx, config, nose_ready, eyes_ready);
+        let (nose_entity_count, eye_entity_count) = self.compute_perception_inner(creature_idx, config, nose_ready, eyes_ready);
 
-        // 扣费并重置冷却
+        // 扣费并重置冷却（成本与处理实体数正相关，促进器官进化取舍）
         if nose_ready {
-            let nose_power = self.creatures[creature_idx].genome.organ_genes.nose_power;
-            self.creatures[creature_idx].energy -= nose_power * nose_power * config.nose_scan_cost;
+            self.creatures[creature_idx].energy -= nose_entity_count as f64 * config.nose_scan_cost;
             self.creatures[creature_idx].nose_cooldown_timer = config.nose_cooldown;
         }
         if eyes_ready {
-            let eye_power = self.creatures[creature_idx].genome.organ_genes.eye_power;
-            self.creatures[creature_idx].energy -= eye_power * eye_power * config.eye_scan_cost;
+            self.creatures[creature_idx].energy -= eye_entity_count as f64 * config.eye_scan_cost;
             self.creatures[creature_idx].eye_cooldown_timer = config.eye_cooldown;
         }
     }
 
     /// 实际感知扫描（按 scan_nose/scan_eyes 选择性更新通道）
-    fn compute_perception_inner(&mut self, creature_idx: usize, config: &Config, scan_nose: bool, scan_eyes: bool) {
+    fn compute_perception_inner(&mut self, creature_idx: usize, config: &Config, scan_nose: bool, scan_eyes: bool) -> (usize, usize) {
         let cx = self.creatures[creature_idx].x;
         let cy = self.creatures[creature_idx].y;
         let heading = self.creatures[creature_idx].heading;
@@ -532,8 +525,12 @@ impl World {
             (true, true) => nose_range.max(eye_range),
             (true, false) => nose_range,
             (false, true) => eye_range,
-            (false, false) => return,
+            (false, false) => return (0, 0),
         };
+
+        // 感知实体计数（成本与处理量正相关）
+        let mut nose_entity_count: usize = 0;
+        let mut eye_entity_count: usize = 0;
 
         // 鼻子通道累加
         let mut nose_food = 0.0_f64;
@@ -558,6 +555,8 @@ impl World {
         for &idx in &energy_buf {
             let particle = &self.energy_particles[idx];
             if !particle.alive { continue; }
+            if scan_nose { nose_entity_count += 1; }
+            if scan_eyes { eye_entity_count += 1; }
 
             let dx = particle.x - cx;
             let dy = particle.y - cy;
@@ -600,6 +599,8 @@ impl World {
             if idx == creature_idx { continue; }
             let other = &self.creatures[idx];
             if !other.alive { continue; }
+            if scan_nose { nose_entity_count += 1; }
+            if scan_eyes { eye_entity_count += 1; }
 
             let dx = other.x - cx;
             let dy = other.y - cy;
@@ -654,6 +655,7 @@ impl World {
             for &idx in &trail_buf {
                 let trail = &self.trail_points[idx];
                 if !trail.alive { continue; }
+                nose_entity_count += 1;
 
                 let dx = trail.x - cx;
                 let dy = trail.y - cy;
@@ -699,6 +701,8 @@ impl World {
             self.creatures[creature_idx].perception_cache[9]  = if eye_ally[1] < f64::MAX { 1.0 - eye_ally[1] / eye_range } else { 0.0 };
             self.creatures[creature_idx].perception_cache[10] = if eye_enemy[1] < f64::MAX { 1.0 - eye_enemy[1] / eye_range } else { 0.0 };
         }
+
+        (nose_entity_count, eye_entity_count)
     }
 
     // ========== 动作系统（6输出） ==========
@@ -743,16 +747,24 @@ impl World {
             self.creatures[creature_idx].energy -= move_cost;
             self.action_counts[0] += 1; // 移动
 
-            // 生成痕迹点（能量守恒：移动消耗转化为痕迹，每16帧生成一次）
-            // 气味驳杂抑制：尾端体型半径内存在其他生物的痕迹则不产生
-            if self.trail_emit_counter % 16 == 0 {
+            // 生成痕迹点（能量守恒：移动消耗转化为痕迹，每个生物独立计时）
+            // 气味驳杂抑制：固定半径内存在其他生物的痕迹则不产生
+            self.creatures[creature_idx].trail_emit_timer -= dt;
+            if self.creatures[creature_idx].trail_emit_timer <= 0.0 {
+                self.creatures[creature_idx].trail_emit_timer = config.trail_emit_interval;
                 let creature_radius = (self.creatures[creature_idx].energy * 1.28).cbrt();
-                let creator_id = self.creatures[creature_idx].id;
-                let nearby_trails = self.trail_grid.query(old_x, old_y, creature_radius);
+                let suppress_radius = config.trail_suppress_radius;
+                let sr2 = suppress_radius * suppress_radius;
+                let nearby_trails = self.trail_grid.query(old_x, old_y, suppress_radius);
                 let has_nearby_trail = nearby_trails.iter().any(|&ti| {
-                    self.trail_points[ti].alive && self.trail_points[ti].creator_id != creator_id
+                    let t = &self.trail_points[ti];
+                    if !t.alive { return false; }
+                    let dx = t.x - old_x;
+                    let dy = t.y - old_y;
+                    dx * dx + dy * dy <= sr2
                 });
                 if !has_nearby_trail {
+                    let creator_id = self.creatures[creature_idx].id;
                     let genome_hash = self.creatures[creature_idx].genome_hash;
                     self.trail_points.push(TrailPoint::new(old_x, old_y, move_cost, genome_hash, creator_id, creature_radius));
                 }

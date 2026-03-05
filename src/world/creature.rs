@@ -42,6 +42,9 @@ pub struct Creature {
     pub nose_cooldown_timer: f64,
     pub eye_cooldown_timer: f64,
     pub mouth_cooldown_timer: f64,
+
+    // 痕迹生成计时器（<=0 可生成）
+    pub trail_emit_timer: f64,
 }
 
 impl Creature {
@@ -68,6 +71,7 @@ impl Creature {
             nose_cooldown_timer: 0.0,
             eye_cooldown_timer: 0.0,
             mouth_cooldown_timer: 0.0,
+            trail_emit_timer: 0.0,
         }
     }
 

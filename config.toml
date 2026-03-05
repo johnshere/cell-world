@@ -1,7 +1,7 @@
 # 初始模拟速度
 initial_speed = 8.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 30
+min_creatures = 64
 # 初始能量
 initial_energy = 50.0
 # 初始世界缩放比例
@@ -17,9 +17,9 @@ volcano_interval = 50.0
 # 火山喷射半径
 volcano_radius = 600.0
 # 每次喷发粒子数
-volcano_count = 90
+volcano_count = 120
 # 火山粒子能量
-volcano_particle_energy = 20.0
+volcano_particle_energy = 30.0
 
 # === 陨石 ===
 # 陨石降落间隔（秒）
@@ -53,10 +53,10 @@ nose_cooldown = 0.4
 eye_cooldown = 0.15
 # 嘴巴冷却时间（秒）
 mouth_cooldown = 1.0
-# 鼻子单次扫描成本（power² × 此值）
-nose_scan_cost = 0.03
-# 眼睛单次扫描成本（power² × 此值）
-eye_scan_cost = 0.02
+# 鼻子单次扫描成本（每实体 × 此值，与环境密度正相关）
+nose_scan_cost = 0.0003
+# 眼睛单次扫描成本（每实体 × 此值，与环境密度正相关）
+eye_scan_cost = 0.0002
 # 咬合能量成本（|mouth| × mouth_power × 此值）
 bite_cost = 0.5
 # 咬合能量转移率
@@ -68,7 +68,7 @@ volcano_heat_range = 1300.0
 # 远离火山温度流失加成系数（+100%）
 cold_loss_factor = 1.0
 # 热容量系数（冷却上限 = 体型半径 × 此值，大体型更抗寒）
-thermal_mass_factor = 10.0
+thermal_mass_factor = 12.0
 
 # === 代谢 ===
 # 基础代谢率（每秒固定消耗）
@@ -76,10 +76,10 @@ base_metabolism = 0.035
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
 age_metabolism_factor = 0.03
 # 移动消耗（每单位距离）
-move_cost = 0.0002
+move_cost = 0.0003
 # === 体温 ===
 # 体温逸散系数（系数 × 冷却时长 × 周长 × 环境因子；小体积生物受影响更大，消耗/能量 ∝ energy^(-2/3)）
-heat_dissipation_coefficient = 0.008
+heat_dissipation_coefficient = 0.006
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -116,6 +116,10 @@ dominant_min_age = 350.0
 # === 痕迹点 ===
 # 痕迹点能量衰减率（/秒）
 trail_decay_rate = 0.12
+# 痕迹抑制半径（px，范围内有其他生物痕迹则不产生）
+trail_suppress_radius = 10.0
+# 痕迹生成间隔（秒，每个生物独立计时）
+trail_emit_interval = 0.25
 
 # === 鼻子 ===
 # 鼻子半角（弧度，PI/9 ≈ 20°）

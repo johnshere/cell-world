@@ -356,11 +356,14 @@ impl CellWorldApp {
 
                     ui.collapsing("环境温度", |ui| {
                         changed |= config_drag_f64(ui, "热辐射范围", &mut c.volcano_heat_range, 1.0, 200.0..=2000.0);
-                        changed |= config_drag_f64(ui, "冷流失加成", &mut c.cold_loss_factor, 0.01, 0.0..=3.0);
+                        changed |= config_drag_f64(ui, "远离火山额外散热", &mut c.cold_loss_factor, 0.01, 0.0..=3.0);
+                        changed |= config_drag_f64(ui, "散热上限(×体型)", &mut c.thermal_mass_factor, 0.5, 1.0..=30.0);
                     });
 
                     ui.collapsing("痕迹点", |ui| {
                         changed |= config_drag_f64(ui, "衰减率(/秒)", &mut c.trail_decay_rate, 0.01, 0.01..=0.5);
+                        changed |= config_drag_f64(ui, "抑制半径(px)", &mut c.trail_suppress_radius, 1.0, 5.0..=100.0);
+                        changed |= config_drag_f64(ui, "生成间隔(秒)", &mut c.trail_emit_interval, 0.01, 0.05..=2.0);
                     });
 
                     ui.collapsing("其他", |ui| {
