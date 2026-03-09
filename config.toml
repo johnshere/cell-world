@@ -1,9 +1,9 @@
 # 初始模拟速度
-initial_speed = 8.0
+initial_speed = 3.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 64
+min_creatures = 60
 # 初始能量
-initial_energy = 50.0
+initial_energy = 160.0
 # 初始世界缩放比例
 initial_scale = 0.6000000238418579
 
@@ -13,38 +13,52 @@ volcano_x = 0.0
 # 火山坐标 Y
 volcano_y = 0.0
 # 火山喷发间隔（秒）
-volcano_interval = 50.0
+volcano_interval = 60.0
 # 火山喷射半径
-volcano_radius = 600.0
+volcano_radius = 900.0
 # 每次喷发粒子数
-volcano_count = 120
+volcano_count = 130
 # 火山粒子能量
-volcano_particle_energy = 30.0
+volcano_particle_energy = 80.0
 
 # === 陨石 ===
 # 陨石降落间隔（秒）
-meteorite_interval = 25.0
+meteorite_interval = 40.0
 # 每颗陨石粒子数
 meteorite_count = 20
 # 陨石散布线段长度
 meteorite_length = 350.0
 # 陨石粒子能量
-meteorite_particle_energy = 100.0
+meteorite_particle_energy = 120.0
+
+# === 正弦周期 ===
+# 火山间隔正弦周期（秒）
+volcano_interval_cycle = 700.0
+# 火山间隔振幅比（0~0.9）
+volcano_interval_amplitude = 0.7
+# 火山能量正弦周期（秒）
+volcano_energy_cycle = 300.0
+# 火山能量振幅比（0~0.9）
+volcano_energy_amplitude = 0.5
+# 陨石间隔正弦周期（秒）
+meteorite_interval_cycle = 400.0
+# 陨石间隔振幅比（0~0.9）
+meteorite_interval_amplitude = 0.9
+# 陨石能量正弦周期（秒）
+meteorite_energy_cycle = 250.0
+# 陨石能量振幅比（0~0.9）
+meteorite_energy_amplitude = 0.9
 
 # 火山粒子衰减率（每秒）
-volcano_decay_rate = 0.001
+volcano_decay_rate = 0.035
 # 陨石粒子衰减率（每秒）
-meteorite_decay_rate = 0.001
+meteorite_decay_rate = 0.01
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 25.0
+volcano_kill_radius = 20.0
 # 陨石落地杀伤半径
 meteorite_kill_radius = 40.0
-# 火山粒子下落时长（秒，分批落下总跨度）
-volcano_fall_duration = 5.0
-# 陨石粒子下落时长（秒）
-meteorite_fall_duration = 2.0
 
 # === 器官冷却 ===
 # 鼻子冷却时间（秒）
@@ -120,6 +134,10 @@ trail_decay_rate = 0.12
 trail_suppress_radius = 10.0
 # 痕迹生成间隔（秒，每个生物独立计时）
 trail_emit_interval = 0.25
+
+# === 繁殖 ===
+# 繁殖冷却时间（秒）
+reproduce_cooldown = 10.0
 
 # === 鼻子 ===
 # 鼻子半角（弧度，PI/9 ≈ 20°）

@@ -102,15 +102,29 @@ pub struct Config {
     /// 热容量系数（冷却上限 = 体型半径 × 此值，体型大热惯性高更抗寒）
     pub thermal_mass_factor: f64,
 
+    // === 正弦周期 ===
+    /// 火山间隔正弦周期（秒）
+    pub volcano_interval_cycle: f64,
+    /// 火山间隔振幅比（0~0.9）
+    pub volcano_interval_amplitude: f64,
+    /// 火山能量正弦周期（秒）
+    pub volcano_energy_cycle: f64,
+    /// 火山能量振幅比（0~0.9）
+    pub volcano_energy_amplitude: f64,
+    /// 陨石间隔正弦周期（秒）
+    pub meteorite_interval_cycle: f64,
+    /// 陨石间隔振幅比（0~0.9）
+    pub meteorite_interval_amplitude: f64,
+    /// 陨石能量正弦周期（秒）
+    pub meteorite_energy_cycle: f64,
+    /// 陨石能量振幅比（0~0.9）
+    pub meteorite_energy_amplitude: f64,
+
     // === 落地杀伤 ===
     /// 火山落地杀伤半径
     pub volcano_kill_radius: f64,
     /// 陨石落地杀伤半径
     pub meteorite_kill_radius: f64,
-    /// 火山粒子下落时长（秒，分批落下总跨度）
-    pub volcano_fall_duration: f64,
-    /// 陨石粒子下落时长（秒）
-    pub meteorite_fall_duration: f64,
 
     // === 痕迹点 ===
     /// 痕迹点能量衰减率（/秒）
@@ -119,6 +133,10 @@ pub struct Config {
     pub trail_suppress_radius: f64,
     /// 痕迹生成间隔（秒，每个生物独立计时）
     pub trail_emit_interval: f64,
+
+    // === 繁殖 ===
+    /// 繁殖冷却时间（秒）
+    pub reproduce_cooldown: f64,
 
     // === 鼻子 ===
     /// 鼻子半角（弧度）
@@ -165,6 +183,34 @@ impl Config {
         }
 
         let _ = std::fs::write(CONFIG_PATH, doc.to_string());
+    }
+
+    /// 正弦周期调制值：value = average × (1 + amplitude × sin(2π × time / period))
+    fn sinusoidal(&self, average: f64, amplitude: f64, cycle: f64, time: f64) -> f64 {
+        if cycle <= 0.0 || amplitude <= 0.0 {
+            return average;
+        }
+        average * (1.0 + amplitude * (std::f64::consts::TAU * time / cycle).sin())
+    }
+
+    /// 当前火山喷发间隔（正弦调制后）
+    pub fn current_volcano_interval(&self, time: f64) -> f64 {
+        self.sinusoidal(self.volcano_interval, self.volcano_interval_amplitude, self.volcano_interval_cycle, time)
+    }
+
+    /// 当前火山粒子能量（正弦调制后）
+    pub fn current_volcano_energy(&self, time: f64) -> f64 {
+        self.sinusoidal(self.volcano_particle_energy, self.volcano_energy_amplitude, self.volcano_energy_cycle, time)
+    }
+
+    /// 当前陨石降落间隔（正弦调制后）
+    pub fn current_meteorite_interval(&self, time: f64) -> f64 {
+        self.sinusoidal(self.meteorite_interval, self.meteorite_interval_amplitude, self.meteorite_interval_cycle, time)
+    }
+
+    /// 当前陨石粒子能量（正弦调制后）
+    pub fn current_meteorite_energy(&self, time: f64) -> f64 {
+        self.sinusoidal(self.meteorite_particle_energy, self.meteorite_energy_amplitude, self.meteorite_energy_cycle, time)
     }
 
     /// 环境温度：距火山越近越高 (0~1)，三次方衰减使火山口附近更热、远处急剧下降

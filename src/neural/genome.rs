@@ -22,7 +22,7 @@ pub struct OrganGenes {
 }
 
 #[cfg(feature = "persistence")]
-fn default_organ_power() -> f64 { 0.5 }
+fn default_organ_power() -> f64 { 0.1 }
 
 impl Default for OrganGenes {
     fn default() -> Self {
@@ -30,9 +30,9 @@ impl Default for OrganGenes {
             nose: false,
             eyes: false,
             mouth: true,
-            nose_power: 0.5,
-            eye_power: 0.5,
-            mouth_power: 0.5,
+            nose_power: 0.1,
+            eye_power: 0.1,
+            mouth_power: 0.1,
         }
     }
 }
@@ -126,11 +126,17 @@ impl Genome {
         }
 
         let next_node_id = Self::INPUT_SIZE + Self::OUTPUT_SIZE;
+        let mut organ_genes = OrganGenes::default();
+        if rng.gen_bool(0.5) {
+            organ_genes.nose = true;
+        } else {
+            organ_genes.eyes = true;
+        }
         Self {
             nodes,
             connections,
             next_node_id,
-            organ_genes: OrganGenes::default(),
+            organ_genes,
         }
     }
 

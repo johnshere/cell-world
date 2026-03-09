@@ -25,6 +25,9 @@ pub struct StatsPanel {
     save_dialog_open: bool,
     save_name: String,
     pub settings_open: bool,
+    pub energy_settings_open: bool,
+    /// 总能量历史 (world_time, total_energy)
+    pub energy_history: Vec<(f64, f64)>,
 }
 
 /// 排名数据
@@ -55,7 +58,7 @@ pub struct CachedStats {
 }
 
 /// 将秒数格式化为 d h m s
-fn format_dhms(seconds: f64) -> String {
+pub fn format_dhms(seconds: f64) -> String {
     let total = seconds as u64;
     let d = total / 86400;
     let h = (total % 86400) / 3600;
@@ -82,6 +85,8 @@ impl StatsPanel {
             save_dialog_open: false,
             save_name: String::new(),
             settings_open: false,
+            energy_settings_open: false,
+            energy_history: Vec::new(),
         }
     }
 
@@ -111,6 +116,12 @@ impl StatsPanel {
                 creature_species_map: stats.creature_species_map.clone(),
                 dominant_candidate: stats.dominant_candidate.clone(),
             };
+            // 记录总能量历史
+            self.energy_history.push((stats.time, stats.total_energy));
+            // 限制最大存储量（保留最近3600个采样点，0.5s间隔≈30分钟）
+            if self.energy_history.len() > 3600 {
+                self.energy_history.drain(..self.energy_history.len() - 3600);
+            }
         }
     }
 
@@ -130,6 +141,9 @@ impl StatsPanel {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("⚙").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                     self.settings_open = !self.settings_open;
+                }
+                if ui.button("🌋").on_hover_text("能量源周期").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    self.energy_settings_open = !self.energy_settings_open;
                 }
             });
         });

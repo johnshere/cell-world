@@ -4,7 +4,7 @@ use std::io::Write;
 use crate::config::Config;
 use crate::store::{Store, CreatureTemplate};
 use crate::world::World;
-use crate::render::{WorldCanvas, StatsPanel, Selection, VisibleWorldBounds, PanelAction, RenderContext};
+use crate::render::{WorldCanvas, StatsPanel, Selection, VisibleWorldBounds, PanelAction, RenderContext, format_dhms};
 
 /// 帧级性能统计
 #[derive(Default)]
@@ -292,25 +292,6 @@ impl CellWorldApp {
                     let c = &mut self.config;
                     let mut changed = false;
 
-                    ui.collapsing("能量源", |ui| {
-                        changed |= config_drag_f64(ui, "火山间隔(秒)", &mut c.volcano_interval, 0.1, 5.0..=120.0);
-                        changed |= config_drag_f64(ui, "火山半径", &mut c.volcano_radius, 1.0, 100.0..=2000.0);
-                        changed |= config_drag_usize(ui, "火山粒子数", &mut c.volcano_count, 10..=200);
-                        changed |= config_drag_f64(ui, "火山粒子能量", &mut c.volcano_particle_energy, 0.1, 5.0..=100.0);
-                        changed |= config_drag_f64(ui, "陨石间隔(秒)", &mut c.meteorite_interval, 0.1, 2.0..=60.0);
-                        changed |= config_drag_usize(ui, "陨石粒子数", &mut c.meteorite_count, 5..=100);
-                        changed |= config_drag_f64(ui, "陨石长度", &mut c.meteorite_length, 1.0, 50.0..=500.0);
-                        changed |= config_drag_f64(ui, "陨石粒子能量", &mut c.meteorite_particle_energy, 0.1, 5.0..=100.0);
-                        changed |= config_drag_f64(ui, "火山衰减率", &mut c.volcano_decay_rate, 0.001, 0.001..=0.1);
-                        changed |= config_drag_f64(ui, "陨石衰减率", &mut c.meteorite_decay_rate, 0.001, 0.001..=0.1);
-                        changed |= config_drag_f64(ui, "火山杀伤半径", &mut c.volcano_kill_radius, 0.5, 1.0..=50.0);
-                        changed |= config_drag_f64(ui, "陨石杀伤半径", &mut c.meteorite_kill_radius, 0.5, 1.0..=50.0);
-                        let v_max = c.volcano_interval;
-                        changed |= config_drag_f64(ui, "火山下落时长", &mut c.volcano_fall_duration, 0.1, 0.0..=v_max);
-                        let m_max = c.meteorite_interval;
-                        changed |= config_drag_f64(ui, "陨石下落时长", &mut c.meteorite_fall_duration, 0.1, 0.0..=m_max);
-                    });
-
                     ui.collapsing("代谢", |ui| {
                         changed |= config_drag_f64(ui, "基础代谢", &mut c.base_metabolism, 0.001, 0.01..=0.5);
                         changed |= config_drag_f64(ui, "年龄代谢倍率", &mut c.age_metabolism_factor, 0.001, 0.0..=0.2);
@@ -335,6 +316,7 @@ impl CellWorldApp {
                         changed |= config_drag_usize(ui, "初始连接数min", &mut c.initial_connections_min, 1..=20);
                         changed |= config_drag_usize(ui, "初始连接数max", &mut c.initial_connections_max, 2..=30);
                         changed |= config_drag_f64(ui, "种族相似度阈值", &mut c.species_similarity_threshold, 0.01, 0.5..=1.0);
+                        changed |= config_drag_f64(ui, "繁殖冷却(秒)", &mut c.reproduce_cooldown, 0.5, 1.0..=60.0);
                     });
 
                     ui.collapsing("战力", |ui| {
@@ -382,6 +364,272 @@ impl CellWorldApp {
                 });
             });
         self.panel.settings_open = open;
+    }
+}
+
+impl CellWorldApp {
+    fn render_energy_settings_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.panel.energy_settings_open;
+        let screen = ctx.screen_rect();
+        let win_width = 520.0;
+        let win_height = 560.0;
+        let center_x = (screen.width() - win_width) / 2.0;
+        let center_y = (screen.height() - win_height) / 2.0;
+        egui::Window::new("能量")
+            .open(&mut open)
+            .default_width(win_width)
+            .default_pos([center_x, center_y])
+            .resizable(true)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let world_time = self.world.time;
+                    let volcano_timer = self.world.volcano_timer();
+                    let meteorite_timer = self.world.meteorite_timer();
+                    let c = &mut self.config;
+                    let mut changed = false;
+
+                    // 总能量曲线图
+                    {
+                        ui.strong("总能量趋势");
+                        let history = &self.panel.energy_history;
+                        let chart_width_f32 = ui.available_width().min(480.0);
+                        let chart_height_f32 = 100.0_f32;
+                        let (response, painter) = ui.allocate_painter(
+                            egui::vec2(chart_width_f32, chart_height_f32),
+                            egui::Sense::hover(),
+                        );
+                        let rect = response.rect;
+
+                        // 背景
+                        painter.rect_filled(rect, 4.0, egui::Color32::from_gray(30));
+
+                        if history.len() >= 2 {
+                            let t_min = history.first().unwrap().0;
+                            let t_max = history.last().unwrap().0;
+                            let t_range = (t_max - t_min).max(1.0);
+
+                            let (e_min, e_max) = history.iter().fold((f64::MAX, f64::MIN), |(lo, hi), &(_, e)| {
+                                (lo.min(e), hi.max(e))
+                            });
+                            let e_min = e_min * 0.9;
+                            let e_max = e_max * 1.1;
+                            let e_range = (e_max - e_min).max(1.0);
+
+                            // 绘制曲线
+                            let points: Vec<egui::Pos2> = history.iter().map(|&(t, e)| {
+                                let x = rect.left() + ((t - t_min) / t_range * chart_width_f32 as f64) as f32;
+                                let y = rect.bottom() - ((e - e_min) / e_range * chart_height_f32 as f64) as f32;
+                                egui::pos2(x, y.clamp(rect.top(), rect.bottom()))
+                            }).collect();
+                            for pair in points.windows(2) {
+                                painter.line_segment([pair[0], pair[1]], egui::Stroke::new(1.5, egui::Color32::from_rgb(100, 200, 255)));
+                            }
+
+                            // 当前值标注
+                            if let Some(&last) = points.last() {
+                                painter.circle_filled(last, 3.0, egui::Color32::from_rgb(100, 200, 255));
+                            }
+
+                            // Y轴标注
+                            let label_color = egui::Color32::from_gray(160);
+                            painter.text(egui::pos2(rect.left() + 2.0, rect.top() + 2.0), egui::Align2::LEFT_TOP,
+                                format!("{:.0}", e_max), egui::FontId::proportional(10.0), label_color);
+                            painter.text(egui::pos2(rect.left() + 2.0, rect.bottom() - 2.0), egui::Align2::LEFT_BOTTOM,
+                                format!("{:.0}", e_min), egui::FontId::proportional(10.0), label_color);
+
+                            // 时间标注
+                            painter.text(egui::pos2(rect.right() - 2.0, rect.bottom() - 2.0), egui::Align2::RIGHT_BOTTOM,
+                                format_dhms(t_max), egui::FontId::proportional(10.0), label_color);
+                        } else {
+                            painter.text(rect.center(), egui::Align2::CENTER_CENTER,
+                                "采集数据中...", egui::FontId::proportional(12.0), egui::Color32::from_gray(120));
+                        }
+
+                        // 当前值
+                        let current = self.panel.stats().total_energy;
+                        ui.label(format!("当前总能量: {:.0}", current));
+                    }
+                    ui.separator();
+
+                    ui.collapsing("基础参数", |ui| {
+                        changed |= config_drag_f64(ui, "火山半径", &mut c.volcano_radius, 1.0, 100.0..=2000.0);
+                        changed |= config_drag_usize(ui, "火山粒子数", &mut c.volcano_count, 10..=200);
+                        changed |= config_drag_usize(ui, "陨石粒子数", &mut c.meteorite_count, 5..=100);
+                        changed |= config_drag_f64(ui, "陨石长度", &mut c.meteorite_length, 1.0, 50.0..=500.0);
+                        changed |= config_drag_f64(ui, "火山衰减率", &mut c.volcano_decay_rate, 0.001, 0.001..=0.1);
+                        changed |= config_drag_f64(ui, "陨石衰减率", &mut c.meteorite_decay_rate, 0.001, 0.001..=0.1);
+                        changed |= config_drag_f64(ui, "火山杀伤半径", &mut c.volcano_kill_radius, 0.5, 1.0..=50.0);
+                        changed |= config_drag_f64(ui, "陨石杀伤半径", &mut c.meteorite_kill_radius, 0.5, 1.0..=50.0);
+                    });
+
+                    // 逐个渲染（用宏避免多重借用问题）
+                    macro_rules! render_sine_group {
+                        ($label:expr, $avg:expr, $avg_range:expr, $avg_speed:expr,
+                         $amp:expr, $cycle:expr, $time:expr, $timer:expr, $color:expr) => {{
+                            ui.separator();
+                            ui.strong($label);
+
+                            // 拖拽控件
+                            ui.horizontal(|ui| {
+                                ui.label("均值:");
+                                changed |= ui.add(egui::DragValue::new($avg).speed($avg_speed).range($avg_range)).changed();
+                                ui.label("振幅:");
+                                changed |= ui.add(egui::DragValue::new($amp).speed(0.01).range(0.0..=0.9).fixed_decimals(2)).changed();
+                                ui.label("周期(秒):");
+                                changed |= ui.add(egui::DragValue::new($cycle).speed(10.0).range(0.0..=2000.0)).changed();
+                            });
+
+                            // 绘制正弦曲线
+                            let avg_val = *$avg;
+                            let amp_val = *$amp;
+                            let cycle_val = *$cycle;
+
+                            let chart_width_f32 = ui.available_width().min(480.0);
+                            let chart_height_f32 = 80.0_f32;
+                            let (response, painter) = ui.allocate_painter(
+                                egui::vec2(chart_width_f32, chart_height_f32),
+                                egui::Sense::hover(),
+                            );
+                            let rect = response.rect;
+                            let chart_width = chart_width_f32 as f64;
+                            let chart_height = chart_height_f32 as f64;
+
+                            // 背景
+                            painter.rect_filled(rect, 4.0, egui::Color32::from_gray(30));
+
+                            // 计算显示范围：以当前时间为中心，显示2个周期
+                            let display_cycle = if cycle_val > 0.0 { cycle_val } else { 200.0 };
+                            let t_center = $time;
+                            let t_start = t_center - display_cycle;
+                            let t_end = t_center + display_cycle;
+
+                            // Y 轴范围
+                            let y_min = avg_val * (1.0 - amp_val) * 0.8;
+                            let y_max = avg_val * (1.0 + amp_val) * 1.2;
+                            let y_range = (y_max - y_min).max(1.0);
+
+                            // 均值线
+                            let avg_y = rect.bottom() - ((avg_val - y_min) / y_range * chart_height) as f32;
+                            painter.line_segment(
+                                [egui::pos2(rect.left(), avg_y), egui::pos2(rect.right(), avg_y)],
+                                egui::Stroke::new(1.0, egui::Color32::from_gray(80)),
+                            );
+
+                            // 正弦波
+                            if cycle_val > 0.0 && amp_val > 0.0 {
+                                let steps = (chart_width as usize).max(60);
+                                let points: Vec<egui::Pos2> = (0..=steps).map(|i| {
+                                    let frac = i as f64 / steps as f64;
+                                    let t = t_start + frac * (t_end - t_start);
+                                    let val = avg_val * (1.0 + amp_val * (std::f64::consts::TAU * t / cycle_val).sin());
+                                    let x = rect.left() + (frac * chart_width) as f32;
+                                    let y = rect.bottom() - ((val - y_min) / y_range * chart_height) as f32;
+                                    egui::pos2(x, y.clamp(rect.top(), rect.bottom()))
+                                }).collect();
+                                for pair in points.windows(2) {
+                                    painter.line_segment([pair[0], pair[1]], egui::Stroke::new(2.0, $color));
+                                }
+                            } else {
+                                // 没有正弦调制，画平线
+                                painter.line_segment(
+                                    [egui::pos2(rect.left(), avg_y), egui::pos2(rect.right(), avg_y)],
+                                    egui::Stroke::new(2.0, $color),
+                                );
+                            }
+
+                            // 当前时间竖线（"现在"）
+                            let now_x = rect.left() + (0.5 * chart_width) as f32; // t_center 在正中
+                            painter.line_segment(
+                                [egui::pos2(now_x, rect.top()), egui::pos2(now_x, rect.bottom())],
+                                egui::Stroke::new(1.0, egui::Color32::GREEN),
+                            );
+
+                            // 当前值标注
+                            let current_val = if cycle_val > 0.0 && amp_val > 0.0 {
+                                avg_val * (1.0 + amp_val * (std::f64::consts::TAU * $time / cycle_val).sin())
+                            } else {
+                                avg_val
+                            };
+                            let cur_y = rect.bottom() - ((current_val - y_min) / y_range * chart_height) as f32;
+                            painter.circle_filled(egui::pos2(now_x, cur_y.clamp(rect.top(), rect.bottom())), 4.0, egui::Color32::GREEN);
+
+                            // 上一次触发标记（timer 秒前）
+                            let last_trigger_t = $time - $timer;
+                            if last_trigger_t >= t_start {
+                                let last_frac = (last_trigger_t - t_start) / (t_end - t_start);
+                                let last_x = rect.left() + (last_frac * chart_width) as f32;
+                                painter.line_segment(
+                                    [egui::pos2(last_x, rect.top()), egui::pos2(last_x, rect.bottom())],
+                                    egui::Stroke::new(1.5, egui::Color32::from_rgb(100, 255, 100)),
+                                );
+                                // 三角形标记
+                                let tri_y = rect.top() + 2.0;
+                                painter.add(egui::Shape::convex_polygon(
+                                    vec![
+                                        egui::pos2(last_x, tri_y + 8.0),
+                                        egui::pos2(last_x - 4.0, tri_y),
+                                        egui::pos2(last_x + 4.0, tri_y),
+                                    ],
+                                    egui::Color32::from_rgb(100, 255, 100),
+                                    egui::Stroke::NONE,
+                                ));
+                            }
+
+                            // 下一次触发标记
+                            let next_interval = if cycle_val > 0.0 && amp_val > 0.0 {
+                                avg_val * (1.0 + amp_val * (std::f64::consts::TAU * $time / cycle_val).sin())
+                            } else {
+                                avg_val
+                            };
+                            let next_trigger_t = $time + (next_interval - $timer).max(0.0);
+                            if next_trigger_t <= t_end {
+                                let next_frac = (next_trigger_t - t_start) / (t_end - t_start);
+                                let next_x = rect.left() + (next_frac * chart_width) as f32;
+                                painter.line_segment(
+                                    [egui::pos2(next_x, rect.top()), egui::pos2(next_x, rect.bottom())],
+                                    egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 120, 120)),
+                                );
+                                // 三角形标记
+                                let tri_y = rect.top() + 2.0;
+                                painter.add(egui::Shape::convex_polygon(
+                                    vec![
+                                        egui::pos2(next_x, tri_y + 8.0),
+                                        egui::pos2(next_x - 4.0, tri_y),
+                                        egui::pos2(next_x + 4.0, tri_y),
+                                    ],
+                                    egui::Color32::from_rgb(255, 120, 120),
+                                    egui::Stroke::NONE,
+                                ));
+                            }
+
+                            // 图例标注
+                            ui.horizontal(|ui| {
+                                ui.colored_label(egui::Color32::GREEN, format!("现在: {:.1}", current_val));
+                                ui.colored_label(egui::Color32::from_rgb(100, 255, 100), "上次");
+                                ui.colored_label(egui::Color32::from_rgb(255, 120, 120), "下次");
+                            });
+                        }};
+                    }
+
+                    render_sine_group!("火山间隔(秒)", &mut c.volcano_interval, 5.0..=120.0, 0.1,
+                        &mut c.volcano_interval_amplitude, &mut c.volcano_interval_cycle,
+                        world_time, volcano_timer, egui::Color32::from_rgb(255, 100, 50));
+                    render_sine_group!("火山能量", &mut c.volcano_particle_energy, 5.0..=200.0, 0.1,
+                        &mut c.volcano_energy_amplitude, &mut c.volcano_energy_cycle,
+                        world_time, volcano_timer, egui::Color32::from_rgb(255, 180, 50));
+                    render_sine_group!("陨石间隔(秒)", &mut c.meteorite_interval, 2.0..=60.0, 0.1,
+                        &mut c.meteorite_interval_amplitude, &mut c.meteorite_interval_cycle,
+                        world_time, meteorite_timer, egui::Color32::from_rgb(80, 160, 255));
+                    render_sine_group!("陨石能量", &mut c.meteorite_particle_energy, 5.0..=200.0, 0.1,
+                        &mut c.meteorite_energy_amplitude, &mut c.meteorite_energy_cycle,
+                        world_time, meteorite_timer, egui::Color32::from_rgb(120, 220, 180));
+
+                    if changed {
+                        c.save();
+                    }
+                });
+            });
+        self.panel.energy_settings_open = open;
     }
 }
 
@@ -504,6 +752,11 @@ impl eframe::App for CellWorldApp {
         // 设置窗口
         if self.panel.settings_open {
             self.render_settings_window(ctx);
+        }
+
+        // 能量源周期窗口
+        if self.panel.energy_settings_open {
+            self.render_energy_settings_window(ctx);
         }
 
         // 主画布

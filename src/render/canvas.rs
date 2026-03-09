@@ -96,19 +96,19 @@ impl WorldCanvas {
             }
             let pos = self.world_to_screen(Pos2::new(particle.x as f32, particle.y as f32), rect);
             if rect.contains(pos) {
-                if particle.is_falling() {
-                    // 下落粒子视觉效果：渐大 + 红橙色调
-                    let max_fall = config.volcano_fall_duration.max(config.meteorite_fall_duration).max(0.1) as f32;
-                    let progress = (1.0 - particle.falling_timer as f32 / max_fall).clamp(0.1, 1.0);
-                    let radius = (1.5 + 2.5 * progress) * self.scale;  // 1.5→4.0倍scale
-                    let r = 255u8;
-                    let g = (80.0 + 140.0 * progress) as u8;   // 80→220
-                    let b = (20.0 + 80.0 * progress) as u8;    // 20→100
-                    let alpha = (80.0 + 175.0 * progress) as u8; // 80→255
-                    let color = Color32::from_rgba_unmultiplied(r, g, b, alpha);
-                    painter.circle_filled(pos, radius, color);
-                } else {
-                    // 正常绘制
+                {
+                    let age = particle.age as f32;
+                    let explode_duration = 1.5_f32; // 爆炸特效时长
+                    if age < explode_duration {
+                        let progress = age / explode_duration;
+                        let radius = (1.5 + 2.5 * progress) * self.scale;
+                        let r = 255u8;
+                        let g = (80.0 + 140.0 * progress) as u8;
+                        let b = (20.0 + 80.0 * progress) as u8;
+                        let alpha = (80.0 + 175.0 * progress) as u8;
+                        let color = Color32::from_rgba_unmultiplied(r, g, b, alpha);
+                        painter.circle_filled(pos, radius, color);
+                    }
                     let alpha = (particle.energy / particle.initial_energy).clamp(0.0, 1.0) as f32;
                     let color = Color32::from_rgba_unmultiplied(255, 220, 100, (alpha * 200.0) as u8);
                     let radius = 1.064 * self.scale;

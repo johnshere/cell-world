@@ -130,11 +130,6 @@ impl World {
         for _ in 0..3 {
             world.volcano_erupt(config);
         }
-        // 初始粒子直接落地
-        for p in &mut world.energy_particles {
-            p.falling_timer = 0.0;
-        }
-
         for _ in 0..config.min_creatures {
             world.spawn_creature(config);
         }
@@ -179,9 +174,6 @@ impl World {
         self.rebuild_spatial_index();
         self.perf_stats.spatial_ms = spatial_start.elapsed().as_secs_f64() * 1000.0;
 
-        // 落地杀伤（下落粒子倒计时 + 落地时砸死附近生物）
-        self.process_landings(dt, config);
-
         // 更新生物
         self.update_creatures(dt, config);
 
@@ -197,7 +189,17 @@ impl World {
 
     /// 火山喷发倒计时
     pub fn volcano_countdown(&self, config: &Config) -> f64 {
-        (config.volcano_interval - self.volcano_timer).max(0.0)
+        (config.current_volcano_interval(self.time) - self.volcano_timer).max(0.0)
+    }
+
+    /// 火山计时器当前值
+    pub fn volcano_timer(&self) -> f64 {
+        self.volcano_timer
+    }
+
+    /// 陨石计时器当前值
+    pub fn meteorite_timer(&self) -> f64 {
+        self.meteorite_timer
     }
 
     // ========== 生成 ==========
@@ -261,13 +263,15 @@ impl World {
     /// 生成能量粒子（火山喷发 + 随机陨石）
     fn spawn_energy(&mut self, dt: f64, config: &Config) {
         self.volcano_timer += dt;
-        if self.volcano_timer >= config.volcano_interval {
+        let current_volcano_interval = config.current_volcano_interval(self.time);
+        if self.volcano_timer >= current_volcano_interval {
             self.volcano_timer = 0.0;
             self.volcano_erupt(config);
         }
 
         self.meteorite_timer += dt;
-        if self.meteorite_timer >= config.meteorite_interval {
+        let current_meteorite_interval = config.current_meteorite_interval(self.time);
+        if self.meteorite_timer >= current_meteorite_interval {
             self.meteorite_timer = 0.0;
             self.meteorite_fall(config);
         }
@@ -275,6 +279,8 @@ impl World {
 
     fn volcano_erupt(&mut self, config: &Config) {
         let mut rng = rand::thread_rng();
+        let current_energy = config.current_volcano_energy(self.time);
+        let kill_r2 = config.volcano_kill_radius * config.volcano_kill_radius;
         for _ in 0..config.volcano_count {
             let angle = rng.gen_range(0.0..std::f64::consts::TAU);
             // 中心富集：u² 分布，50%粒子在25%半径内
@@ -284,16 +290,25 @@ impl World {
             let y = config.volcano_y + r * angle.sin();
             let energy_id = self.next_energy_id;
             self.next_energy_id += 1;
-            // 分批落下：falling_timer 在 0 ~ volcano_fall_duration 内均匀分布
-            let fall_t = rng.gen_range(0.0..config.volcano_fall_duration.max(0.01));
             self.energy_particles.push(EnergyParticle::new(
-                energy_id, x, y, config.volcano_particle_energy, f64::MAX, fall_t, ParticleSource::Volcano,
+                energy_id, x, y, current_energy, f64::MAX, ParticleSource::Volcano,
             ));
+            // 即时杀伤
+            for c in &mut self.creatures {
+                if c.alive {
+                    let dx = c.x - x;
+                    let dy = c.y - y;
+                    if dx * dx + dy * dy < kill_r2 {
+                        c.alive = false;
+                    }
+                }
+            }
         }
     }
 
     fn meteorite_fall(&mut self, config: &Config) {
         let mut rng = rand::thread_rng();
+        let current_energy = config.current_meteorite_energy(self.time);
         let (ib_min_x, ib_min_y, ib_max_x, ib_max_y) = self.initial_bounds;
         let cx = rng.gen_range(ib_min_x..ib_max_x);
         let cy = rng.gen_range(ib_min_y..ib_max_y);
@@ -301,6 +316,7 @@ impl World {
         let dx = angle.cos();
         let dy = angle.sin();
         let half_len = config.meteorite_length / 2.0;
+        let kill_r2 = config.meteorite_kill_radius * config.meteorite_kill_radius;
 
         for i in 0..config.meteorite_count {
             let t = if config.meteorite_count > 1 {
@@ -314,11 +330,19 @@ impl World {
 
             let energy_id = self.next_energy_id;
             self.next_energy_id += 1;
-            // 分批落下
-            let fall_t = rng.gen_range(0.0..config.meteorite_fall_duration.max(0.01));
             self.energy_particles.push(EnergyParticle::new(
-                energy_id, x, y, config.meteorite_particle_energy, f64::MAX, fall_t, ParticleSource::Meteorite,
+                energy_id, x, y, current_energy, f64::MAX, ParticleSource::Meteorite,
             ));
+            // 即时杀伤
+            for c in &mut self.creatures {
+                if c.alive {
+                    let cdx = c.x - x;
+                    let cdy = c.y - y;
+                    if cdx * cdx + cdy * cdy < kill_r2 {
+                        c.alive = false;
+                    }
+                }
+            }
         }
     }
 
@@ -342,38 +366,6 @@ impl World {
         for (i, t) in self.trail_points.iter().enumerate() {
             if t.alive {
                 self.trail_grid.insert(i, t.x, t.y);
-            }
-        }
-    }
-
-    // ========== 落地杀伤 ==========
-
-    fn process_landings(&mut self, dt: f64, config: &Config) {
-        for i in 0..self.energy_particles.len() {
-            let p = &mut self.energy_particles[i];
-            if !p.alive || p.falling_timer <= 0.0 { continue; }
-
-            p.falling_timer -= dt;
-
-            if p.falling_timer <= 0.0 {
-                // 刚落地 → 杀伤附近生物（需精确距离检查）
-                let kill_r = match p.source {
-                    ParticleSource::Volcano => config.volcano_kill_radius,
-                    ParticleSource::Meteorite => config.meteorite_kill_radius,
-                };
-                let kill_r2 = kill_r * kill_r;
-                let px = p.x;
-                let py = p.y;
-                let nearby = self.creature_grid.query(px, py, kill_r);
-                for &ci in &nearby {
-                    if self.creatures[ci].alive {
-                        let dx = self.creatures[ci].x - px;
-                        let dy = self.creatures[ci].y - py;
-                        if dx * dx + dy * dy < kill_r2 {
-                            self.creatures[ci].alive = false;
-                        }
-                    }
-                }
             }
         }
     }
@@ -407,6 +399,7 @@ impl World {
             self.creatures[i].nose_cooldown_timer -= dt;
             self.creatures[i].eye_cooldown_timer -= dt;
             self.creatures[i].mouth_cooldown_timer -= dt;
+            self.creatures[i].reproduce_cooldown_timer -= dt;
 
             // 体温逸散：系数 × 冷却时长 × 周长 × (1 + (1 - ambient) × cold_loss_factor)
             // 冷却上限 = 体型半径 × thermal_mass_factor（热平衡：大体型热惯性高，更抗寒）
@@ -481,11 +474,13 @@ impl World {
 
         // 扣费并重置冷却（成本与处理实体数正相关，促进器官进化取舍）
         if nose_ready {
-            self.creatures[creature_idx].energy -= nose_entity_count as f64 * config.nose_scan_cost;
+            let nose_power = self.creatures[creature_idx].genome.organ_genes.nose_power;
+            self.creatures[creature_idx].energy -= nose_entity_count as f64 * config.nose_scan_cost * nose_power;
             self.creatures[creature_idx].nose_cooldown_timer = config.nose_cooldown;
         }
         if eyes_ready {
-            self.creatures[creature_idx].energy -= eye_entity_count as f64 * config.eye_scan_cost;
+            let eye_power = self.creatures[creature_idx].genome.organ_genes.eye_power;
+            self.creatures[creature_idx].energy -= eye_entity_count as f64 * config.eye_scan_cost * eye_power;
             self.creatures[creature_idx].eye_cooldown_timer = config.eye_cooldown;
         }
     }
@@ -774,9 +769,10 @@ impl World {
         // 嘴：接触食物自动吸收 + 对生物咬/喂
         self.action_mouth(creature_idx, mouth, config);
 
-        // 繁殖
-        if reproduce > 0.2 {
+        // 繁殖（受冷却限制）
+        if reproduce > 0.2 && self.creatures[creature_idx].reproduce_cooldown_timer <= 0.0 {
             if self.action_reproduce(creature_idx, reproduce_threshold, reproduce_ratio, config) {
+                self.creatures[creature_idx].reproduce_cooldown_timer = config.reproduce_cooldown;
                 self.action_counts[4] += 1; // 繁殖
             }
         }
@@ -796,10 +792,10 @@ impl World {
         let mouth_range = body_radius * 0.5;
         let query_range = mouth_range + config.contact_range;
 
-        // 接触食物自动吸收（不受冷却限制，跳过下落中的粒子）
+        // 接触食物自动吸收（不受冷却限制）
         let nearby_energy = self.energy_grid.query(mx, my, query_range);
         for &particle_idx in &nearby_energy {
-            if self.energy_particles[particle_idx].alive && !self.energy_particles[particle_idx].is_falling() {
+            if self.energy_particles[particle_idx].alive {
                 let px = self.energy_particles[particle_idx].x;
                 let py = self.energy_particles[particle_idx].y;
                 let dist = ((px - mx).powi(2) + (py - my).powi(2)).sqrt();
