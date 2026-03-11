@@ -193,13 +193,10 @@ impl WorldCanvas {
 
                 // 器官绘制（缩放足够大时）
                 if self.scale > 0.3 {
-                    let organs = &creature.genome.organ_genes;
-
-                    // 嘴巴（弧线，粉红色，以生物中心为圆心，从1.1倍半径向外加厚）
-                    // 先绘制嘴巴，使其图层在鼻子下面
-                    if organs.mouth {
+                    // 嘴巴（弧线，粉红色）
+                    {
                         let mouth_stroke = radius * 0.25;
-                        let mouth_arc_r = radius * 1.05 + mouth_stroke * 0.5; // stroke中线，内边缘在1.05倍半径
+                        let mouth_arc_r = radius * 1.05 + mouth_stroke * 0.5;
                         let half_arc = 0.4363; // 50°/2 = 25° ≈ 0.4363 rad
                         let segments = 8;
                         let points: Vec<Pos2> = (0..=segments)
@@ -215,26 +212,9 @@ impl WorldCanvas {
                         painter.add(PathShape::line(points, Stroke::new(mouth_stroke, Color32::from_rgb(255, 100, 100))));
                     }
 
-                    // 鼻子（正前方线段，淡蓝色，长度按 power 缩放）
-                    if organs.nose {
-                        let nose_len = radius * 0.4 * organs.nose_power as f32;
-                        let nose_start = Pos2::new(
-                            pos.x + radius * heading.cos(),
-                            pos.y + radius * heading.sin(),
-                        );
-                        let nose_end = Pos2::new(
-                            pos.x + (radius + nose_len) * heading.cos(),
-                            pos.y + (radius + nose_len) * heading.sin(),
-                        );
-                        painter.line_segment(
-                            [nose_start, nose_end],
-                            Stroke::new(radius * 0.15, Color32::from_rgb(200, 200, 255)),
-                        );
-                    }
-
-                    // 双眼（白圆+黑瞳，半径按 power 缩放）
-                    if organs.eyes {
-                        let eye_r = (radius * 0.25 * organs.eye_power as f32).max(radius * 0.12).min(radius * 0.4);
+                    // 双眼（白圆+黑瞳，固定大小）
+                    {
+                        let eye_r = radius * 0.25;
                         let pupil_r = eye_r * 0.5;
                         let eye_offset = 50.0_f32.to_radians(); // ±50°
                         for &sign in &[-1.0_f32, 1.0] {

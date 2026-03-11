@@ -343,23 +343,11 @@ impl StatsPanel {
                         ui.label(format!("{:08X}", creature.genome_hash));
                     });
 
-                    // 器官状态（含功率）
-                    ui.separator();
-                    ui.label("器官");
-                    let organs = &creature.genome.organ_genes;
-                    ui.horizontal(|ui| {
-                        ui.label(format!(
-                            "鼻:{} 眼:{} 嘴:{}",
-                            if organs.nose { format!("✓({:.2})", organs.nose_power) } else { "✗".to_string() },
-                            if organs.eyes { format!("✓({:.2})", organs.eye_power) } else { "✗".to_string() },
-                            if organs.mouth { format!("✓({:.2})", organs.mouth_power) } else { "✗".to_string() },
-                        ));
-                    });
                     // 冷却状态
+                    ui.separator();
                     ui.horizontal(|ui| {
                         ui.label(format!(
-                            "冷却: 鼻:{:.1}s 眼:{:.1}s 嘴:{:.1}s",
-                            creature.nose_cooldown_timer.max(0.0),
+                            "冷却: 眼:{:.2}s 嘴:{:.1}s",
                             creature.eye_cooldown_timer.max(0.0),
                             creature.mouth_cooldown_timer.max(0.0),
                         ));

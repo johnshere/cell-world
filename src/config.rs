@@ -59,7 +59,7 @@ pub struct Config {
     pub initial_connections_max: usize,
     /// 种族相似度阈值（高于此值视为同一种族）
     pub species_similarity_threshold: f64,
-    /// 体温逸散系数（系数 × 冷却时长 × 周长 × 环境因子；小体积生物受影响更大，消耗/能量 ∝ energy^(-2/3)）
+    /// 体温逸散系数
     pub heat_dissipation_coefficient: f64,
     /// 喂食效率（固定比例，无体型限制）
     pub feed_efficiency: f64,
@@ -78,29 +78,22 @@ pub struct Config {
     pub initial_scale: f32,
 
     // === 器官冷却 ===
-    /// 鼻子冷却时间（秒）
-    pub nose_cooldown: f64,
     /// 眼睛冷却时间（秒）
     pub eye_cooldown: f64,
     /// 嘴巴冷却时间（秒）
     pub mouth_cooldown: f64,
-    /// 鼻子单次扫描成本（每实体 × 此值，与环境密度正相关）
-    pub nose_scan_cost: f64,
-    /// 眼睛单次扫描成本（每实体 × 此值，与环境密度正相关）
-    pub eye_scan_cost: f64,
-    /// 咬合能量成本（|mouth| × mouth_power × 此值）
-    pub bite_cost: f64,
     /// 咬合能量转移率
     pub bite_transfer_rate: f64,
 
     // === 环境温度 ===
     /// 火山热辐射范围
     pub volcano_heat_range: f64,
-    /// 远离火山温度流失加成系数（+100%）
-    pub cold_loss_factor: f64,
 
-    /// 热容量系数（冷却上限 = 体型半径 × 此值，体型大热惯性高更抗寒）
-    pub thermal_mass_factor: f64,
+    // === 集体热效应 ===
+    /// 集体热判定半径
+    pub group_heat_radius: f64,
+    /// 集体热分母
+    pub group_heat_denominator: f64,
 
     // === 正弦周期 ===
     /// 火山间隔正弦周期（秒）
@@ -137,10 +130,6 @@ pub struct Config {
     // === 繁殖 ===
     /// 繁殖冷却时间（秒）
     pub reproduce_cooldown: f64,
-
-    // === 鼻子 ===
-    /// 鼻子半角（弧度）
-    pub nose_half_angle: f64,
 }
 
 impl Config {

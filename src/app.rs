@@ -296,7 +296,7 @@ impl CellWorldApp {
                         changed |= config_drag_f64(ui, "基础代谢", &mut c.base_metabolism, 0.001, 0.01..=0.5);
                         changed |= config_drag_f64(ui, "年龄代谢倍率", &mut c.age_metabolism_factor, 0.001, 0.0..=0.2);
                         changed |= config_drag_f64(ui, "移动消耗", &mut c.move_cost, 0.0001, 0.0001..=0.01);
-                        changed |= config_drag_f64(ui, "体温逸散系数", &mut c.heat_dissipation_coefficient, 0.0001, 0.0..=0.01);
+                        changed |= config_drag_f64(ui, "体温逸散系数", &mut c.heat_dissipation_coefficient, 0.001, 0.0..=1.0);
                         changed |= config_drag_f64(ui, "喂食效率", &mut c.feed_efficiency, 0.01, 0.1..=1.0);
                     });
 
@@ -308,7 +308,6 @@ impl CellWorldApp {
                     ui.collapsing("感知", |ui| {
                         changed |= config_drag_f64(ui, "视觉半径", &mut c.vision_range, 1.0, 50.0..=500.0);
                         changed |= config_drag_f64(ui, "接触距离", &mut c.contact_range, 0.5, 5.0..=50.0);
-                        changed |= config_drag_f64(ui, "鼻子半角(弧度)", &mut c.nose_half_angle, 0.01, 0.1..=1.5);
                     });
 
                     ui.collapsing("进化", |ui| {
@@ -327,19 +326,15 @@ impl CellWorldApp {
                     });
 
                     ui.collapsing("器官系统", |ui| {
-                        changed |= config_drag_f64(ui, "鼻子冷却(秒)", &mut c.nose_cooldown, 0.01, 0.05..=2.0);
-                        changed |= config_drag_f64(ui, "眼睛冷却(秒)", &mut c.eye_cooldown, 0.01, 0.05..=1.0);
+                        changed |= config_drag_f64(ui, "眼睛冷却(秒)", &mut c.eye_cooldown, 0.001, 0.01..=1.0);
                         changed |= config_drag_f64(ui, "嘴巴冷却(秒)", &mut c.mouth_cooldown, 0.01, 0.1..=5.0);
-                        changed |= config_drag_f64(ui, "鼻子扫描成本", &mut c.nose_scan_cost, 0.001, 0.0..=0.2);
-                        changed |= config_drag_f64(ui, "眼睛扫描成本", &mut c.eye_scan_cost, 0.001, 0.0..=0.2);
-                        changed |= config_drag_f64(ui, "咬消耗", &mut c.bite_cost, 0.01, 0.0..=2.0);
-                        changed |= config_drag_f64(ui, "咬转移率", &mut c.bite_transfer_rate, 0.01, 0.01..=0.5);
+                        changed |= config_drag_f64(ui, "咬转移率", &mut c.bite_transfer_rate, 0.01, 0.01..=0.8);
                     });
 
                     ui.collapsing("环境温度", |ui| {
                         changed |= config_drag_f64(ui, "热辐射范围", &mut c.volcano_heat_range, 1.0, 200.0..=2000.0);
-                        changed |= config_drag_f64(ui, "远离火山额外散热", &mut c.cold_loss_factor, 0.01, 0.0..=3.0);
-                        changed |= config_drag_f64(ui, "散热上限(×体型)", &mut c.thermal_mass_factor, 0.5, 1.0..=30.0);
+                        changed |= config_drag_f64(ui, "集体热半径", &mut c.group_heat_radius, 1.0, 50.0..=500.0);
+                        changed |= config_drag_f64(ui, "集体热分母", &mut c.group_heat_denominator, 100.0, 500.0..=20000.0);
                     });
 
                     ui.collapsing("痕迹点", |ui| {
