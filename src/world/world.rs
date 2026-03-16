@@ -74,6 +74,10 @@ pub struct World {
     energy_query_buf: Vec<usize>,
     trail_query_buf: Vec<usize>,
 
+    /// 痕迹系统完全禁用（手动开关，屏蔽所有痕迹逻辑）
+    pub trail_disabled: bool,
+    /// 痕迹生成暂停（FPS<30时自动开启，仅停止生成新痕迹）
+    pub trail_spawn_paused: bool,
 }
 
 /// 种族缓存（祖先追溯模型）
@@ -125,6 +129,8 @@ impl World {
             creature_query_buf: Vec::new(),
             energy_query_buf: Vec::new(),
             trail_query_buf: Vec::new(),
+            trail_disabled: false,
+            trail_spawn_paused: false,
         };
         // 初始连喷三波，提供充足起始能量（直接落地，不杀伤）
         for _ in 0..3 {
@@ -181,7 +187,9 @@ impl World {
         self.update_energy_particles(dt, config);
 
         // 更新痕迹点
-        self.update_trail_points(dt, config);
+        if !self.trail_disabled {
+            self.update_trail_points(dt, config);
+        }
 
         // 清理
         self.cleanup();
@@ -349,7 +357,9 @@ impl World {
     fn rebuild_spatial_index(&mut self) {
         self.creature_grid.clear();
         self.energy_grid.clear();
-        self.trail_grid.clear();
+        if !self.trail_disabled {
+            self.trail_grid.clear();
+        }
 
         for (i, c) in self.creatures.iter().enumerate() {
             if c.alive {
@@ -361,9 +371,11 @@ impl World {
                 self.energy_grid.insert(i, e.x, e.y);
             }
         }
-        for (i, t) in self.trail_points.iter().enumerate() {
-            if t.alive {
-                self.trail_grid.insert(i, t.x, t.y);
+        if !self.trail_disabled {
+            for (i, t) in self.trail_points.iter().enumerate() {
+                if t.alive {
+                    self.trail_grid.insert(i, t.x, t.y);
+                }
             }
         }
     }
@@ -629,8 +641,9 @@ impl World {
         let turn_rate = std::f64::consts::PI * 2.0; // 最大每秒一圈
         let turn_amount = turn * turn_rate * dt;
         self.creatures[creature_idx].heading += turn_amount;
-        // 转向消耗：与角位移成正比
-        self.creatures[creature_idx].energy -= turn_amount.abs() * config.move_cost;
+        // 转向消耗：与角速度的平方成正比（慢转低耗，急转高耗）
+        let angular_speed = turn_amount.abs() / dt;
+        self.creatures[creature_idx].energy -= turn_amount.abs() * config.move_cost * angular_speed;
 
         let actual_speed = speed.abs() * 25.0;
         self.creatures[creature_idx].current_speed = actual_speed;
@@ -649,25 +662,26 @@ impl World {
             self.action_counts[0] += 1; // 移动
 
             // 生成痕迹点（能量守恒：移动消耗转化为痕迹，每个生物独立计时）
-            // 气味驳杂抑制：固定半径内存在其他生物的痕迹则不产生
-            self.creatures[creature_idx].trail_emit_timer -= dt;
-            if self.creatures[creature_idx].trail_emit_timer <= 0.0 {
-                self.creatures[creature_idx].trail_emit_timer = config.trail_emit_interval;
-                let creature_radius = (self.creatures[creature_idx].energy * 1.28).cbrt();
-                let suppress_radius = config.trail_suppress_radius;
-                let sr2 = suppress_radius * suppress_radius;
-                let nearby_trails = self.trail_grid.query(old_x, old_y, suppress_radius);
-                let has_nearby_trail = nearby_trails.iter().any(|&ti| {
-                    let t = &self.trail_points[ti];
-                    if !t.alive { return false; }
-                    let dx = t.x - old_x;
-                    let dy = t.y - old_y;
-                    dx * dx + dy * dy <= sr2
-                });
-                if !has_nearby_trail {
-                    let creator_id = self.creatures[creature_idx].id;
-                    let genome_hash = self.creatures[creature_idx].genome_hash;
-                    self.trail_points.push(TrailPoint::new(old_x, old_y, move_cost, genome_hash, creator_id, creature_radius));
+            if !self.trail_disabled && !self.trail_spawn_paused {
+                self.creatures[creature_idx].trail_emit_timer -= dt;
+                if self.creatures[creature_idx].trail_emit_timer <= 0.0 {
+                    self.creatures[creature_idx].trail_emit_timer = config.trail_emit_interval;
+                    let creature_radius = (self.creatures[creature_idx].energy * 1.28).cbrt();
+                    let suppress_radius = config.trail_suppress_radius;
+                    let sr2 = suppress_radius * suppress_radius;
+                    let nearby_trails = self.trail_grid.query(old_x, old_y, suppress_radius);
+                    let has_nearby_trail = nearby_trails.iter().any(|&ti| {
+                        let t = &self.trail_points[ti];
+                        if !t.alive { return false; }
+                        let dx = t.x - old_x;
+                        let dy = t.y - old_y;
+                        dx * dx + dy * dy <= sr2
+                    });
+                    if !has_nearby_trail {
+                        let creator_id = self.creatures[creature_idx].id;
+                        let genome_hash = self.creatures[creature_idx].genome_hash;
+                        self.trail_points.push(TrailPoint::new(old_x, old_y, move_cost, genome_hash, creator_id, creature_radius));
+                    }
                 }
             }
         }
@@ -711,18 +725,20 @@ impl World {
         }
 
         // 接触痕迹点自动吸收（不受冷却限制）
-        let my_genome_hash = self.creatures[idx].genome_hash;
-        let nearby_trails = self.trail_grid.query(mx, my, query_range);
-        for &trail_idx in &nearby_trails {
-            let trail = &self.trail_points[trail_idx];
-            if trail.alive && trail.age > 2.0 && trail.genome_hash != my_genome_hash {
-                let tx = trail.x;
-                let ty = trail.y;
-                let dist = ((tx - mx).powi(2) + (ty - my).powi(2)).sqrt();
-                if dist < mouth_range {
-                    let energy = self.trail_points[trail_idx].consume();
-                    self.creatures[idx].energy += energy;
-                    break;
+        if !self.trail_disabled {
+            let my_genome_hash = self.creatures[idx].genome_hash;
+            let nearby_trails = self.trail_grid.query(mx, my, query_range);
+            for &trail_idx in &nearby_trails {
+                let trail = &self.trail_points[trail_idx];
+                if trail.alive && trail.age > 2.0 && trail.genome_hash != my_genome_hash {
+                    let tx = trail.x;
+                    let ty = trail.y;
+                    let dist = ((tx - mx).powi(2) + (ty - my).powi(2)).sqrt();
+                    if dist < mouth_range {
+                        let energy = self.trail_points[trail_idx].consume();
+                        self.creatures[idx].energy += energy;
+                        break;
+                    }
                 }
             }
         }
@@ -917,12 +933,14 @@ impl World {
         }
 
         // 死亡生物的痕迹点也消失
-        for creature in &self.creatures {
-            if !creature.alive {
-                let dead_id = creature.id;
-                for trail in &mut self.trail_points {
-                    if trail.alive && trail.creator_id == dead_id {
-                        trail.alive = false;
+        if !self.trail_disabled {
+            for creature in &self.creatures {
+                if !creature.alive {
+                    let dead_id = creature.id;
+                    for trail in &mut self.trail_points {
+                        if trail.alive && trail.creator_id == dead_id {
+                            trail.alive = false;
+                        }
                     }
                 }
             }
@@ -930,7 +948,9 @@ impl World {
 
         self.creatures.retain(|c| c.alive);
         self.energy_particles.retain(|e| e.alive);
-        self.trail_points.retain(|t| t.alive);
+        if !self.trail_disabled {
+            self.trail_points.retain(|t| t.alive);
+        }
 
         // 每10秒清理一次相似度缓存
         if self.time - self.cache_cleanup_timer >= 10.0 {

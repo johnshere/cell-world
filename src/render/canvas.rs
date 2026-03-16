@@ -122,18 +122,19 @@ impl WorldCanvas {
             }
         }
 
-        // 绘制痕迹点
-        for trail in &world.trail_points {
-            if !trail.alive { continue; }
-            let pos = self.world_to_screen(Pos2::new(trail.x as f32, trail.y as f32), rect);
-            if rect.contains(pos) {
-                // 透明度和半径都随时间线性衰减（decay_rate=0.12，约38秒消失）
-                let age_ratio = (1.0 - trail.age / 38.0).max(0.0) as f32;
-                let alpha = (80.0 * age_ratio) as u8;
-                let color = species_to_color(trail.genome_hash);
-                let trail_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
-                let radius = (trail.visual_radius as f32 * 0.2 * age_ratio * self.scale).max(0.3 * self.scale);
-                painter.circle_filled(pos, radius, trail_color);
+        // 绘制痕迹点（trail_disabled 时跳过）
+        if !world.trail_disabled {
+            for trail in &world.trail_points {
+                if !trail.alive { continue; }
+                let pos = self.world_to_screen(Pos2::new(trail.x as f32, trail.y as f32), rect);
+                if rect.contains(pos) {
+                    let age_ratio = (1.0 - trail.age / 38.0).max(0.0) as f32;
+                    let alpha = (80.0 * age_ratio) as u8;
+                    let color = species_to_color(trail.genome_hash);
+                    let trail_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
+                    let radius = (trail.visual_radius as f32 * 0.2 * age_ratio * self.scale).max(0.3 * self.scale);
+                    painter.circle_filled(pos, radius, trail_color);
+                }
             }
         }
 

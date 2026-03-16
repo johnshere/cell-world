@@ -289,6 +289,8 @@ impl CellWorldApp {
             .resizable(false)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.checkbox(&mut self.world.trail_disabled, "禁用痕迹系统");
+
                     let c = &mut self.config;
                     let mut changed = false;
 
@@ -643,6 +645,9 @@ impl eframe::App for CellWorldApp {
             self.frame_count = 0;
             self.fps_timer = now;
         }
+
+        // FPS低于30时自动暂停痕迹生成（不影响已有痕迹的渲染/衰减/吸收）
+        self.world.trail_spawn_paused = self.fps > 0.0 && self.fps < 30.0;
 
         // 使用上一帧的可见范围更新视窗
         // 第一帧时 last_visible_bounds 为 None，跳过更新，等待渲染获取视窗大小
