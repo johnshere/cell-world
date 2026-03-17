@@ -8,4 +8,4 @@ pub use creature::Creature;
 pub use energy::{EnergyParticle, ParticleSource};
 pub use spatial::SpatialGrid;
 pub use trail::TrailPoint;
-pub use world::{World, PerfStats, DeathAgeStats, DominantCandidate};
+pub use world::{DeathAgeStats, DominantCandidate, World};

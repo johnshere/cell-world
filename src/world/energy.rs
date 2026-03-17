@@ -20,7 +20,14 @@ pub struct EnergyParticle {
 }
 
 impl EnergyParticle {
-    pub fn new(id: u64, x: f64, y: f64, energy: f64, lifetime: f64, source: ParticleSource) -> Self {
+    pub fn new(
+        id: u64,
+        x: f64,
+        y: f64,
+        energy: f64,
+        lifetime: f64,
+        source: ParticleSource,
+    ) -> Self {
         Self {
             id,
             x,

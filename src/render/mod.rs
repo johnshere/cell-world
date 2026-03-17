@@ -1,8 +1,8 @@
 mod canvas;
 mod panel;
 
-pub use canvas::{WorldCanvas, VisibleWorldBounds, RenderContext};
-pub use panel::{StatsPanel, PanelAction, format_dhms};
+pub use canvas::{RenderContext, VisibleWorldBounds, WorldCanvas};
+pub use panel::{format_dhms, PanelAction, StatsPanel};
 
 /// 选中状态
 #[derive(Clone, Copy, Debug, PartialEq)]

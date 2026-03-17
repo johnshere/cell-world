@@ -1,5 +1,5 @@
 use crate::neural::Genome;
-use crate::neural::Network;
+use crate::neural::SpikingNetwork;
 
 /// 生物
 pub struct Creature {
@@ -20,7 +20,7 @@ pub struct Creature {
 
     // 遗传
     pub genome: Genome,
-    pub brain: Network,
+    pub brain: SpikingNetwork,
     pub generation: usize,
 
     // 血缘（None = 自然生成，无祖先）
@@ -35,6 +35,9 @@ pub struct Creature {
     // 感知结果缓存（10维：左眼4 + 右眼4 + 自身2）
     pub perception_cache: [f64; 10],
 
+    // 上一帧 SNN 输出缓存
+    pub last_outputs: [f64; 6],
+
     // 器官冷却计时器（<=0 可触发）
     pub eye_cooldown_timer: f64,
     pub mouth_cooldown_timer: f64,
@@ -44,11 +47,22 @@ pub struct Creature {
 
     // 繁殖冷却计时器（<=0 可繁殖）
     pub reproduce_cooldown_timer: f64,
+
+    // 本帧 CPU 计算耗时（纳秒）
+    pub frame_compute_ns: u64,
 }
 
 impl Creature {
-    pub fn new(id: u64, x: f64, y: f64, energy: f64, genome: Genome, generation: usize, parent_id: Option<u64>) -> Self {
-        let brain = Network::from_genome(&genome);
+    pub fn new(
+        id: u64,
+        x: f64,
+        y: f64,
+        energy: f64,
+        genome: Genome,
+        generation: usize,
+        parent_id: Option<u64>,
+    ) -> Self {
+        let brain = SpikingNetwork::from_genome(&genome);
         let genome_hash = genome.hash();
 
         Self {
@@ -66,10 +80,12 @@ impl Creature {
             genome_hash,
             current_speed: 0.0,
             perception_cache: [0.0; 10],
+            last_outputs: [0.0; 6],
             eye_cooldown_timer: 0.0,
             mouth_cooldown_timer: 0.0,
             trail_emit_timer: 0.0,
             reproduce_cooldown_timer: 0.0,
+            frame_compute_ns: 0,
         }
     }
 
@@ -89,6 +105,14 @@ impl Creature {
     /// 繁殖产生子代（代数+1，parent_id = 自己的 id）
     pub fn reproduce(&self, id: u64, x: f64, y: f64, energy: f64, mutation_rate: f64) -> Self {
         let child_genome = self.genome.mutate(mutation_rate);
-        Self::new(id, x, y, energy, child_genome, self.generation + 1, Some(self.id))
+        Self::new(
+            id,
+            x,
+            y,
+            energy,
+            child_genome,
+            self.generation + 1,
+            Some(self.id),
+        )
     }
 }

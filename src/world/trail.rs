@@ -5,14 +5,21 @@ pub struct TrailPoint {
     pub energy: f64,
     pub initial_energy: f64,
     pub genome_hash: u64,
-    pub creator_id: u64,     // 创建者生物ID，主人死亡时痕迹消失
-    pub visual_radius: f64,  // 创建者的体型半径，用于渲染
+    pub creator_id: u64,    // 创建者生物ID，主人死亡时痕迹消失
+    pub visual_radius: f64, // 创建者的体型半径，用于渲染
     pub age: f64,
     pub alive: bool,
 }
 
 impl TrailPoint {
-    pub fn new(x: f64, y: f64, energy: f64, genome_hash: u64, creator_id: u64, visual_radius: f64) -> Self {
+    pub fn new(
+        x: f64,
+        y: f64,
+        energy: f64,
+        genome_hash: u64,
+        creator_id: u64,
+        visual_radius: f64,
+    ) -> Self {
         Self {
             x,
             y,

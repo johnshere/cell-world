@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 const CONFIG_PATH: &str = "config.toml";
 
@@ -130,23 +130,47 @@ pub struct Config {
     // === 繁殖 ===
     /// 繁殖冷却时间（秒）
     pub reproduce_cooldown: f64,
+
+    // === 算力能量 ===
+    /// 算力转能量系数（0.1s → 能量，内部除以1亿，0 = 禁用）
+    #[serde(default)]
+    pub compute_energy_factor: f64,
+
+    // === SNN ===
+    /// 每帧 SNN tick 数（同步模式）
+    #[serde(default = "default_snn_ticks_per_frame")]
+    pub snn_ticks_per_frame: usize,
+    /// 神经后端: auto | cpu | gpu | legacy
+    #[serde(default = "default_neural_backend")]
+    pub neural_backend: String,
+    /// 异步模式 tick 频率 (ticks/s)
+    #[serde(default = "default_neural_tick_rate")]
+    pub neural_tick_rate: f64,
+}
+
+fn default_snn_ticks_per_frame() -> usize {
+    10
+}
+fn default_neural_backend() -> String {
+    "auto".to_string()
+}
+fn default_neural_tick_rate() -> f64 {
+    600.0
 }
 
 impl Config {
     /// 从 config.toml 加载，失败则用默认值
     pub fn load() -> Self {
         match std::fs::read_to_string(CONFIG_PATH) {
-            Ok(content) => {
-                match toml::from_str(&content) {
-                    Ok(config) => config,
-                    Err(e) => {
-                        eprintln!("配置解析失败，使用默认值: {}", e);
-                        let config = Self::default();
-                        config.save();
-                        config
-                    }
+            Ok(content) => match toml::from_str(&content) {
+                Ok(config) => config,
+                Err(e) => {
+                    eprintln!("配置解析失败，使用默认值: {}", e);
+                    let config = Self::default();
+                    config.save();
+                    config
                 }
-            }
+            },
             Err(_) => {
                 let config = Self::default();
                 config.save();
@@ -158,9 +182,9 @@ impl Config {
     /// 保存到 config.toml（保留注释）
     pub fn save(&self) {
         let existing = std::fs::read_to_string(CONFIG_PATH).unwrap_or_default();
-        let mut doc = existing.parse::<toml_edit::DocumentMut>().unwrap_or_else(|_| {
-            toml_edit::DocumentMut::new()
-        });
+        let mut doc = existing
+            .parse::<toml_edit::DocumentMut>()
+            .unwrap_or_else(|_| toml_edit::DocumentMut::new());
 
         // 序列化当前值，逐字段更新到已有文档（保留注释和排版）
         if let Ok(new_str) = toml::to_string(self) {
@@ -184,22 +208,42 @@ impl Config {
 
     /// 当前火山喷发间隔（正弦调制后）
     pub fn current_volcano_interval(&self, time: f64) -> f64 {
-        self.sinusoidal(self.volcano_interval, self.volcano_interval_amplitude, self.volcano_interval_cycle, time)
+        self.sinusoidal(
+            self.volcano_interval,
+            self.volcano_interval_amplitude,
+            self.volcano_interval_cycle,
+            time,
+        )
     }
 
     /// 当前火山粒子能量（正弦调制后）
     pub fn current_volcano_energy(&self, time: f64) -> f64 {
-        self.sinusoidal(self.volcano_particle_energy, self.volcano_energy_amplitude, self.volcano_energy_cycle, time)
+        self.sinusoidal(
+            self.volcano_particle_energy,
+            self.volcano_energy_amplitude,
+            self.volcano_energy_cycle,
+            time,
+        )
     }
 
     /// 当前陨石降落间隔（正弦调制后）
     pub fn current_meteorite_interval(&self, time: f64) -> f64 {
-        self.sinusoidal(self.meteorite_interval, self.meteorite_interval_amplitude, self.meteorite_interval_cycle, time)
+        self.sinusoidal(
+            self.meteorite_interval,
+            self.meteorite_interval_amplitude,
+            self.meteorite_interval_cycle,
+            time,
+        )
     }
 
     /// 当前陨石粒子能量（正弦调制后）
     pub fn current_meteorite_energy(&self, time: f64) -> f64 {
-        self.sinusoidal(self.meteorite_particle_energy, self.meteorite_energy_amplitude, self.meteorite_energy_cycle, time)
+        self.sinusoidal(
+            self.meteorite_particle_energy,
+            self.meteorite_energy_amplitude,
+            self.meteorite_energy_cycle,
+            time,
+        )
     }
 
     /// 环境温度：距火山越近越高 (0~1)，三次方衰减使火山口附近更热、远处急剧下降
@@ -210,7 +254,13 @@ impl Config {
     }
 
     /// 战力计算公式
-    pub fn combat_power(&self, energy: f64, warmth: f64, speed_norm: f64, ally_total_energy: f64) -> f64 {
+    pub fn combat_power(
+        &self,
+        energy: f64,
+        warmth: f64,
+        speed_norm: f64,
+        ally_total_energy: f64,
+    ) -> f64 {
         let energy_factor = energy / 100.0;
         let temp_factor = 1.0 + self.combat_temp_weight * warmth;
         let speed_factor = 1.0 + self.combat_speed_weight * speed_norm;
@@ -223,7 +273,6 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         // 唯一配置源：config.toml（编译时嵌入）
-        toml::from_str(include_str!("../config.toml"))
-            .expect("config.toml 格式错误")
+        toml::from_str(include_str!("../config.toml")).expect("config.toml 格式错误")
     }
 }

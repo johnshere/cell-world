@@ -1,8 +1,8 @@
-use egui::{Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2, epaint::PathShape};
+use egui::{epaint::PathShape, Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
 use rustc_hash::FxHashMap;
 
-use crate::world::World;
 use super::Selection;
+use crate::world::World;
 
 /// 渲染上下文（种族颜色）
 pub struct RenderContext {
@@ -50,14 +50,25 @@ impl WorldCanvas {
         let max_x = ((screen_rect.width() - self.offset.x) / self.scale) as f64;
         let max_y = ((screen_rect.height() - self.offset.y) / self.scale) as f64;
 
-        VisibleWorldBounds { min_x, min_y, max_x, max_y }
+        VisibleWorldBounds {
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+        }
     }
 
     /// 渲染世界，返回当前可见的世界坐标范围
-    pub fn render(&mut self, ui: &mut Ui, world: &World, selection: &mut Selection, ctx: &RenderContext, config: &crate::config::Config) -> VisibleWorldBounds {
+    pub fn render(
+        &mut self,
+        ui: &mut Ui,
+        world: &World,
+        selection: &mut Selection,
+        ctx: &RenderContext,
+        config: &crate::config::Config,
+    ) -> VisibleWorldBounds {
         let available_size = ui.available_size();
-        let (response, painter) =
-            ui.allocate_painter(available_size, Sense::click_and_drag());
+        let (response, painter) = ui.allocate_painter(available_size, Sense::click_and_drag());
         let rect = response.rect;
 
         // 首次渲染时设置默认缩放并居中视窗（原点在屏幕中心）
@@ -87,7 +98,8 @@ impl WorldCanvas {
         self.draw_grid(&painter, rect);
 
         // 选中描边颜色
-        let selection_stroke = Stroke::new(1.5, Color32::from_rgba_unmultiplied(255, 255, 255, 180));
+        let selection_stroke =
+            Stroke::new(1.5, Color32::from_rgba_unmultiplied(255, 255, 255, 180));
 
         // 绘制能量粒子
         for particle in &world.energy_particles {
@@ -110,7 +122,8 @@ impl WorldCanvas {
                         painter.circle_filled(pos, radius, color);
                     }
                     let alpha = (particle.energy / particle.initial_energy).clamp(0.0, 1.0) as f32;
-                    let color = Color32::from_rgba_unmultiplied(255, 220, 100, (alpha * 200.0) as u8);
+                    let color =
+                        Color32::from_rgba_unmultiplied(255, 220, 100, (alpha * 200.0) as u8);
                     let radius = 1.064 * self.scale;
                     painter.circle_filled(pos, radius, color);
 
@@ -125,28 +138,43 @@ impl WorldCanvas {
         // 绘制痕迹点（trail_disabled 时跳过）
         if !world.trail_disabled {
             for trail in &world.trail_points {
-                if !trail.alive { continue; }
+                if !trail.alive {
+                    continue;
+                }
                 let pos = self.world_to_screen(Pos2::new(trail.x as f32, trail.y as f32), rect);
                 if rect.contains(pos) {
                     let age_ratio = (1.0 - trail.age / 38.0).max(0.0) as f32;
                     let alpha = (80.0 * age_ratio) as u8;
                     let color = species_to_color(trail.genome_hash);
-                    let trail_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
-                    let radius = (trail.visual_radius as f32 * 0.2 * age_ratio * self.scale).max(0.3 * self.scale);
+                    let trail_color =
+                        Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
+                    let radius = (trail.visual_radius as f32 * 0.2 * age_ratio * self.scale)
+                        .max(0.3 * self.scale);
                     painter.circle_filled(pos, radius, trail_color);
                 }
             }
         }
 
-        // 绘制火山热辐射圈
+        // 绘制火山温度影响边界
         {
-            let volcano_pos = self.world_to_screen(Pos2::new(config.volcano_x as f32, config.volcano_y as f32), rect);
+            let volcano_pos = self.world_to_screen(
+                Pos2::new(config.volcano_x as f32, config.volcano_y as f32),
+                rect,
+            );
             let heat_radius = config.volcano_heat_range as f32 * self.scale;
             if heat_radius > 5.0 {
+                // 外圈：温度影响边界（虚线效果用低透明度）
                 painter.circle_stroke(
                     volcano_pos,
                     heat_radius,
-                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 100, 50, 20)),
+                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 120, 50, 50)),
+                );
+                // 中圈：t³衰减下约50%温度处（约 0.79 * range）
+                let mid_radius = heat_radius * 0.79;
+                painter.circle_stroke(
+                    volcano_pos,
+                    mid_radius,
+                    Stroke::new(0.5, Color32::from_rgba_unmultiplied(255, 80, 30, 30)),
                 );
             }
         }
@@ -155,7 +183,8 @@ impl WorldCanvas {
         {
             let (ib_min_x, ib_min_y, ib_max_x, ib_max_y) = world.initial_bounds;
             let top_left = self.world_to_screen(Pos2::new(ib_min_x as f32, ib_min_y as f32), rect);
-            let bottom_right = self.world_to_screen(Pos2::new(ib_max_x as f32, ib_max_y as f32), rect);
+            let bottom_right =
+                self.world_to_screen(Pos2::new(ib_max_x as f32, ib_max_y as f32), rect);
             let bounds_rect = Rect::from_min_max(top_left, bottom_right);
             painter.rect_stroke(
                 bounds_rect,
@@ -171,7 +200,11 @@ impl WorldCanvas {
                 let outer_r = 8.0 * self.scale;
                 let inner_r = 4.0 * self.scale;
                 let volcano_color = Color32::from_rgb(255, 80, 30);
-                painter.circle_filled(volcano_pos, outer_r, Color32::from_rgba_unmultiplied(255, 80, 30, 80));
+                painter.circle_filled(
+                    volcano_pos,
+                    outer_r,
+                    Color32::from_rgba_unmultiplied(255, 80, 30, 80),
+                );
                 painter.circle_filled(volcano_pos, inner_r, volcano_color);
             }
         }
@@ -210,7 +243,10 @@ impl WorldCanvas {
                                 )
                             })
                             .collect();
-                        painter.add(PathShape::line(points, Stroke::new(mouth_stroke, Color32::from_rgb(255, 100, 100))));
+                        painter.add(PathShape::line(
+                            points,
+                            Stroke::new(mouth_stroke, Color32::from_rgb(255, 100, 100)),
+                        ));
                     }
 
                     // 双眼（白圆+黑瞳，固定大小）
@@ -301,9 +337,9 @@ impl WorldCanvas {
 
         // 滚轮缩放（以鼠标位置为中心，仅当鼠标在画布区域且无其他窗口遮挡时）
         let scroll_delta = ui.input(|i| i.raw_scroll_delta.y);
-        let pointer_over_canvas = ui.input(|i| {
-            i.pointer.hover_pos().map_or(false, |p| rect.contains(p))
-        }) && !ui.ctx().is_pointer_over_area();
+        let pointer_over_canvas = ui
+            .input(|i| i.pointer.hover_pos().map_or(false, |p| rect.contains(p)))
+            && !ui.ctx().is_pointer_over_area();
         if scroll_delta != 0.0 && pointer_over_canvas {
             if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
                 // 鼠标相对于画布的位置
@@ -368,7 +404,6 @@ impl WorldCanvas {
             screen_rect.top() + self.offset.y + world_pos.y * self.scale,
         )
     }
-
 }
 
 impl Default for WorldCanvas {

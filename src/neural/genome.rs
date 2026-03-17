@@ -15,12 +15,28 @@ pub enum NodeType {
     Output,
 }
 
+fn default_decay() -> f64 {
+    0.0
+}
+fn default_threshold() -> f64 {
+    0.0
+}
+
 /// 节点基因
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
 pub struct NodeGene {
     pub id: usize,
     pub node_type: NodeType,
+    /// 膜电位衰减 (0.0~0.99)
+    #[cfg_attr(feature = "persistence", serde(default = "default_decay"))]
+    pub decay: f64,
+    /// 发放阈值 (0.0~2.0)，0=直读
+    #[cfg_attr(feature = "persistence", serde(default = "default_threshold"))]
+    pub threshold: f64,
+    /// 不应期 ticks
+    #[cfg_attr(feature = "persistence", serde(default))]
+    pub refractory_period: u8,
 }
 
 /// 连接基因
@@ -63,20 +79,41 @@ impl Genome {
         let mut nodes = Vec::new();
         let mut connections = Vec::new();
 
-        // 创建输入节点
+        // 创建输入节点（直通：decay=0, threshold=0, refractory=0）
         for i in 0..Self::INPUT_SIZE {
             nodes.push(NodeGene {
                 id: i,
                 node_type: NodeType::Input,
+                decay: 0.0,
+                threshold: 0.0,
+                refractory_period: 0,
             });
         }
 
-        // 创建4个固定输出节点
+        // 创建输出节点
+        // 转向(0)/速度(1)/阈值(4)/比例(5) → threshold=0 直读
+        // 嘴(2)/繁殖(3) → threshold>0 脉冲
         for i in 0..Self::OUTPUT_SIZE {
             let output_id = Self::INPUT_SIZE + i;
+            let (decay, threshold, refractory) = match i {
+                2 => (
+                    rng.gen_range(0.5..0.9),
+                    rng.gen_range(0.3..0.8),
+                    rng.gen_range(1..=2),
+                ),
+                3 => (
+                    rng.gen_range(0.5..0.9),
+                    rng.gen_range(0.3..0.8),
+                    rng.gen_range(1..=2),
+                ),
+                _ => (0.0, 0.0, 0),
+            };
             nodes.push(NodeGene {
                 id: output_id,
                 node_type: NodeType::Output,
+                decay,
+                threshold,
+                refractory_period: refractory,
             });
 
             // 随机连接一些输入到这个输出
@@ -133,6 +170,23 @@ impl Genome {
         if rng.gen::<f64>() < rate {
             if let Some(conn) = child.connections.choose_mut(&mut rng) {
                 conn.enabled = !conn.enabled;
+            }
+        }
+
+        // SNN 参数变异（decay / threshold / refractory_period）
+        for node in &mut child.nodes {
+            if node.node_type == NodeType::Input {
+                continue; // 输入节点始终直通
+            }
+            if rng.gen::<f64>() < rate {
+                node.decay = (node.decay + rng.gen_range(-0.1..0.1)).clamp(0.0, 0.99);
+            }
+            if rng.gen::<f64>() < rate {
+                node.threshold = (node.threshold + rng.gen_range(-0.15..0.15)).clamp(0.0, 2.0);
+            }
+            if rng.gen::<f64>() < rate * 0.5 {
+                let delta: i8 = if rng.gen_bool(0.5) { 1 } else { -1 };
+                node.refractory_period = (node.refractory_period as i8 + delta).clamp(0, 5) as u8;
             }
         }
 
@@ -209,12 +263,15 @@ impl Genome {
         // 禁用旧连接
         self.connections[conn_idx].enabled = false;
 
-        // 创建新的隐藏节点
+        // 创建新的隐藏节点（随机 SNN 参数）
         let new_node_id = self.next_node_id;
         self.next_node_id += 1;
         self.nodes.push(NodeGene {
             id: new_node_id,
             node_type: NodeType::Hidden,
+            decay: rng.gen_range(0.5..0.95),
+            threshold: rng.gen_range(0.3..1.0),
+            refractory_period: rng.gen_range(1..=3),
         });
 
         // 创建两个新连接
@@ -310,12 +367,20 @@ impl Genome {
         }
         total += (self_conns.len() - i) + (other_conns.len() - j);
 
-        if total == 0 { 1.0 } else { (similarity_sum / total as f64).max(0.0) }
+        if total == 0 {
+            1.0
+        } else {
+            (similarity_sum / total as f64).max(0.0)
+        }
     }
 
     /// NEAT 有性繁殖：两个父代基因交叉产生子代
     pub fn crossover(parent_a: &Genome, parent_b: &Genome, a_is_fitter: bool) -> Genome {
-        let (fitter, weaker) = if a_is_fitter { (parent_a, parent_b) } else { (parent_b, parent_a) };
+        let (fitter, weaker) = if a_is_fitter {
+            (parent_a, parent_b)
+        } else {
+            (parent_b, parent_a)
+        };
 
         // 构建 weaker 的连接映射
         let weaker_conns: std::collections::HashMap<(usize, usize), &ConnectionGene> = weaker
@@ -339,12 +404,23 @@ impl Genome {
             }
         }
 
-        // 节点：取两方并集
+        // 节点：取两方并集，共有节点 SNN 参数取平均
+        let weaker_nodes: std::collections::HashMap<usize, &NodeGene> =
+            weaker.nodes.iter().map(|n| (n.id, n)).collect();
+
         let mut node_ids: std::collections::HashSet<usize> = std::collections::HashSet::new();
         let mut child_nodes = Vec::new();
         for node in &fitter.nodes {
             node_ids.insert(node.id);
-            child_nodes.push(node.clone());
+            let mut blended = node.clone();
+            if let Some(&weaker_node) = weaker_nodes.get(&node.id) {
+                blended.decay = (node.decay + weaker_node.decay) / 2.0;
+                blended.threshold = (node.threshold + weaker_node.threshold) / 2.0;
+                blended.refractory_period = ((node.refractory_period as u16
+                    + weaker_node.refractory_period as u16)
+                    / 2) as u8;
+            }
+            child_nodes.push(blended);
         }
         for node in &weaker.nodes {
             if !node_ids.contains(&node.id) {

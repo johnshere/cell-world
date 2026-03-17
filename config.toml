@@ -1,11 +1,11 @@
 # 初始模拟速度
-initial_speed = 1.0
+initial_speed = 2.0
 # 最小生物数量（低于此值自动补充）
 min_creatures = 60
 # 初始能量
-initial_energy = 100.0
+initial_energy = 200.0
 # 初始世界缩放比例
-initial_scale = 0.6000000238418579
+initial_scale = 0.5
 
 # === 火山 ===
 # 火山坐标 X
@@ -13,13 +13,13 @@ volcano_x = 0.0
 # 火山坐标 Y
 volcano_y = 0.0
 # 火山喷发间隔（秒）
-volcano_interval = 40.0
+volcano_interval = 50.0
 # 火山喷射半径
-volcano_radius = 900.0
+volcano_radius = 1000.0
 # 每次喷发粒子数
-volcano_count = 80
+volcano_count = 200
 # 火山粒子能量
-volcano_particle_energy = 100.0
+volcano_particle_energy = 50.0
 
 # === 陨石 ===
 # 陨石降落间隔（秒）
@@ -27,7 +27,7 @@ meteorite_interval = 40.0
 # 每颗陨石粒子数
 meteorite_count = 20
 # 陨石散布线段长度
-meteorite_length = 350.0
+meteorite_length = 400.0
 # 陨石粒子能量
 meteorite_particle_energy = 150.0
 
@@ -35,19 +35,19 @@ meteorite_particle_energy = 150.0
 # 火山间隔正弦周期（秒）
 volcano_interval_cycle = 700.0
 # 火山间隔振幅比（0~0.9）
-volcano_interval_amplitude = 0.7
+volcano_interval_amplitude = 0.6
 # 火山能量正弦周期（秒）
 volcano_energy_cycle = 300.0
 # 火山能量振幅比（0~0.9）
-volcano_energy_amplitude = 0.5
+volcano_energy_amplitude = 0.6
 # 陨石间隔正弦周期（秒）
 meteorite_interval_cycle = 400.0
 # 陨石间隔振幅比（0~0.9）
-meteorite_interval_amplitude = 0.9
+meteorite_interval_amplitude = 0.7
 # 陨石能量正弦周期（秒）
 meteorite_energy_cycle = 250.0
 # 陨石能量振幅比（0~0.9）
-meteorite_energy_amplitude = 0.9
+meteorite_energy_amplitude = 0.7
 
 # 火山粒子衰减率（每秒）
 volcano_decay_rate = 0.03
@@ -56,9 +56,9 @@ meteorite_decay_rate = 0.01
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 40.0
+volcano_kill_radius = 20.0
 # 陨石落地杀伤半径
-meteorite_kill_radius = 50.0
+meteorite_kill_radius = 40.0
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）
@@ -87,7 +87,7 @@ age_metabolism_factor = 0.03
 move_cost = 0.0003
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.02
+heat_dissipation_coefficient = 0.015
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -132,3 +132,15 @@ trail_emit_interval = 0.25
 # === 繁殖 ===
 # 繁殖冷却时间（秒）
 reproduce_cooldown = 10.0
+
+# === 算力能量 ===
+# 算力转能量系数（内部除以1亿，0 = 禁用）
+compute_energy_factor = 10.0
+
+# === SNN ===
+# 每帧 SNN tick 数（同步模式）
+snn_ticks_per_frame = 10
+# 神经后端: auto | cpu | gpu | legacy
+neural_backend = "auto"
+# 异步模式 tick 频率 (ticks/s)
+neural_tick_rate = 600.0

@@ -3,19 +3,21 @@ use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::time::Instant;
 
-use crate::config::Config;
-use crate::neural::Genome;
 use super::{Creature, EnergyParticle, ParticleSource, SpatialGrid, TrailPoint};
+use crate::config::Config;
+use crate::neural::bridge::{CreatureEvent, CreatureInput, NeuralBridge};
+use crate::neural::Genome;
 
 /// 性能统计（单帧）
 #[derive(Default, Clone)]
 pub struct PerfStats {
     pub perceive_ms: f64,
-    pub forward_ms: f64,
+    pub snn_ms: f64,
     pub actions_ms: f64,
     pub spatial_ms: f64,
     pub total_ms: f64,
     pub creature_count: usize,
+    pub avg_compute_ns: f64,
 }
 
 /// 世界
@@ -47,7 +49,7 @@ pub struct World {
     viewport_max_y: f64,
 
     // 初始世界范围（固定，用于陨石坠落）
-    pub initial_bounds: (f64, f64, f64, f64),  // (min_x, min_y, max_x, max_y)
+    pub initial_bounds: (f64, f64, f64, f64), // (min_x, min_y, max_x, max_y)
     initial_bounds_set: bool,
 
     // 性能统计
@@ -78,6 +80,13 @@ pub struct World {
     pub trail_disabled: bool,
     /// 痕迹生成暂停（FPS<30时自动开启，仅停止生成新痕迹）
     pub trail_spawn_paused: bool,
+
+    /// 异步神经桥（None = 同步模式）
+    neural_bridge: Option<NeuralBridge>,
+    /// 异步模式下的输出缓存
+    neural_output_cache: FxHashMap<u64, [f64; 6]>,
+    /// 异步 SNN 耗时缓存
+    neural_compute_cache: FxHashMap<u64, u64>,
 }
 
 /// 种族缓存（祖先追溯模型）
@@ -110,12 +119,12 @@ impl World {
             next_creature_id: 0,
             next_energy_id: 0,
             // 初始视窗居中于原点
-            viewport_min_x: -400.0,
-            viewport_min_y: -300.0,
-            viewport_max_x: 400.0,
-            viewport_max_y: 300.0,
+            viewport_min_x: -700.0,
+            viewport_min_y: -500.0,
+            viewport_max_x: 700.0,
+            viewport_max_y: 500.0,
             // 初始世界范围（首帧 set_viewport 时锁定）
-            initial_bounds: (-400.0, -300.0, 400.0, 300.0),
+            initial_bounds: (-700.0, -500.0, 700.0, 500.0),
             initial_bounds_set: false,
             perf_stats: PerfStats::default(),
             similarity_cache: RefCell::new(FxHashMap::default()),
@@ -131,6 +140,9 @@ impl World {
             trail_query_buf: Vec::new(),
             trail_disabled: false,
             trail_spawn_paused: false,
+            neural_bridge: None,
+            neural_output_cache: FxHashMap::default(),
+            neural_compute_cache: FxHashMap::default(),
         };
         // 初始连喷三波，提供充足起始能量（直接落地，不杀伤）
         for _ in 0..3 {
@@ -142,15 +154,50 @@ impl World {
         world
     }
 
+    /// 设置异步神经桥
+    pub fn set_neural_bridge(&mut self, bridge: NeuralBridge) {
+        // 向桥注册所有已有生物
+        for creature in &self.creatures {
+            if creature.alive {
+                bridge.send_event(CreatureEvent::Born {
+                    id: creature.id,
+                    genome: creature.genome.clone(),
+                });
+            }
+        }
+        self.neural_bridge = Some(bridge);
+    }
+
+    /// 向桥发送 Born 事件
+    fn notify_born(&self, creature: &Creature) {
+        if let Some(ref bridge) = self.neural_bridge {
+            bridge.send_event(CreatureEvent::Born {
+                id: creature.id,
+                genome: creature.genome.clone(),
+            });
+        }
+    }
+
+    /// 向桥发送 Died 事件
+    fn notify_died(&self, creature_id: u64) {
+        if let Some(ref bridge) = self.neural_bridge {
+            bridge.send_event(CreatureEvent::Died { id: creature_id });
+        }
+    }
+
     /// 获取缓存的相似度
     fn get_similarity(&self, creature_a: &Creature, creature_b: &Creature) -> f64 {
         let hash_a = creature_a.genome_hash;
         let hash_b = creature_b.genome_hash;
-        let key = if hash_a <= hash_b { (hash_a, hash_b) } else { (hash_b, hash_a) };
+        let key = if hash_a <= hash_b {
+            (hash_a, hash_b)
+        } else {
+            (hash_b, hash_a)
+        };
         let mut cache = self.similarity_cache.borrow_mut();
-        *cache.entry(key).or_insert_with(|| {
-            creature_a.genome.similarity(&creature_b.genome)
-        })
+        *cache
+            .entry(key)
+            .or_insert_with(|| creature_a.genome.similarity(&creature_b.genome))
     }
 
     /// 设置视窗范围
@@ -241,6 +288,7 @@ impl World {
             config.initial_connections_min,
             config.initial_connections_max,
         );
+        self.notify_born(&creature);
         self.creatures.push(creature);
     }
 
@@ -256,6 +304,7 @@ impl World {
         let creature_id = self.next_creature_id;
         self.next_creature_id += 1;
         let creature = Creature::new(creature_id, x, y, energy, genome.clone(), 0, None);
+        self.notify_born(&creature);
         self.creatures.push(creature);
     }
 
@@ -263,6 +312,7 @@ impl World {
     pub fn kill_creature(&mut self, id: u64) {
         if let Some(creature) = self.creatures.iter_mut().find(|c| c.id == id) {
             creature.alive = false;
+            self.notify_died(id);
         }
     }
 
@@ -297,7 +347,12 @@ impl World {
             let energy_id = self.next_energy_id;
             self.next_energy_id += 1;
             self.energy_particles.push(EnergyParticle::new(
-                energy_id, x, y, current_energy, f64::MAX, ParticleSource::Volcano,
+                energy_id,
+                x,
+                y,
+                current_energy,
+                f64::MAX,
+                ParticleSource::Volcano,
             ));
             // 即时杀伤
             for c in &mut self.creatures {
@@ -337,7 +392,12 @@ impl World {
             let energy_id = self.next_energy_id;
             self.next_energy_id += 1;
             self.energy_particles.push(EnergyParticle::new(
-                energy_id, x, y, current_energy, f64::MAX, ParticleSource::Meteorite,
+                energy_id,
+                x,
+                y,
+                current_energy,
+                f64::MAX,
+                ParticleSource::Meteorite,
             ));
             // 即时杀伤
             for c in &mut self.creatures {
@@ -398,6 +458,20 @@ impl World {
     // ========== 更新生物 ==========
 
     fn update_creatures(&mut self, dt: f64, config: &Config) {
+        let has_bridge = self.neural_bridge.is_some();
+
+        // 异步模式：交换缓冲区，读取输出
+        if has_bridge {
+            if let Some(ref bridge) = self.neural_bridge {
+                bridge.swap_outputs();
+                let outputs = bridge.read_outputs();
+                for o in &outputs {
+                    self.neural_output_cache.insert(o.creature_id, o.outputs);
+                    self.neural_compute_cache.insert(o.creature_id, o.compute_ns);
+                }
+            }
+        }
+
         let creature_count = self.creatures.len();
         let mut alive_count = 0;
         let mut perceive_time = 0.0;
@@ -406,11 +480,20 @@ impl World {
 
         let total_start = Instant::now();
 
+        // 异步模式：收集感知数据
+        let mut bridge_inputs: Vec<CreatureInput> = if has_bridge {
+            Vec::with_capacity(creature_count)
+        } else {
+            Vec::new()
+        };
+
         for i in 0..creature_count {
             if !self.creatures[i].alive {
                 continue;
             }
             alive_count += 1;
+
+            let creature_t0 = Instant::now();
 
             // 环境温度（火山+集体热）
             let env_temp = self.compute_env_temp(self.creatures[i].x, self.creatures[i].y, config);
@@ -429,7 +512,8 @@ impl World {
             // env_temp 越低散热越快，集群可减缓散热
             let body_radius = (self.creatures[i].energy.max(0.0) * 1.28).cbrt();
             let circumference = body_radius * std::f64::consts::TAU;
-            let heat_cost = config.heat_dissipation_coefficient * circumference / (env_temp + 0.01) * dt;
+            let heat_cost =
+                config.heat_dissipation_coefficient * circumference / (env_temp + 0.01) * dt;
             self.creatures[i].energy -= heat_cost;
 
             self.creatures[i].age += dt;
@@ -444,24 +528,95 @@ impl World {
             self.compute_perception_with_cooldown(i, config);
             perceive_time += t0.elapsed().as_secs_f64() * 1000.0;
 
-            // 神经网络决策
-            let t1 = Instant::now();
-            let perception = self.creatures[i].perception_cache;
-            let outputs = self.creatures[i].brain.forward(&perception);
-            forward_time += t1.elapsed().as_secs_f64() * 1000.0;
+            if has_bridge {
+                // 异步模式：发布感知 → 读缓存输出
+                bridge_inputs.push(CreatureInput {
+                    creature_id: self.creatures[i].id,
+                    perception: self.creatures[i].perception_cache,
+                });
+                let outputs = self
+                    .neural_output_cache
+                    .get(&self.creatures[i].id)
+                    .copied()
+                    .unwrap_or(self.creatures[i].last_outputs);
+                self.creatures[i].last_outputs = outputs;
 
-            // 执行动作
-            let t2 = Instant::now();
-            self.execute_actions(i, &outputs, dt, config);
-            actions_time += t2.elapsed().as_secs_f64() * 1000.0;
+                let t2 = Instant::now();
+                self.execute_actions(i, &outputs.to_vec(), dt, config);
+                actions_time += t2.elapsed().as_secs_f64() * 1000.0;
+
+                // 主线程耗时 + 异步 SNN 耗时
+                let main_ns = creature_t0.elapsed().as_nanos() as u64;
+                let snn_ns = self.neural_compute_cache.get(&self.creatures[i].id).copied().unwrap_or(0);
+                self.creatures[i].frame_compute_ns = main_ns + snn_ns;
+            } else {
+                // 同步模式：SNN tick
+                let t1 = Instant::now();
+                let perception = self.creatures[i].perception_cache;
+                let snn_ticks = config.snn_ticks_per_frame;
+                let mut outputs = self.creatures[i].last_outputs.to_vec();
+                for _ in 0..snn_ticks {
+                    outputs = self.creatures[i].brain.tick(&perception);
+                }
+                for (j, &v) in outputs.iter().enumerate().take(6) {
+                    self.creatures[i].last_outputs[j] = v;
+                }
+                forward_time += t1.elapsed().as_secs_f64() * 1000.0;
+
+                let t2 = Instant::now();
+                self.execute_actions(i, &outputs, dt, config);
+                actions_time += t2.elapsed().as_secs_f64() * 1000.0;
+
+                // 同步模式下 SNN 已在 main_ns 中
+                let main_ns = creature_t0.elapsed().as_nanos() as u64;
+                self.creatures[i].frame_compute_ns = main_ns;
+            }
+        }
+
+        // 异步模式：写入感知并交换
+        if has_bridge {
+            if let Some(ref bridge) = self.neural_bridge {
+                bridge.write_inputs(bridge_inputs);
+                bridge.swap_inputs();
+            }
+        }
+
+        // 算力能量扣除（在计时区间外，避免递归膨胀）
+        if config.compute_energy_factor > 0.0 {
+            let mut died_ids = Vec::new();
+            for i in 0..self.creatures.len() {
+                if !self.creatures[i].alive {
+                    continue;
+                }
+                let cost = (self.creatures[i].frame_compute_ns as f64 / 100_000_000.0)
+                    * config.compute_energy_factor;
+                self.creatures[i].energy -= cost;
+                if self.creatures[i].energy <= 0.0 {
+                    self.creatures[i].alive = false;
+                    died_ids.push(self.creatures[i].id);
+                }
+            }
+            for id in died_ids {
+                if let Some(ref bridge) = self.neural_bridge {
+                    bridge.send_event(CreatureEvent::Died { id });
+                }
+            }
         }
 
         let total_time = total_start.elapsed().as_secs_f64() * 1000.0;
         self.perf_stats.perceive_ms = perceive_time;
-        self.perf_stats.forward_ms = forward_time;
+        self.perf_stats.snn_ms = forward_time;
         self.perf_stats.actions_ms = actions_time;
         self.perf_stats.total_ms = total_time;
         self.perf_stats.creature_count = alive_count;
+
+        // 平均算力统计
+        if alive_count > 0 {
+            let total_ns: u64 = self.creatures.iter().filter(|c| c.alive).map(|c| c.frame_compute_ns).sum();
+            self.perf_stats.avg_compute_ns = total_ns as f64 / alive_count as f64;
+        } else {
+            self.perf_stats.avg_compute_ns = 0.0;
+        }
     }
 
     // ========== 感知系统（双眼，带冷却） ==========
@@ -473,7 +628,8 @@ impl World {
         // 自身状态 [8..9] 始终更新
         let cx = self.creatures[creature_idx].x;
         let cy = self.creatures[creature_idx].y;
-        self.creatures[creature_idx].perception_cache[8] = (self.creatures[creature_idx].energy / 200.0).min(1.0);
+        self.creatures[creature_idx].perception_cache[8] =
+            (self.creatures[creature_idx].energy / 200.0).min(1.0);
         self.creatures[creature_idx].perception_cache[9] = self.compute_env_temp(cx, cy, config);
 
         if !eyes_ready {
@@ -497,17 +653,18 @@ impl World {
         let eye_range = config.vision_range;
         let eye_half_fov = 70.0_f64.to_radians();
         let eye_offset_angle = 50.0_f64.to_radians();
-        let eye_dirs = [
-            heading - eye_offset_angle,
-            heading + eye_offset_angle,
-        ];
+        let eye_dirs = [heading - eye_offset_angle, heading + eye_offset_angle];
         // 眼睛世界坐标（用于计算从眼睛出发的距离）
         let body_radius = (self.creatures[creature_idx].energy * 1.28).cbrt();
         let eye_positions = [
-            (cx + body_radius * (heading - eye_offset_angle).cos(),
-             cy + body_radius * (heading - eye_offset_angle).sin()),
-            (cx + body_radius * (heading + eye_offset_angle).cos(),
-             cy + body_radius * (heading + eye_offset_angle).sin()),
+            (
+                cx + body_radius * (heading - eye_offset_angle).cos(),
+                cy + body_radius * (heading - eye_offset_angle).sin(),
+            ),
+            (
+                cx + body_radius * (heading + eye_offset_angle).cos(),
+                cy + body_radius * (heading + eye_offset_angle).sin(),
+            ),
         ];
 
         // 眼睛：最近距离
@@ -522,15 +679,20 @@ impl World {
         let mut energy_buf = std::mem::take(&mut self.energy_query_buf);
 
         // === 能量粒子 ===
-        self.energy_grid.query_into(cx, cy, eye_range, &mut energy_buf);
+        self.energy_grid
+            .query_into(cx, cy, eye_range, &mut energy_buf);
         for &idx in &energy_buf {
             let particle = &self.energy_particles[idx];
-            if !particle.alive { continue; }
+            if !particle.alive {
+                continue;
+            }
 
             let dx = particle.x - cx;
             let dy = particle.y - cy;
             let dist = (dx * dx + dy * dy).sqrt();
-            if dist <= 0.0 { continue; }
+            if dist <= 0.0 {
+                continue;
+            }
 
             let angle = dy.atan2(dx);
 
@@ -550,22 +712,27 @@ impl World {
         }
 
         // === 生物 ===
-        self.creature_grid.query_into(cx, cy, eye_range, &mut creature_buf);
+        self.creature_grid
+            .query_into(cx, cy, eye_range, &mut creature_buf);
         for &idx in &creature_buf {
-            if idx == creature_idx { continue; }
+            if idx == creature_idx {
+                continue;
+            }
             let other = &self.creatures[idx];
-            if !other.alive { continue; }
+            if !other.alive {
+                continue;
+            }
 
             let dx = other.x - cx;
             let dy = other.y - cy;
             let dist = (dx * dx + dy * dy).sqrt();
-            if dist <= 0.0 { continue; }
+            if dist <= 0.0 {
+                continue;
+            }
 
             let angle = dy.atan2(dx);
-            let similarity = self.get_similarity(
-                &self.creatures[creature_idx],
-                &self.creatures[idx],
-            );
+            let similarity =
+                self.get_similarity(&self.creatures[creature_idx], &self.creatures[idx]);
             let is_ally = similarity >= threshold;
 
             // 双眼（从眼睛位置算距离）
@@ -578,7 +745,9 @@ impl World {
                     let eye_dist = (edx * edx + edy * edy).sqrt();
                     if eye_dist <= eye_range {
                         if is_ally {
-                            if eye_dist < eye_ally[eye_i] { eye_ally[eye_i] = eye_dist; }
+                            if eye_dist < eye_ally[eye_i] {
+                                eye_ally[eye_i] = eye_dist;
+                            }
                         } else if eye_dist < eye_enemy[eye_i] {
                             eye_enemy[eye_i] = eye_dist;
                         }
@@ -595,14 +764,38 @@ impl World {
 
         // === 写入通道 ===
         // 左眼 [0..3]: 食物接近度, 同族接近度, 异族接近度, 热感温度
-        self.creatures[creature_idx].perception_cache[0] = if eye_food[0] < f64::MAX { 1.0 - eye_food[0] / eye_range } else { 0.0 };
-        self.creatures[creature_idx].perception_cache[1] = if eye_ally[0] < f64::MAX { 1.0 - eye_ally[0] / eye_range } else { 0.0 };
-        self.creatures[creature_idx].perception_cache[2] = if eye_enemy[0] < f64::MAX { 1.0 - eye_enemy[0] / eye_range } else { 0.0 };
+        self.creatures[creature_idx].perception_cache[0] = if eye_food[0] < f64::MAX {
+            body_radius / (body_radius + eye_food[0])
+        } else {
+            0.0
+        };
+        self.creatures[creature_idx].perception_cache[1] = if eye_ally[0] < f64::MAX {
+            body_radius / (body_radius + eye_ally[0])
+        } else {
+            0.0
+        };
+        self.creatures[creature_idx].perception_cache[2] = if eye_enemy[0] < f64::MAX {
+            body_radius / (body_radius + eye_enemy[0])
+        } else {
+            0.0
+        };
 
         // 右眼 [4..7]: 食物接近度, 同族接近度, 异族接近度, 热感温度
-        self.creatures[creature_idx].perception_cache[4] = if eye_food[1] < f64::MAX { 1.0 - eye_food[1] / eye_range } else { 0.0 };
-        self.creatures[creature_idx].perception_cache[5] = if eye_ally[1] < f64::MAX { 1.0 - eye_ally[1] / eye_range } else { 0.0 };
-        self.creatures[creature_idx].perception_cache[6] = if eye_enemy[1] < f64::MAX { 1.0 - eye_enemy[1] / eye_range } else { 0.0 };
+        self.creatures[creature_idx].perception_cache[4] = if eye_food[1] < f64::MAX {
+            body_radius / (body_radius + eye_food[1])
+        } else {
+            0.0
+        };
+        self.creatures[creature_idx].perception_cache[5] = if eye_ally[1] < f64::MAX {
+            body_radius / (body_radius + eye_ally[1])
+        } else {
+            0.0
+        };
+        self.creatures[creature_idx].perception_cache[6] = if eye_enemy[1] < f64::MAX {
+            body_radius / (body_radius + eye_enemy[1])
+        } else {
+            0.0
+        };
 
         // 眼睛热感温度：火山热 + 视锥内生物集体热
         let eye_mid_dist = eye_range * 0.5;
@@ -614,8 +807,10 @@ impl World {
             cx + eye_mid_dist * eye_dirs[1].cos(),
             cy + eye_mid_dist * eye_dirs[1].sin(),
         );
-        self.creatures[creature_idx].perception_cache[3] = (left_volcano + eye_group_energy[0] / config.group_heat_denominator).min(1.0);
-        self.creatures[creature_idx].perception_cache[7] = (right_volcano + eye_group_energy[1] / config.group_heat_denominator).min(1.0);
+        self.creatures[creature_idx].perception_cache[3] =
+            (left_volcano + eye_group_energy[0] / config.group_heat_denominator).min(1.0);
+        self.creatures[creature_idx].perception_cache[7] =
+            (right_volcano + eye_group_energy[1] / config.group_heat_denominator).min(1.0);
     }
 
     // ========== 动作系统（6输出） ==========
@@ -672,7 +867,9 @@ impl World {
                     let nearby_trails = self.trail_grid.query(old_x, old_y, suppress_radius);
                     let has_nearby_trail = nearby_trails.iter().any(|&ti| {
                         let t = &self.trail_points[ti];
-                        if !t.alive { return false; }
+                        if !t.alive {
+                            return false;
+                        }
                         let dx = t.x - old_x;
                         let dy = t.y - old_y;
                         dx * dx + dy * dy <= sr2
@@ -680,7 +877,14 @@ impl World {
                     if !has_nearby_trail {
                         let creator_id = self.creatures[creature_idx].id;
                         let genome_hash = self.creatures[creature_idx].genome_hash;
-                        self.trail_points.push(TrailPoint::new(old_x, old_y, move_cost, genome_hash, creator_id, creature_radius));
+                        self.trail_points.push(TrailPoint::new(
+                            old_x,
+                            old_y,
+                            move_cost,
+                            genome_hash,
+                            creator_id,
+                            creature_radius,
+                        ));
                     }
                 }
             }
@@ -744,17 +948,25 @@ impl World {
         }
 
         // 对生物的咬/喂 — 受嘴巴冷却限制
-        if mouth.abs() <= 0.1 { return; }
-        if self.creatures[idx].mouth_cooldown_timer > 0.0 { return; }
+        if mouth.abs() <= 0.1 {
+            return;
+        }
+        if self.creatures[idx].mouth_cooldown_timer > 0.0 {
+            return;
+        }
 
         let nearby_creatures = self.creature_grid.query(mx, my, query_range);
         for &other_idx in &nearby_creatures {
-            if other_idx == idx || !self.creatures[other_idx].alive { continue; }
+            if other_idx == idx || !self.creatures[other_idx].alive {
+                continue;
+            }
             let ox = self.creatures[other_idx].x;
             let oy = self.creatures[other_idx].y;
             let other_radius = (self.creatures[other_idx].energy * 1.28).cbrt();
             let dist = ((ox - mx).powi(2) + (oy - my).powi(2)).sqrt();
-            if dist >= mouth_range + other_radius { continue; }
+            if dist >= mouth_range + other_radius {
+                continue;
+            }
 
             if mouth < -0.1 {
                 // 咬（捕食）— 咬合力 = |mouth|
@@ -763,21 +975,34 @@ impl World {
                 let other_energy = self.creatures[other_idx].energy;
 
                 // 攻击方战力 × 咬合力（warmth 改用 env_temp）
-                let my_warmth = self.compute_env_temp(self.creatures[idx].x, self.creatures[idx].y, config);
+                let my_warmth =
+                    self.compute_env_temp(self.creatures[idx].x, self.creatures[idx].y, config);
                 let my_speed_norm = (self.creatures[idx].current_speed / 50.0).min(1.0);
                 let my_ally_energy = self.compute_nearby_ally_energy(idx, config);
-                let attacker_score = config.combat_power(my_energy, my_warmth, my_speed_norm, my_ally_energy) * bite_force;
+                let attacker_score =
+                    config.combat_power(my_energy, my_warmth, my_speed_norm, my_ally_energy)
+                        * bite_force;
 
                 // 防御方战力
-                let other_warmth = self.compute_env_temp(self.creatures[other_idx].x, self.creatures[other_idx].y, config);
+                let other_warmth = self.compute_env_temp(
+                    self.creatures[other_idx].x,
+                    self.creatures[other_idx].y,
+                    config,
+                );
                 let other_speed_norm = (self.creatures[other_idx].current_speed / 50.0).min(1.0);
                 let other_ally_energy = self.compute_nearby_ally_energy(other_idx, config);
-                let defender_score = config.combat_power(other_energy, other_warmth, other_speed_norm, other_ally_energy);
+                let defender_score = config.combat_power(
+                    other_energy,
+                    other_warmth,
+                    other_speed_norm,
+                    other_ally_energy,
+                );
 
                 let damage_ratio = attacker_score / (attacker_score + defender_score + 0.001);
                 let transfer = other_energy * damage_ratio * config.bite_transfer_rate;
 
-                let similarity = self.get_similarity(&self.creatures[idx], &self.creatures[other_idx]);
+                let similarity =
+                    self.get_similarity(&self.creatures[idx], &self.creatures[other_idx]);
                 let efficiency = 1.0 - similarity;
                 self.creatures[other_idx].energy -= transfer;
                 self.creatures[idx].energy += transfer * efficiency;
@@ -806,8 +1031,11 @@ impl World {
         let threshold = config.species_similarity_threshold;
         let mut total = 0.0;
         for &other_idx in &nearby {
-            if other_idx == creature_idx || !self.creatures[other_idx].alive { continue; }
-            let similarity = self.get_similarity(&self.creatures[creature_idx], &self.creatures[other_idx]);
+            if other_idx == creature_idx || !self.creatures[other_idx].alive {
+                continue;
+            }
+            let similarity =
+                self.get_similarity(&self.creatures[creature_idx], &self.creatures[other_idx]);
             if similarity >= threshold {
                 total += self.creatures[other_idx].energy;
             }
@@ -816,8 +1044,16 @@ impl World {
     }
 
     /// 繁殖（支持有性/无性）
-    fn action_reproduce(&mut self, idx: usize, threshold: f64, ratio: f64, config: &Config) -> bool {
-        if self.creatures[idx].energy < threshold { return false; }
+    fn action_reproduce(
+        &mut self,
+        idx: usize,
+        threshold: f64,
+        ratio: f64,
+        config: &Config,
+    ) -> bool {
+        if self.creatures[idx].energy < threshold {
+            return false;
+        }
 
         let child_energy = self.creatures[idx].energy * ratio;
         self.creatures[idx].energy -= child_energy;
@@ -836,11 +1072,8 @@ impl World {
         self.next_creature_id += 1;
 
         let child = if let Some(mate_genome) = mate_genome {
-            let crossover_genome = Genome::crossover(
-                &self.creatures[idx].genome,
-                &mate_genome,
-                true,
-            );
+            let crossover_genome =
+                Genome::crossover(&self.creatures[idx].genome, &mate_genome, true);
             let child_genome = crossover_genome.mutate(config.mutation_rate);
             Creature::new(
                 creature_id,
@@ -861,16 +1094,21 @@ impl World {
             )
         };
 
+        self.notify_born(&child);
         self.creatures.push(child);
         true
     }
 
     fn find_mate(&self, idx: usize, config: &Config) -> Option<Genome> {
         let creature = &self.creatures[idx];
-        let nearby = self.creature_grid.query(creature.x, creature.y, config.contact_range);
+        let nearby = self
+            .creature_grid
+            .query(creature.x, creature.y, config.contact_range);
 
         for &other_idx in &nearby {
-            if other_idx == idx || !self.creatures[other_idx].alive { continue; }
+            if other_idx == idx || !self.creatures[other_idx].alive {
+                continue;
+            }
             let other = &self.creatures[other_idx];
             let dist = ((other.x - creature.x).powi(2) + (other.y - creature.y).powi(2)).sqrt();
             if dist < config.contact_range {
@@ -909,6 +1147,7 @@ impl World {
         for creature in &self.creatures {
             if !creature.alive {
                 had_deaths = true;
+                self.notify_died(creature.id);
                 let age = creature.age;
                 let pos = self.death_ages.partition_point(|&x| x < age);
                 self.death_ages.insert(pos, age);
@@ -955,14 +1194,14 @@ impl World {
         // 每10秒清理一次相似度缓存
         if self.time - self.cache_cleanup_timer >= 10.0 {
             self.cache_cleanup_timer = self.time;
-            let alive_hashes: rustc_hash::FxHashSet<u64> = self.creatures.iter()
+            let alive_hashes: rustc_hash::FxHashSet<u64> = self
+                .creatures
+                .iter()
                 .filter(|c| c.alive)
                 .map(|c| c.genome_hash)
                 .collect();
             let mut cache = self.similarity_cache.borrow_mut();
-            cache.retain(|(h1, h2), _| {
-                alive_hashes.contains(h1) && alive_hashes.contains(h2)
-            });
+            cache.retain(|(h1, h2), _| alive_hashes.contains(h1) && alive_hashes.contains(h2));
         }
     }
 
@@ -970,17 +1209,32 @@ impl World {
 
     pub fn stats(&self, species_threshold: f64, config: &Config) -> WorldStats {
         let alive_creatures: Vec<_> = self.creatures.iter().filter(|c| c.alive).collect();
-        let max_generation = alive_creatures.iter().map(|c| c.generation).max().unwrap_or(0);
+        let max_generation = alive_creatures
+            .iter()
+            .map(|c| c.generation)
+            .max()
+            .unwrap_or(0);
 
         let creature_energy: f64 = alive_creatures.iter().map(|c| c.energy).sum();
-        let particle_energy: f64 = self.energy_particles.iter()
-            .filter(|e| e.alive).map(|e| e.energy).sum();
-        let trail_energy: f64 = self.trail_points.iter()
-            .filter(|t| t.alive).map(|t| t.energy).sum();
+        let particle_energy: f64 = self
+            .energy_particles
+            .iter()
+            .filter(|e| e.alive)
+            .map(|e| e.energy)
+            .sum();
+        let trail_energy: f64 = self
+            .trail_points
+            .iter()
+            .filter(|t| t.alive)
+            .map(|t| t.energy)
+            .sum();
         let trail_count = self.trail_points.iter().filter(|t| t.alive).count();
         let total_energy = creature_energy + particle_energy + trail_energy;
-        let avg_energy = if alive_creatures.is_empty() { 0.0 }
-            else { creature_energy / alive_creatures.len() as f64 };
+        let avg_energy = if alive_creatures.is_empty() {
+            0.0
+        } else {
+            creature_energy / alive_creatures.len() as f64
+        };
 
         // 种族聚类（祖先追溯模型）
         self.ensure_clan_cache(species_threshold);
@@ -1013,6 +1267,7 @@ impl World {
             energy_particle_count: self.energy_particles.iter().filter(|e| e.alive).count(),
             trail_count,
             total_energy,
+            creature_energy,
             max_generation,
             avg_energy,
             action_counts: self.action_counts,
@@ -1033,9 +1288,8 @@ impl World {
             None => return FxHashMap::default(),
         };
 
-        let mut creature_species: FxHashMap<usize, u64> = FxHashMap::with_capacity_and_hasher(
-            cache.alive_indices.len(), Default::default(),
-        );
+        let mut creature_species: FxHashMap<usize, u64> =
+            FxHashMap::with_capacity_and_hasher(cache.alive_indices.len(), Default::default());
         for (i, &original_idx) in cache.alive_indices.iter().enumerate() {
             if let Some(&leader_id) = cache.creature_clan_map.get(&i) {
                 if let Some(&color_hash) = cache.clan_color.get(&leader_id) {
@@ -1057,7 +1311,9 @@ impl World {
         config: &Config,
     ) -> Option<DominantCandidate> {
         let total_count = alive_creatures.len();
-        if total_count < 5 { return None; }
+        if total_count < 5 {
+            return None;
+        }
 
         let death_median = self.death_age_stats.median;
         let has_death_data = self.death_age_stats.count > 0;
@@ -1073,10 +1329,14 @@ impl World {
 
         for (_species_root, members) in &species_members {
             let count = members.len();
-            if count < 5 { continue; }
+            if count < 5 {
+                continue;
+            }
 
             let ratio = count as f64 / total_count as f64;
-            if ratio < 0.3 { continue; }
+            if ratio < 0.3 {
+                continue;
+            }
 
             let mut max_age: f64 = 0.0;
             let mut sum_age: f64 = 0.0;
@@ -1087,10 +1347,14 @@ impl World {
 
             for &idx in members {
                 let c = alive_creatures[idx];
-                if c.age > max_age { max_age = c.age; }
+                if c.age > max_age {
+                    max_age = c.age;
+                }
                 sum_age += c.age;
                 sum_energy += c.energy;
-                if c.generation > sp_max_gen { sp_max_gen = c.generation; }
+                if c.generation > sp_max_gen {
+                    sp_max_gen = c.generation;
+                }
                 if c.energy > best_energy_val {
                     best_energy_val = c.energy;
                     best_energy_idx = idx;
@@ -1100,22 +1364,35 @@ impl World {
             let sp_avg_age = sum_age / count as f64;
             let sp_avg_energy = sum_energy / count as f64;
 
-            if max_age < config.dominant_min_age { continue; }
-            if has_death_data && sp_avg_age < death_median { continue; }
+            if max_age < config.dominant_min_age {
+                continue;
+            }
+            if has_death_data && sp_avg_age < death_median {
+                continue;
+            }
 
             let ratio_score = ratio;
             let energy_score = if global_avg_energy > 0.0 {
                 (sp_avg_energy / global_avg_energy).min(2.0) / 2.0
-            } else { 0.0 };
+            } else {
+                0.0
+            };
             let age_score = if has_death_data && death_median > 0.0 {
                 (sp_avg_age / death_median).min(2.0) / 2.0
-            } else { 0.5 };
+            } else {
+                0.5
+            };
             let gen_score = if global_max_generation > 0 {
                 sp_max_gen as f64 / global_max_generation as f64
-            } else { 0.0 };
+            } else {
+                0.0
+            };
 
-            let score = 0.30 * ratio_score + 0.20 * energy_score + 0.30 * age_score + 0.20 * gen_score;
-            if score < 0.6 { continue; }
+            let score =
+                0.30 * ratio_score + 0.20 * energy_score + 0.30 * age_score + 0.20 * gen_score;
+            if score < 0.6 {
+                continue;
+            }
 
             let representative = alive_creatures[best_energy_idx];
             let candidate = DominantCandidate {
@@ -1165,13 +1442,15 @@ impl World {
         }
 
         // 建立 creature ID -> 局部索引映射
-        let mut id_to_local: FxHashMap<u64, usize> = FxHashMap::with_capacity_and_hasher(n, Default::default());
+        let mut id_to_local: FxHashMap<u64, usize> =
+            FxHashMap::with_capacity_and_hasher(n, Default::default());
         for (i, c) in alive_creatures.iter().enumerate() {
             id_to_local.insert(c.id, i);
         }
 
         // 为每个生物找到族长
-        let mut creature_clan_map: FxHashMap<usize, u64> = FxHashMap::with_capacity_and_hasher(n, Default::default());
+        let mut creature_clan_map: FxHashMap<usize, u64> =
+            FxHashMap::with_capacity_and_hasher(n, Default::default());
         for i in 0..n {
             let leader_id = self.find_clan_leader(i, alive_creatures, &id_to_local, threshold);
             creature_clan_map.insert(i, leader_id);
@@ -1185,7 +1464,8 @@ impl World {
             let leader_id = creature_clan_map[&i];
             *clan_counts.entry(leader_id).or_insert(0) += 1;
             clan_color.entry(leader_id).or_insert_with(|| {
-                id_to_local.get(&leader_id)
+                id_to_local
+                    .get(&leader_id)
                     .map(|&local| alive_creatures[local].genome_hash)
                     .unwrap_or(0)
             });
@@ -1193,8 +1473,12 @@ impl World {
 
         let species_count = clan_counts.len();
 
-        let mut species_vec: Vec<_> = clan_counts.into_iter()
-            .map(|(leader_id, count)| RankedEntry { id: leader_id as usize, count })
+        let mut species_vec: Vec<_> = clan_counts
+            .into_iter()
+            .map(|(leader_id, count)| RankedEntry {
+                id: leader_id as usize,
+                count,
+            })
             .collect();
         species_vec.sort_by(|a, b| b.count.cmp(&a.count));
         let top_species: Vec<_> = species_vec.into_iter().take(3).collect();
@@ -1227,7 +1511,9 @@ impl World {
         let mut ancestor_local = local_idx;
         let mut depth = 0;
         loop {
-            if depth > 1000 { break; } // 安全上限
+            if depth > 1000 {
+                break;
+            } // 安全上限
             match alive_creatures[ancestor_local].parent_id {
                 Some(parent_id) => {
                     if let Some(&parent_local) = id_to_local.get(&parent_id) {
@@ -1260,8 +1546,12 @@ impl World {
 #[inline]
 fn angle_diff(a: f64, b: f64) -> f64 {
     let mut d = a - b;
-    while d > std::f64::consts::PI { d -= std::f64::consts::TAU; }
-    while d < -std::f64::consts::PI { d += std::f64::consts::TAU; }
+    while d > std::f64::consts::PI {
+        d -= std::f64::consts::TAU;
+    }
+    while d < -std::f64::consts::PI {
+        d += std::f64::consts::TAU;
+    }
     d
 }
 
@@ -1288,6 +1578,7 @@ pub struct WorldStats {
     pub energy_particle_count: usize,
     pub trail_count: usize,
     pub total_energy: f64,
+    pub creature_energy: f64,
     pub max_generation: usize,
     pub avg_energy: f64,
     pub action_counts: [usize; 5],
@@ -1296,6 +1587,14 @@ pub struct WorldStats {
     pub top_species: Vec<RankedEntry>,
     pub creature_species_map: FxHashMap<u64, u64>,
     pub dominant_candidate: Option<DominantCandidate>,
+}
+
+impl Drop for World {
+    fn drop(&mut self) {
+        if let Some(ref bridge) = self.neural_bridge {
+            bridge.shutdown();
+        }
+    }
 }
 
 #[derive(Clone)]

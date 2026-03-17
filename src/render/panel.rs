@@ -2,10 +2,10 @@ use egui::Ui;
 use rustc_hash::FxHashMap;
 use std::time::Instant;
 
+use super::Selection;
 use crate::config::Config;
 use crate::store::Store;
-use crate::world::{World, DeathAgeStats, DominantCandidate};
-use super::Selection;
+use crate::world::{DeathAgeStats, DominantCandidate, World};
 
 /// 面板操作结果
 #[derive(Default)]
@@ -26,8 +26,8 @@ pub struct StatsPanel {
     save_name: String,
     pub settings_open: bool,
     pub energy_settings_open: bool,
-    /// 总能量历史 (world_time, total_energy)
-    pub energy_history: Vec<(f64, f64)>,
+    /// 能量历史 (world_time, total_energy, creature_energy)
+    pub energy_history: Vec<(f64, f64, f64)>,
 }
 
 /// 排名数据
@@ -45,6 +45,7 @@ pub struct CachedStats {
     pub energy_particle_count: usize,
     pub trail_count: usize,
     pub total_energy: f64,
+    pub creature_energy: f64,
     pub volcano_countdown: f64,
     pub max_generation: usize,
     pub avg_energy: f64,
@@ -55,6 +56,7 @@ pub struct CachedStats {
     pub top_species: Vec<RankedEntry>,
     pub creature_species_map: FxHashMap<u64, u64>,
     pub dominant_candidate: Option<DominantCandidate>,
+    pub avg_compute_ns: f64,
 }
 
 /// 将秒数格式化为 d h m s
@@ -90,7 +92,14 @@ impl StatsPanel {
         }
     }
 
-    pub fn update(&mut self, world: &World, config: &Config, species_threshold: f64, fps: f64, now: Instant) {
+    pub fn update(
+        &mut self,
+        world: &World,
+        config: &Config,
+        species_threshold: f64,
+        fps: f64,
+        now: Instant,
+    ) {
         self.cached_stats.fps = fps;
         self.cached_stats.volcano_countdown = world.volcano_countdown(config);
 
@@ -104,23 +113,38 @@ impl StatsPanel {
                 energy_particle_count: stats.energy_particle_count,
                 trail_count: stats.trail_count,
                 total_energy: stats.total_energy,
+                creature_energy: stats.creature_energy,
                 volcano_countdown: self.cached_stats.volcano_countdown,
                 max_generation: stats.max_generation,
                 avg_energy: stats.avg_energy,
                 action_counts: stats.action_counts,
                 death_age_stats: stats.death_age_stats.clone(),
                 species_count: stats.species_count,
-                top_species: stats.top_species.iter()
-                    .map(|e| RankedEntry { id: e.id, count: e.count })
+                top_species: stats
+                    .top_species
+                    .iter()
+                    .map(|e| RankedEntry {
+                        id: e.id,
+                        count: e.count,
+                    })
                     .collect(),
                 creature_species_map: stats.creature_species_map.clone(),
                 dominant_candidate: stats.dominant_candidate.clone(),
+                avg_compute_ns: world.perf_stats.avg_compute_ns,
             };
-            // 记录总能量历史
-            self.energy_history.push((stats.time, stats.total_energy));
-            // 限制最大存储量（保留最近3600个采样点，0.5s间隔≈30分钟）
-            if self.energy_history.len() > 3600 {
-                self.energy_history.drain(..self.energy_history.len() - 3600);
+            // 记录能量历史（总能量 + 生命能量）
+            self.energy_history
+                .push((stats.time, stats.total_energy, stats.creature_energy));
+            // 按时间裁剪：只保留最近30分钟
+            let cutoff = stats.time - 1800.0;
+            if let Some(pos) = self
+                .energy_history
+                .iter()
+                .position(|&(t, _, _)| t >= cutoff)
+            {
+                if pos > 0 {
+                    self.energy_history.drain(..pos);
+                }
             }
         }
     }
@@ -133,17 +157,44 @@ impl StatsPanel {
         self.selected_template = 0;
     }
 
-    pub fn render(&mut self, ui: &mut Ui, fps: f64, speed: &mut f64, paused: &mut bool, store: &Store, _config: &mut Config) -> PanelAction {
+    pub fn render(
+        &mut self,
+        ui: &mut Ui,
+        fps: f64,
+        speed: &mut f64,
+        paused: &mut bool,
+        store: &Store,
+        _config: &mut Config,
+    ) -> PanelAction {
         let mut action = PanelAction::default();
 
         ui.horizontal(|ui| {
             ui.heading("Cell World");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("⚙").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                    self.settings_open = !self.settings_open;
+                if ui
+                    .button("⚙")
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    if self.settings_open {
+                        self.settings_open = false;
+                    } else {
+                        self.settings_open = true;
+                        self.energy_settings_open = false;
+                    }
                 }
-                if ui.button("🌋").on_hover_text("能量源周期").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                    self.energy_settings_open = !self.energy_settings_open;
+                if ui
+                    .button("🌋")
+                    .on_hover_text("能量源周期")
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    if self.energy_settings_open {
+                        self.energy_settings_open = false;
+                    } else {
+                        self.energy_settings_open = true;
+                        self.settings_open = false;
+                    }
                 }
             });
         });
@@ -158,17 +209,29 @@ impl StatsPanel {
 
         // 速度控制
         ui.horizontal(|ui| {
-            if ui.button("⏪").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            if ui
+                .button("⏪")
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
                 let new_speed = *speed - 0.5;
                 if new_speed > 0.0 {
                     *speed = new_speed.max(0.1);
                 }
             }
             ui.add(egui::Slider::new(speed, 0.5..=10.0).step_by(0.5));
-            if ui.button("⏩").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            if ui
+                .button("⏩")
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
                 *speed = (*speed + 0.5).min(10.0);
             }
-            if ui.button(if *paused { "▶" } else { "⏸" }).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            if ui
+                .button(if *paused { "▶" } else { "⏸" })
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
                 *paused = !*paused;
             }
         });
@@ -193,7 +256,11 @@ impl StatsPanel {
                     }
                 });
 
-            if ui.button("+").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            if ui
+                .button("+")
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
                 if self.selected_template == 0 {
                     action.spawn = Some(None);
                 } else if let Some(name) = template_names.get(self.selected_template - 1) {
@@ -202,7 +269,11 @@ impl StatsPanel {
             }
 
             if self.selected_template > 0 {
-                if ui.button("-").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                if ui
+                    .button("-")
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
                     if let Some(name) = template_names.get(self.selected_template - 1) {
                         action.delete_template = Some(name.to_string());
                     }
@@ -225,6 +296,10 @@ impl StatsPanel {
             ui.label(format!("代:{}", self.cached_stats.max_generation));
             ui.label("│");
             ui.label(format!("种群:{}", self.cached_stats.species_count));
+            if self.cached_stats.avg_compute_ns > 0.0 {
+                ui.label("│");
+                ui.label(format!("算力:{:.0}ns", self.cached_stats.avg_compute_ns));
+            }
             ui.label("│");
             // 火山倒计时
             let countdown = self.cached_stats.volcano_countdown;
@@ -252,8 +327,11 @@ impl StatsPanel {
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
                 "行为: 移动:{}│吸收:{}│咬:{}│喂:{}│繁殖:{}",
-                format_count(acts[0]), format_count(acts[1]), format_count(acts[2]),
-                format_count(acts[3]), format_count(acts[4])
+                format_count(acts[0]),
+                format_count(acts[1]),
+                format_count(acts[2]),
+                format_count(acts[3]),
+                format_count(acts[4])
             ));
         });
 
@@ -278,7 +356,12 @@ impl StatsPanel {
         action
     }
 
-    pub fn render_selection(&mut self, ui: &mut Ui, selection: &Selection, world: &World) -> PanelAction {
+    pub fn render_selection(
+        &mut self,
+        ui: &mut Ui,
+        selection: &Selection,
+        world: &World,
+    ) -> PanelAction {
         let creature_species_map = &self.cached_stats.creature_species_map;
         let mut action = PanelAction::default();
 
@@ -290,10 +373,18 @@ impl StatsPanel {
                     ui.label("选中生物");
 
                     ui.horizontal(|ui| {
-                        if ui.button("🗑 删除").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        if ui
+                            .button("🗑 删除")
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
                             action.delete_selected = true;
                         }
-                        if ui.button("💾 保存").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        if ui
+                            .button("💾 保存")
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
                             self.save_dialog_open = true;
                             self.save_name = format!("生物_{:08X}", creature.genome_hash);
                         }
@@ -305,11 +396,19 @@ impl StatsPanel {
                             ui.text_edit_singleline(&mut self.save_name);
                         });
                         ui.horizontal(|ui| {
-                            if ui.button("确认保存").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            if ui
+                                .button("确认保存")
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .clicked()
+                            {
                                 action.save_selected = Some(self.save_name.clone());
                                 self.save_dialog_open = false;
                             }
-                            if ui.button("取消").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            if ui
+                                .button("取消")
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .clicked()
+                            {
                                 self.save_dialog_open = false;
                             }
                         });
@@ -335,13 +434,29 @@ impl StatsPanel {
                     });
                     ui.horizontal(|ui| {
                         ui.label("种群ID:");
-                        let species_id = creature_species_map.get(&creature.id).copied().unwrap_or(0);
+                        let species_id =
+                            creature_species_map.get(&creature.id).copied().unwrap_or(0);
                         ui.label(format!("{}", species_id));
                     });
                     ui.horizontal(|ui| {
                         ui.label("基因哈希:");
                         ui.label(format!("{:08X}", creature.genome_hash));
                     });
+
+                    // 算力耗时
+                    if creature.frame_compute_ns > 0 {
+                        ui.horizontal(|ui| {
+                            ui.label("算力:");
+                            let ns = creature.frame_compute_ns;
+                            if ns >= 1_000_000 {
+                                ui.label(format!("{:.2}ms", ns as f64 / 1_000_000.0));
+                            } else if ns >= 1_000 {
+                                ui.label(format!("{:.1}μs", ns as f64 / 1_000.0));
+                            } else {
+                                ui.label(format!("{}ns", ns));
+                            }
+                        });
+                    }
 
                     // 冷却状态
                     ui.separator();
@@ -368,7 +483,11 @@ impl StatsPanel {
                 }
             }
             Selection::Energy(id) => {
-                if let Some(particle) = world.energy_particles.iter().find(|e| e.id == *id && e.alive) {
+                if let Some(particle) = world
+                    .energy_particles
+                    .iter()
+                    .find(|e| e.id == *id && e.alive)
+                {
                     ui.separator();
                     ui.label("选中能量粒子");
                     ui.separator();

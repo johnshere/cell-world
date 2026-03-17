@@ -88,11 +88,10 @@ impl Store {
         let filename = format!("{}.json", sanitize_filename(&template.name));
         let path = self.dir.join(&filename);
 
-        let content = serde_json::to_string_pretty(&template)
-            .map_err(|e| format!("序列化失败: {}", e))?;
+        let content =
+            serde_json::to_string_pretty(&template).map_err(|e| format!("序列化失败: {}", e))?;
 
-        fs::write(&path, content)
-            .map_err(|e| format!("写入失败: {}", e))?;
+        fs::write(&path, content).map_err(|e| format!("写入失败: {}", e))?;
 
         // 更新内存中的列表
         if let Some(existing) = self.templates.iter_mut().find(|t| t.name == template.name) {
