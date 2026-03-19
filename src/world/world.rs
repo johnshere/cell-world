@@ -339,9 +339,9 @@ impl World {
         let kill_r2 = config.volcano_kill_radius * config.volcano_kill_radius;
         for _ in 0..config.volcano_count {
             let angle = rng.gen_range(0.0..std::f64::consts::TAU);
-            // 中心富集：u² 分布，50%粒子在25%半径内
+            // 中心富集：u^1.5 分布，比 u² 稍平缓，远处粒子更多
             let u: f64 = rng.gen_range(0.0..1.0);
-            let r = u * u * config.volcano_radius;
+            let r = u.powf(1.5) * config.volcano_radius;
             let x = config.volcano_x + r * angle.cos();
             let y = config.volcano_y + r * angle.sin();
             let energy_id = self.next_energy_id;
@@ -440,19 +440,25 @@ impl World {
         }
     }
 
-    // ========== 环境温度（火山+集体热） ==========
+    // ========== 周围能量（粒子+生物） ==========
 
-    fn compute_env_temp(&self, x: f64, y: f64, config: &Config) -> f64 {
-        let volcano = config.ambient_temperature(x, y);
-        let mut group_energy = 0.0;
-        let nearby = self.creature_grid.query(x, y, config.group_heat_radius);
-        for &idx in &nearby {
-            if self.creatures[idx].alive {
-                group_energy += self.creatures[idx].energy;
+    /// 查询 vision_range 内所有粒子能量 + 生物能量
+    fn compute_nearby_energy(&self, x: f64, y: f64, config: &Config) -> f64 {
+        let range = config.vision_range;
+        let mut total = 0.0;
+        // 粒子
+        for &idx in &self.energy_grid.query(x, y, range) {
+            if self.energy_particles[idx].alive {
+                total += self.energy_particles[idx].energy;
             }
         }
-        let group = group_energy / config.group_heat_denominator;
-        (volcano + group).min(1.0)
+        // 生物
+        for &idx in &self.creature_grid.query(x, y, range) {
+            if self.creatures[idx].alive {
+                total += self.creatures[idx].energy;
+            }
+        }
+        total
     }
 
     // ========== 更新生物 ==========
@@ -495,8 +501,8 @@ impl World {
 
             let creature_t0 = Instant::now();
 
-            // 环境温度（火山+集体热）
-            let env_temp = self.compute_env_temp(self.creatures[i].x, self.creatures[i].y, config);
+            // 周围能量（粒子+生物）
+            let nearby_energy = self.compute_nearby_energy(self.creatures[i].x, self.creatures[i].y, config);
 
             // 基础代谢
             let age_multiplier = 1.0 + self.creatures[i].age * config.age_metabolism_factor;
@@ -508,12 +514,13 @@ impl World {
             self.creatures[i].mouth_cooldown_timer -= dt;
             self.creatures[i].reproduce_cooldown_timer -= dt;
 
-            // 体温逸散：系数 × 周长 / env_temp × dt
-            // env_temp 越低散热越快，集群可减缓散热
+            // 体温逸散：指数衰减 + floor
+            // heat_factor = heat_floor + (1 - heat_floor) × exp(-nearby_energy / energy_denominator)
             let body_radius = (self.creatures[i].energy.max(0.0) * 1.28).cbrt();
             let circumference = body_radius * std::f64::consts::TAU;
-            let heat_cost =
-                config.heat_dissipation_coefficient * circumference / (env_temp + 0.01) * dt;
+            let heat_factor = config.heat_floor
+                + (1.0 - config.heat_floor) * (-nearby_energy / config.energy_denominator).exp();
+            let heat_cost = config.heat_dissipation_coefficient * circumference * heat_factor * dt;
             self.creatures[i].energy -= heat_cost;
 
             self.creatures[i].age += dt;
@@ -630,7 +637,8 @@ impl World {
         let cy = self.creatures[creature_idx].y;
         self.creatures[creature_idx].perception_cache[8] =
             (self.creatures[creature_idx].energy / 200.0).min(1.0);
-        self.creatures[creature_idx].perception_cache[9] = self.compute_env_temp(cx, cy, config);
+        self.creatures[creature_idx].perception_cache[9] =
+            (self.compute_nearby_energy(cx, cy, config) / config.energy_denominator).min(1.0);
 
         if !eyes_ready {
             return; // 冷却中，保持缓存不变
@@ -671,8 +679,9 @@ impl World {
         let mut eye_food = [f64::MAX; 2];
         let mut eye_ally = [f64::MAX; 2];
         let mut eye_enemy = [f64::MAX; 2];
-        // 眼睛视锥内生物能量累加（用于热感温度通道）
+        // 眼睛视锥内能量累加（粒子+生物，用于能量密度通道）
         let mut eye_group_energy = [0.0_f64; 2];
+        let mut eye_particle_energy = [0.0_f64; 2];
 
         // 临时取出缓冲区
         let mut creature_buf = std::mem::take(&mut self.creature_query_buf);
@@ -704,8 +713,12 @@ impl World {
                     let edx = particle.x - ex;
                     let edy = particle.y - ey;
                     let eye_dist = (edx * edx + edy * edy).sqrt();
-                    if eye_dist <= eye_range && eye_dist < eye_food[eye_i] {
-                        eye_food[eye_i] = eye_dist;
+                    if eye_dist <= eye_range {
+                        if eye_dist < eye_food[eye_i] {
+                            eye_food[eye_i] = eye_dist;
+                        }
+                        // 累加视锥内粒子能量
+                        eye_particle_energy[eye_i] += particle.energy;
                     }
                 }
             }
@@ -797,20 +810,11 @@ impl World {
             0.0
         };
 
-        // 眼睛热感温度：火山热 + 视锥内生物集体热
-        let eye_mid_dist = eye_range * 0.5;
-        let left_volcano = config.ambient_temperature(
-            cx + eye_mid_dist * eye_dirs[0].cos(),
-            cy + eye_mid_dist * eye_dirs[0].sin(),
-        );
-        let right_volcano = config.ambient_temperature(
-            cx + eye_mid_dist * eye_dirs[1].cos(),
-            cy + eye_mid_dist * eye_dirs[1].sin(),
-        );
+        // 眼睛能量密度：(视锥内粒子能量 + 生物能量) / energy_denominator
         self.creatures[creature_idx].perception_cache[3] =
-            (left_volcano + eye_group_energy[0] / config.group_heat_denominator).min(1.0);
+            ((eye_particle_energy[0] + eye_group_energy[0]) / config.energy_denominator).min(1.0);
         self.creatures[creature_idx].perception_cache[7] =
-            (right_volcano + eye_group_energy[1] / config.group_heat_denominator).min(1.0);
+            ((eye_particle_energy[1] + eye_group_energy[1]) / config.energy_denominator).min(1.0);
     }
 
     // ========== 动作系统（6输出） ==========
@@ -974,26 +978,18 @@ impl World {
                 let my_energy = self.creatures[idx].energy;
                 let other_energy = self.creatures[other_idx].energy;
 
-                // 攻击方战力 × 咬合力（warmth 改用 env_temp）
-                let my_warmth =
-                    self.compute_env_temp(self.creatures[idx].x, self.creatures[idx].y, config);
+                // 攻击方战力 × 咬合力
                 let my_speed_norm = (self.creatures[idx].current_speed / 50.0).min(1.0);
                 let my_ally_energy = self.compute_nearby_ally_energy(idx, config);
                 let attacker_score =
-                    config.combat_power(my_energy, my_warmth, my_speed_norm, my_ally_energy)
+                    config.combat_power(my_energy, my_speed_norm, my_ally_energy)
                         * bite_force;
 
                 // 防御方战力
-                let other_warmth = self.compute_env_temp(
-                    self.creatures[other_idx].x,
-                    self.creatures[other_idx].y,
-                    config,
-                );
                 let other_speed_norm = (self.creatures[other_idx].current_speed / 50.0).min(1.0);
                 let other_ally_energy = self.compute_nearby_ally_energy(other_idx, config);
                 let defender_score = config.combat_power(
                     other_energy,
-                    other_warmth,
                     other_speed_norm,
                     other_ally_energy,
                 );
@@ -1023,11 +1019,11 @@ impl World {
         }
     }
 
-    /// 计算指定生物附近同族总能量（用于战力计算）
+    /// 计算指定生物附近同族总能量（用于战力计算，范围=vision_range）
     fn compute_nearby_ally_energy(&self, creature_idx: usize, config: &Config) -> f64 {
         let cx = self.creatures[creature_idx].x;
         let cy = self.creatures[creature_idx].y;
-        let nearby = self.creature_grid.query(cx, cy, config.combat_ally_range);
+        let nearby = self.creature_grid.query(cx, cy, config.vision_range);
         let threshold = config.species_similarity_threshold;
         let mut total = 0.0;
         for &other_idx in &nearby {

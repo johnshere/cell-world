@@ -155,26 +155,18 @@ impl WorldCanvas {
             }
         }
 
-        // 绘制火山温度影响边界
+        // 绘制火山喷射范围参考圈
         {
             let volcano_pos = self.world_to_screen(
                 Pos2::new(config.volcano_x as f32, config.volcano_y as f32),
                 rect,
             );
-            let heat_radius = config.volcano_heat_range as f32 * self.scale;
-            if heat_radius > 5.0 {
-                // 外圈：温度影响边界（虚线效果用低透明度）
+            let radius = config.volcano_radius as f32 * self.scale;
+            if radius > 5.0 {
                 painter.circle_stroke(
                     volcano_pos,
-                    heat_radius,
-                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 120, 50, 50)),
-                );
-                // 中圈：t³衰减下约50%温度处（约 0.79 * range）
-                let mid_radius = heat_radius * 0.79;
-                painter.circle_stroke(
-                    volcano_pos,
-                    mid_radius,
-                    Stroke::new(0.5, Color32::from_rgba_unmultiplied(255, 80, 30, 30)),
+                    radius,
+                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 120, 50, 40)),
                 );
             }
         }

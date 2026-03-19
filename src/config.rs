@@ -63,14 +63,10 @@ pub struct Config {
     pub heat_dissipation_coefficient: f64,
     /// 喂食效率（固定比例，无体型限制）
     pub feed_efficiency: f64,
-    /// 战力公式：体温权重（越暖越强）
-    pub combat_temp_weight: f64,
     /// 战力公式：速度权重（越快越强）
     pub combat_speed_weight: f64,
     /// 战力公式：同族援助权重（附近同族越多越强）
     pub combat_ally_weight: f64,
-    /// 战力公式：同族援助范围
-    pub combat_ally_range: f64,
 
     /// 优势种检测：种群最老成员最低年龄
     pub dominant_min_age: f64,
@@ -85,15 +81,11 @@ pub struct Config {
     /// 咬合能量转移率
     pub bite_transfer_rate: f64,
 
-    // === 环境温度 ===
-    /// 火山热辐射范围
-    pub volcano_heat_range: f64,
-
-    // === 集体热效应 ===
-    /// 集体热判定半径
-    pub group_heat_radius: f64,
-    /// 集体热分母
-    pub group_heat_denominator: f64,
+    // === 散热 ===
+    /// 能量分母（nearby_energy 归一化）
+    pub energy_denominator: f64,
+    /// 散热下限（指数衰减底板，0~1）
+    pub heat_floor: f64,
 
     // === 正弦周期 ===
     /// 火山间隔正弦周期（秒）
@@ -181,13 +173,17 @@ impl Config {
 
     /// 保存到 config.toml（保留注释）
     pub fn save(&self) {
+        // 截断 f32 精度，避免序列化出十几位小数
+        let mut config = self.clone();
+        config.initial_scale = (config.initial_scale * 1000.0).round() / 1000.0;
+
         let existing = std::fs::read_to_string(CONFIG_PATH).unwrap_or_default();
         let mut doc = existing
             .parse::<toml_edit::DocumentMut>()
             .unwrap_or_else(|_| toml_edit::DocumentMut::new());
 
         // 序列化当前值，逐字段更新到已有文档（保留注释和排版）
-        if let Ok(new_str) = toml::to_string(self) {
+        if let Ok(new_str) = toml::to_string(&config) {
             if let Ok(new_doc) = new_str.parse::<toml_edit::DocumentMut>() {
                 for (key, item) in new_doc.iter() {
                     doc[key] = item.clone();
@@ -246,27 +242,18 @@ impl Config {
         )
     }
 
-    /// 环境温度：距火山越近越高 (0~1)，三次方衰减使火山口附近更热、远处急剧下降
-    pub fn ambient_temperature(&self, x: f64, y: f64) -> f64 {
-        let dist = ((x - self.volcano_x).powi(2) + (y - self.volcano_y).powi(2)).sqrt();
-        let linear = (1.0 - dist / self.volcano_heat_range).clamp(0.0, 1.0);
-        linear * linear * linear
-    }
-
-    /// 战力计算公式
+    /// 战力计算公式（energy + speed + ally）
     pub fn combat_power(
         &self,
         energy: f64,
-        warmth: f64,
         speed_norm: f64,
         ally_total_energy: f64,
     ) -> f64 {
         let energy_factor = energy / 100.0;
-        let temp_factor = 1.0 + self.combat_temp_weight * warmth;
         let speed_factor = 1.0 + self.combat_speed_weight * speed_norm;
         let ally_norm = (ally_total_energy / 500.0).min(1.0);
         let ally_factor = 1.0 + self.combat_ally_weight * ally_norm;
-        energy_factor * temp_factor * speed_factor * ally_factor
+        energy_factor * speed_factor * ally_factor
     }
 }
 

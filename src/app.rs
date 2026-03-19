@@ -367,8 +367,6 @@ impl CellWorldApp {
 
             ui.collapsing("战力", |ui| {
                 changed |=
-                    config_drag_f64(ui, "体温权重", &mut c.combat_temp_weight, 0.01, 0.0..=2.0);
-                changed |=
                     config_drag_f64(ui, "速度权重", &mut c.combat_speed_weight, 0.01, 0.0..=2.0);
                 changed |= config_drag_f64(
                     ui,
@@ -376,13 +374,6 @@ impl CellWorldApp {
                     &mut c.combat_ally_weight,
                     0.01,
                     0.0..=2.0,
-                );
-                changed |= config_drag_f64(
-                    ui,
-                    "同族援助范围",
-                    &mut c.combat_ally_range,
-                    1.0,
-                    10.0..=200.0,
                 );
             });
 
@@ -395,27 +386,20 @@ impl CellWorldApp {
                     config_drag_f64(ui, "咬转移率", &mut c.bite_transfer_rate, 0.01, 0.01..=0.8);
             });
 
-            ui.collapsing("环境温度", |ui| {
+            ui.collapsing("散热", |ui| {
                 changed |= config_drag_f64(
                     ui,
-                    "热辐射范围",
-                    &mut c.volcano_heat_range,
-                    1.0,
-                    200.0..=2000.0,
+                    "能量分母",
+                    &mut c.energy_denominator,
+                    10.0,
+                    100.0..=5000.0,
                 );
                 changed |= config_drag_f64(
                     ui,
-                    "集体热半径",
-                    &mut c.group_heat_radius,
-                    1.0,
-                    50.0..=500.0,
-                );
-                changed |= config_drag_f64(
-                    ui,
-                    "集体热分母",
-                    &mut c.group_heat_denominator,
-                    100.0,
-                    500.0..=20000.0,
+                    "散热下限",
+                    &mut c.heat_floor,
+                    0.01,
+                    0.0..=1.0,
                 );
             });
 
@@ -601,9 +585,9 @@ impl CellWorldApp {
 
             ui.collapsing("基础参数", |ui| {
                 changed |=
-                    config_drag_f64(ui, "火山半径", &mut c.volcano_radius, 1.0, 100.0..=2000.0);
-                changed |= config_drag_usize(ui, "火山粒子数", &mut c.volcano_count, 10..=200);
-                changed |= config_drag_usize(ui, "陨石粒子数", &mut c.meteorite_count, 5..=100);
+                    config_drag_f64(ui, "火山半径", &mut c.volcano_radius, 1.0, 100.0..=5000.0);
+                changed |= config_drag_usize(ui, "火山粒子数", &mut c.volcano_count, 10..=2000);
+                changed |= config_drag_usize(ui, "陨石粒子数", &mut c.meteorite_count, 5..=1000);
                 changed |=
                     config_drag_f64(ui, "陨石长度", &mut c.meteorite_length, 1.0, 50.0..=500.0);
                 changed |= config_drag_f64(
@@ -799,7 +783,7 @@ impl CellWorldApp {
             render_sine_group!(
                 "火山能量",
                 &mut c.volcano_particle_energy,
-                5.0..=200.0,
+                5.0..=1000.0,
                 0.1,
                 &mut c.volcano_energy_amplitude,
                 &mut c.volcano_energy_cycle,
@@ -821,7 +805,7 @@ impl CellWorldApp {
             render_sine_group!(
                 "陨石能量",
                 &mut c.meteorite_particle_energy,
-                5.0..=200.0,
+                5.0..=1000.0,
                 0.1,
                 &mut c.meteorite_energy_amplitude,
                 &mut c.meteorite_energy_cycle,
