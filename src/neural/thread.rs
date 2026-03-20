@@ -13,7 +13,9 @@ use crate::config::Config;
 pub trait TickExecutor: Send {
     fn register(&mut self, id: u64, genome: &Genome);
     fn unregister(&mut self, id: u64);
-    fn set_inputs(&mut self, inputs: &[CreatureInput]);
+    /// 注入新输入（每帧调用一次）
+    fn inject_inputs(&mut self, inputs: &[CreatureInput]);
+    /// 执行一个 tick（第一次有输入注入，后续 tick_free）
     fn tick(&mut self);
     fn read_outputs(&self) -> Vec<CreatureOutput>;
 }
@@ -21,18 +23,31 @@ pub trait TickExecutor: Send {
 /// CPU 执行器
 pub struct CpuExecutor {
     networks: FxHashMap<u64, SpikingNetwork>,
-    current_inputs: FxHashMap<u64, [f64; 10]>,
+    /// 待注入的输入（注入后清空）
+    pending_inputs: FxHashMap<u64, [f64; 10]>,
     current_outputs: FxHashMap<u64, [f64; 6]>,
+    /// 首次 tick（注入输入时）的直读输出值
+    first_outputs: FxHashMap<u64, [f64; 6]>,
     compute_times: FxHashMap<u64, u64>,
+    /// 脉冲发放计数（每帧重置）
+    spike_counts: FxHashMap<u64, [u32; 6]>,
+    /// 帧内 tick 计数
+    tick_count: u32,
+    /// 输出模式缓存：creature_id -> output_modes
+    output_modes_cache: FxHashMap<u64, Vec<bool>>,
 }
 
 impl CpuExecutor {
     pub fn new() -> Self {
         Self {
             networks: FxHashMap::default(),
-            current_inputs: FxHashMap::default(),
+            pending_inputs: FxHashMap::default(),
             current_outputs: FxHashMap::default(),
+            first_outputs: FxHashMap::default(),
             compute_times: FxHashMap::default(),
+            spike_counts: FxHashMap::default(),
+            tick_count: 0,
+            output_modes_cache: FxHashMap::default(),
         }
     }
 }
@@ -40,54 +55,107 @@ impl CpuExecutor {
 impl TickExecutor for CpuExecutor {
     fn register(&mut self, id: u64, genome: &Genome) {
         let network = SpikingNetwork::from_genome(genome);
+        let modes = network.output_modes().to_vec();
         self.networks.insert(id, network);
         self.current_outputs.insert(id, [0.0; 6]);
+        self.output_modes_cache.insert(id, modes);
+        self.spike_counts.insert(id, [0; 6]);
     }
 
     fn unregister(&mut self, id: u64) {
         self.networks.remove(&id);
-        self.current_inputs.remove(&id);
+        self.pending_inputs.remove(&id);
         self.current_outputs.remove(&id);
+        self.first_outputs.remove(&id);
+        self.output_modes_cache.remove(&id);
+        self.spike_counts.remove(&id);
     }
 
-    fn set_inputs(&mut self, inputs: &[CreatureInput]) {
-        // 清除旧输入，仅保留本帧有新数据的
-        self.current_inputs.clear();
+    fn inject_inputs(&mut self, inputs: &[CreatureInput]) {
+        self.pending_inputs.clear();
         self.compute_times.clear();
+        self.tick_count = 0;
+        for counts in self.spike_counts.values_mut() {
+            *counts = [0; 6];
+        }
         for input in inputs {
-            self.current_inputs
+            self.pending_inputs
                 .insert(input.creature_id, input.perception);
         }
     }
 
     fn tick(&mut self) {
+        self.tick_count += 1;
+        let inject = !self.pending_inputs.is_empty();
+
         for (&id, network) in self.networks.iter_mut() {
-            let input = self
-                .current_inputs
-                .get(&id)
-                .map(|p| &p[..])
-                .unwrap_or(&[0.0; 10]);
             let t0 = Instant::now();
-            let outputs = network.tick(input);
+            let outputs = if inject {
+                if let Some(input) = self.pending_inputs.get(&id) {
+                    network.tick(&input[..])
+                } else {
+                    network.tick_free()
+                }
+            } else {
+                network.tick_free()
+            };
             let elapsed_ns = t0.elapsed().as_nanos() as u64;
             *self.compute_times.entry(id).or_insert(0) += elapsed_ns;
+
+            // 追踪脉冲发放
+            if let Some(modes) = self.output_modes_cache.get(&id) {
+                if let Some(counts) = self.spike_counts.get_mut(&id) {
+                    for (j, (&v, &direct_read)) in
+                        outputs.iter().zip(modes.iter()).enumerate().take(6)
+                    {
+                        if !direct_read && v > 0.5 {
+                            counts[j] += 1;
+                        }
+                    }
+                }
+            }
+
             if outputs.len() >= 6 {
                 let mut arr = [0.0; 6];
                 arr.copy_from_slice(&outputs[..6]);
+                // 注入帧的首次 tick：保存直读输出值
+                if inject {
+                    self.first_outputs.insert(id, arr);
+                }
                 self.current_outputs.insert(id, arr);
             }
         }
-        // tick 之后清除输入，后续 tick 用零输入
-        self.current_inputs.clear();
+        // 输入注入后清空，后续 tick 用 tick_free（保持输入信号）
+        if inject {
+            self.pending_inputs.clear();
+        }
     }
 
     fn read_outputs(&self) -> Vec<CreatureOutput> {
         self.current_outputs
             .iter()
-            .map(|(&id, &outputs)| CreatureOutput {
-                creature_id: id,
-                outputs,
-                compute_ns: self.compute_times.get(&id).copied().unwrap_or(0),
+            .map(|(&id, &_outputs)| {
+                // 直读输出取首次注入时的值，脉冲输出取发放率
+                let first = self.first_outputs.get(&id).copied().unwrap_or([0.0; 6]);
+                let mut final_outputs = first;
+                if let Some(modes) = self.output_modes_cache.get(&id) {
+                    if let Some(counts) = self.spike_counts.get(&id) {
+                        if self.tick_count > 0 {
+                            for (j, &direct_read) in modes.iter().enumerate().take(6) {
+                                if !direct_read {
+                                    let rate =
+                                        counts[j] as f64 / self.tick_count as f64;
+                                    final_outputs[j] = rate * 2.0 - 1.0;
+                                }
+                            }
+                        }
+                    }
+                }
+                CreatureOutput {
+                    creature_id: id,
+                    outputs: final_outputs,
+                    compute_ns: self.compute_times.get(&id).copied().unwrap_or(0),
+                }
             })
             .collect()
     }
@@ -203,9 +271,10 @@ fn neural_thread_main(handle: NeuralBridgeHandle, tick_rate: f64, backend: &str)
             }
         }
 
-        // 读取输入
-        let inputs = handle.read_inputs();
-        executor.set_inputs(&inputs);
+        // 仅在世界提供新输入时注入（每帧一次）
+        if let Some(inputs) = handle.try_consume_inputs() {
+            executor.inject_inputs(&inputs);
+        }
 
         // 执行一个 tick
         executor.tick();

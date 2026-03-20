@@ -18,7 +18,7 @@ struct SnnNode {
     fired: bool,
 }
 
-/// 脉冲神经网络（从基因组构建）
+/// 脉冲神经网络（从基因组构建，支持回环连接）
 pub struct SpikingNetwork {
     nodes: FxHashMap<usize, SnnNode>,
     /// 拓扑排序后的节点顺序
@@ -29,10 +29,14 @@ pub struct SpikingNetwork {
     input_ids_set: FxHashSet<usize>,
     /// 输出节点 ID
     output_ids: Vec<usize>,
-    /// 输出模式：true=直读(tanh membrane), false=脉冲(fired?1:-1)
+    /// 输出模式：true=直读(tanh membrane), false=脉冲
     output_modes: Vec<bool>,
-    /// 节点的输入连接：node_id -> [(from_node, weight), ...]
-    node_inputs: FxHashMap<usize, Vec<(usize, f64)>>,
+    /// 正向连接：node_id -> [(from_node, weight), ...]
+    forward_inputs: FxHashMap<usize, Vec<(usize, f64)>>,
+    /// 回环连接：node_id -> [(from_node, weight), ...]
+    recurrent_inputs: FxHashMap<usize, Vec<(usize, f64)>>,
+    /// 回环源节点的上一 tick 状态: node_id -> (membrane, fired)
+    prev_state: FxHashMap<usize, (f64, bool)>,
 }
 
 impl SpikingNetwork {
@@ -69,18 +73,53 @@ impl SpikingNetwork {
             }
         }
 
-        // 构建邻接表
-        let mut node_inputs: FxHashMap<usize, Vec<(usize, f64)>> = FxHashMap::default();
+        // 拓扑排序
+        let eval_order = Self::topological_sort(genome);
+
+        // 构建位置映射，用于区分正向/回环连接
+        let mut position: FxHashMap<usize, usize> = FxHashMap::default();
+        for (pos, &node_id) in eval_order.iter().enumerate() {
+            position.insert(node_id, pos);
+        }
+
+        // 分离正向连接和回环连接
+        let mut forward_inputs: FxHashMap<usize, Vec<(usize, f64)>> = FxHashMap::default();
+        let mut recurrent_inputs: FxHashMap<usize, Vec<(usize, f64)>> = FxHashMap::default();
+        let mut recurrent_source_ids: FxHashSet<usize> = FxHashSet::default();
+
         for conn in &genome.connections {
-            if conn.enabled {
-                node_inputs
+            if !conn.enabled {
+                continue;
+            }
+
+            let in_pos = position.get(&conn.in_node).copied();
+            let out_pos = position.get(&conn.out_node).copied();
+
+            // 回环判定：源节点在拓扑序中位于目标节点之后（且不是输入节点）
+            let is_recurrent = match (in_pos, out_pos) {
+                (Some(ip), Some(op)) => !input_ids_set.contains(&conn.in_node) && ip >= op,
+                _ => false,
+            };
+
+            if is_recurrent {
+                recurrent_inputs
+                    .entry(conn.out_node)
+                    .or_default()
+                    .push((conn.in_node, conn.weight));
+                recurrent_source_ids.insert(conn.in_node);
+            } else {
+                forward_inputs
                     .entry(conn.out_node)
                     .or_default()
                     .push((conn.in_node, conn.weight));
             }
         }
 
-        let eval_order = Self::topological_sort(genome);
+        // 初始化回环源节点的 prev_state
+        let mut prev_state = FxHashMap::default();
+        for &src_id in &recurrent_source_ids {
+            prev_state.insert(src_id, (0.0, false));
+        }
 
         Self {
             nodes,
@@ -89,11 +128,13 @@ impl SpikingNetwork {
             input_ids_set,
             output_ids,
             output_modes,
-            node_inputs,
+            forward_inputs,
+            recurrent_inputs,
+            prev_state,
         }
     }
 
-    /// 拓扑排序（复用 network.rs 的逻辑）
+    /// 拓扑排序
     fn topological_sort(genome: &Genome) -> Vec<usize> {
         let mut result = Vec::new();
         let mut visited = std::collections::HashSet::new();
@@ -117,7 +158,7 @@ impl SpikingNetwork {
                 return;
             }
             if temp_visited.contains(&node) {
-                return; // 循环检测
+                return; // 回环检测：跳过回环边
             }
             temp_visited.insert(node);
 
@@ -140,13 +181,16 @@ impl SpikingNetwork {
         result
     }
 
-    /// 执行一个 tick
-    ///
-    /// 1. 输入节点：membrane = input value, fired = true
-    /// 2. 非输入按拓扑序：不应期跳过 → membrane *= decay → 累加 fired 前驱的 weight → 超阈发放/直读
-    /// 3. 收集输出
+    /// 输出模式（直读/脉冲）
+    pub fn output_modes(&self) -> &[bool] {
+        &self.output_modes
+    }
+
+    /// 执行一个 tick（注入输入）
     pub fn tick(&mut self, inputs: &[f64]) -> Vec<f64> {
-        // 1. 设置输入节点
+        self.save_recurrent_state();
+
+        // 设置输入节点
         for (i, &input_id) in self.input_ids.iter().enumerate() {
             if let Some(node) = self.nodes.get_mut(&input_id) {
                 node.membrane = if i < inputs.len() { inputs[i] } else { 0.0 };
@@ -154,34 +198,115 @@ impl SpikingNetwork {
             }
         }
 
-        // 2. 按拓扑序计算非输入节点
-        // 需要两步拆分以避免同时借用
+        self.tick_inner()
+    }
+
+    /// 执行一个 tick（不注入新输入，输入节点保持上次状态）
+    /// 感知在帧内不变，保持输入信号持续激励脉冲神经元
+    pub fn tick_free(&mut self) -> Vec<f64> {
+        self.save_recurrent_state();
+        // 不修改输入节点，保持上一次 tick() 注入的 membrane 和 fired 状态
+        self.tick_inner()
+    }
+
+    /// 执行多 tick：首次注入输入，后续 tick_free
+    /// 直读输出取首次 tick 值，脉冲输出取发放率
+    pub fn tick_multi(&mut self, inputs: &[f64], ticks: usize) -> Vec<f64> {
+        let n = self.output_ids.len().min(6);
+        let mut spike_counts = [0u32; 6];
+
+        // 第 1 tick: 注入输入（直读输出在此刻最有意义）
+        let first_outputs = self.tick(inputs);
+        for (j, (&v, &direct_read)) in first_outputs
+            .iter()
+            .zip(self.output_modes.iter())
+            .enumerate()
+            .take(n)
+        {
+            if !direct_read && v > 0.5 {
+                spike_counts[j] += 1;
+            }
+        }
+
+        // 后续 ticks: tick_free 保持输入信号，脉冲神经元持续获得激励
+        for _ in 1..ticks {
+            let outputs = self.tick_free();
+            for (j, (&v, &direct_read)) in outputs
+                .iter()
+                .zip(self.output_modes.iter())
+                .enumerate()
+                .take(n)
+            {
+                if !direct_read && v > 0.5 {
+                    spike_counts[j] += 1;
+                }
+            }
+        }
+
+        // 组合最终输出：直读取首次值，脉冲取发放率
+        let mut final_outputs = first_outputs;
+        for (j, &direct_read) in self.output_modes.iter().enumerate().take(n) {
+            if !direct_read && j < final_outputs.len() {
+                let rate = spike_counts[j] as f64 / ticks.max(1) as f64;
+                final_outputs[j] = rate * 2.0 - 1.0;
+            }
+        }
+
+        final_outputs
+    }
+
+    /// 保存回环源节点的当前状态（用于下一轮 tick 的回环读取）
+    fn save_recurrent_state(&mut self) {
+        for (&src_id, state) in self.prev_state.iter_mut() {
+            if let Some(node) = self.nodes.get(&src_id) {
+                *state = (node.membrane, node.fired);
+            }
+        }
+    }
+
+    /// 内部 tick 逻辑（评估非输入节点）
+    fn tick_inner(&mut self) -> Vec<f64> {
         let eval_order = self.eval_order.clone();
         for &node_id in &eval_order {
             if self.input_ids_set.contains(&node_id) {
                 continue;
             }
 
-            // 收集前驱信号
-            // 直读节点(threshold=0): membrane * weight（保留信号幅度，类似传统ANN）
-            // 脉冲节点(threshold>0): weight（二值脉冲）
-            let weighted_sum = if let Some(inputs_list) = self.node_inputs.get(&node_id) {
-                let mut sum = 0.0;
+            // 正向连接信号（读当前 tick 状态）
+            let mut weighted_sum = 0.0;
+            if let Some(inputs_list) = self.forward_inputs.get(&node_id) {
                 for &(in_node, weight) in inputs_list {
                     if let Some(src) = self.nodes.get(&in_node) {
                         if src.fired {
                             if src.threshold == 0.0 {
-                                sum += src.membrane * weight;
+                                weighted_sum += src.membrane * weight;
                             } else {
-                                sum += weight;
+                                weighted_sum += weight;
                             }
                         }
                     }
                 }
-                sum
-            } else {
-                0.0
-            };
+            }
+
+            // 回环连接信号（读上一 tick 保存的状态）
+            if let Some(recurrent_list) = self.recurrent_inputs.get(&node_id) {
+                for &(in_node, weight) in recurrent_list {
+                    if let Some(&(prev_membrane, prev_fired)) = self.prev_state.get(&in_node) {
+                        if prev_fired {
+                            let threshold = self
+                                .nodes
+                                .get(&in_node)
+                                .map(|n| n.threshold)
+                                .unwrap_or(0.0);
+                            if threshold == 0.0 {
+                                weighted_sum += prev_membrane * weight;
+                            } else {
+                                weighted_sum += weight;
+                            }
+                        }
+                    }
+                }
+            }
 
             if let Some(node) = self.nodes.get_mut(&node_id) {
                 // 不应期中
@@ -210,7 +335,7 @@ impl SpikingNetwork {
             }
         }
 
-        // 3. 收集输出
+        // 收集输出
         self.output_ids
             .iter()
             .zip(self.output_modes.iter())
@@ -220,11 +345,11 @@ impl SpikingNetwork {
                         // 直读模式：tanh(membrane)
                         node.membrane.tanh()
                     } else {
-                        // 脉冲模式：fired → 1.0, 否则 → -1.0
+                        // 脉冲模式：fired → 1.0, 否则 → 0.0
                         if node.fired {
                             1.0
                         } else {
-                            -1.0
+                            0.0
                         }
                     }
                 } else {
@@ -240,6 +365,9 @@ impl SpikingNetwork {
             node.membrane = 0.0;
             node.fired = false;
             node.refractory_count = 0;
+        }
+        for state in self.prev_state.values_mut() {
+            *state = (0.0, false);
         }
     }
 }

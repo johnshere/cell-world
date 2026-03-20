@@ -609,7 +609,7 @@ mod inner {
             self.slots.free(id);
         }
 
-        fn set_inputs(&mut self, inputs: &[CreatureInput]) {
+        fn inject_inputs(&mut self, inputs: &[CreatureInput]) {
             for input in inputs {
                 if let Some(slot) = self.slots.get_slot(input.creature_id) {
                     self.gpu.upload_inputs(slot, &input.perception);

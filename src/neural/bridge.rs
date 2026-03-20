@@ -40,6 +40,8 @@ pub struct NeuralBridge {
     pub(crate) event_rx: Arc<Mutex<mpsc::Receiver<CreatureEvent>>>,
     /// 运行标志
     pub running: Arc<AtomicBool>,
+    /// 输入是否已被消费（世界 swap 时重置，神经线程消费后置 true）
+    input_consumed: Arc<AtomicBool>,
 }
 
 impl NeuralBridge {
@@ -53,6 +55,7 @@ impl NeuralBridge {
             event_tx,
             event_rx: Arc::new(Mutex::new(event_rx)),
             running: Arc::new(AtomicBool::new(true)),
+            input_consumed: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -70,6 +73,7 @@ impl NeuralBridge {
         if let (Ok(mut front), Ok(mut back)) = (self.input_front.lock(), self.input_back.lock()) {
             std::mem::swap(&mut *front, &mut *back);
         }
+        self.input_consumed.store(false, Ordering::Release);
     }
 
     /// 读取输出（世界线程调用）
@@ -128,6 +132,7 @@ impl NeuralBridge {
             output_back: Arc::clone(&self.output_back),
             event_rx: Arc::clone(&self.event_rx),
             running: Arc::clone(&self.running),
+            input_consumed: Arc::clone(&self.input_consumed),
         }
     }
 }
@@ -138,14 +143,24 @@ pub struct NeuralBridgeHandle {
     output_back: Arc<Mutex<Vec<CreatureOutput>>>,
     event_rx: Arc<Mutex<mpsc::Receiver<CreatureEvent>>>,
     running: Arc<AtomicBool>,
+    input_consumed: Arc<AtomicBool>,
 }
 
 impl NeuralBridgeHandle {
-    pub fn read_inputs(&self) -> Vec<CreatureInput> {
-        if let Ok(back) = self.input_back.lock() {
-            back.clone()
+    /// 尝试消费输入（仅在世界提供新数据后返回 Some，之后返回 None 直到下一帧）
+    pub fn try_consume_inputs(&self) -> Option<Vec<CreatureInput>> {
+        if self
+            .input_consumed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            if let Ok(back) = self.input_back.lock() {
+                Some(back.clone())
+            } else {
+                None
+            }
         } else {
-            Vec::new()
+            None
         }
     }
 

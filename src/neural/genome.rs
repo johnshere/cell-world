@@ -104,7 +104,7 @@ impl Genome {
                 3 => (
                     rng.gen_range(0.5..0.9),
                     rng.gen_range(0.3..0.8),
-                    rng.gen_range(1..=2),
+                    rng.gen_range(0..=2),
                 ),
                 _ => (0.0, 0.0, 0),
             };

@@ -557,14 +557,11 @@ impl World {
                 let snn_ns = self.neural_compute_cache.get(&self.creatures[i].id).copied().unwrap_or(0);
                 self.creatures[i].frame_compute_ns = main_ns + snn_ns;
             } else {
-                // 同步模式：SNN tick
+                // 同步模式：SNN tick（首次注入输入，后续 tick_free，脉冲输出用发放率）
                 let t1 = Instant::now();
                 let perception = self.creatures[i].perception_cache;
                 let snn_ticks = config.snn_ticks_per_frame;
-                let mut outputs = self.creatures[i].last_outputs.to_vec();
-                for _ in 0..snn_ticks {
-                    outputs = self.creatures[i].brain.tick(&perception);
-                }
+                let outputs = self.creatures[i].brain.tick_multi(&perception, snn_ticks);
                 for (j, &v) in outputs.iter().enumerate().take(6) {
                     self.creatures[i].last_outputs[j] = v;
                 }
