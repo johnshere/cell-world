@@ -1064,7 +1064,7 @@ impl World {
         let creature_id = self.next_creature_id;
         self.next_creature_id += 1;
 
-        let child = if let Some(mate_genome) = mate_genome {
+        let mut child = if let Some(mate_genome) = mate_genome {
             let crossover_genome =
                 Genome::crossover(&self.creatures[idx].genome, &mate_genome, true);
             let child_genome = crossover_genome.mutate(config.mutation_rate);
@@ -1086,6 +1086,13 @@ impl World {
                 config.mutation_rate,
             )
         };
+
+        // 种族颜色继承：与父代相似度 >= 阈值则继承 clan_hash，否则新建
+        let similarity = self.creatures[idx].genome.similarity(&child.genome);
+        if similarity >= config.species_similarity_threshold {
+            child.clan_hash = self.creatures[idx].clan_hash;
+        }
+        // else: child.clan_hash 已默认为自身 genome_hash
 
         self.notify_born(&child);
         self.creatures.push(child);
@@ -1272,25 +1279,14 @@ impl World {
         }
     }
 
-    /// 获取渲染上下文数据（族长 genome_hash 作为颜色标识）
-    pub fn get_render_data(&self, threshold: f64) -> FxHashMap<usize, u64> {
-        self.ensure_clan_cache(threshold);
-        let cache_ref = self.clan_cache.borrow();
-        let cache = match cache_ref.as_ref() {
-            Some(c) => c,
-            None => return FxHashMap::default(),
-        };
-
-        let mut creature_species: FxHashMap<usize, u64> =
-            FxHashMap::with_capacity_and_hasher(cache.alive_indices.len(), Default::default());
-        for (i, &original_idx) in cache.alive_indices.iter().enumerate() {
-            if let Some(&leader_id) = cache.creature_clan_map.get(&i) {
-                if let Some(&color_hash) = cache.clan_color.get(&leader_id) {
-                    creature_species.insert(original_idx, color_hash);
-                }
+    /// 获取渲染上下文数据（clan_hash 作为颜色标识，出生时确定，终身不变）
+    pub fn get_render_data(&self, _threshold: f64) -> FxHashMap<usize, u64> {
+        let mut creature_species: FxHashMap<usize, u64> = FxHashMap::default();
+        for (idx, creature) in self.creatures.iter().enumerate() {
+            if creature.alive {
+                creature_species.insert(idx, creature.clan_hash);
             }
         }
-
         creature_species
     }
 

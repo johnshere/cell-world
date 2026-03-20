@@ -29,6 +29,9 @@ pub struct Creature {
     // 缓存
     pub genome_hash: u64,
 
+    // 种族颜色标识（出生时确定，终身不变）
+    pub clan_hash: u64,
+
     // 当前速度（每帧更新，用于战力计算）
     pub current_speed: f64,
 
@@ -78,6 +81,7 @@ impl Creature {
             generation,
             parent_id,
             genome_hash,
+            clan_hash: genome_hash, // 默认用自身 hash，繁殖时由调用者覆盖
             current_speed: 0.0,
             perception_cache: [0.0; 10],
             last_outputs: [0.0; 6],

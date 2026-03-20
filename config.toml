@@ -1,5 +1,5 @@
 # 初始模拟速度
-initial_speed = 7.0
+initial_speed = 6.0
 # 最小生物数量（低于此值自动补充）
 min_creatures = 60
 # 初始能量
