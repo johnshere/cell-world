@@ -87,6 +87,9 @@ pub struct World {
     neural_output_cache: FxHashMap<u64, [f64; 6]>,
     /// 异步 SNN 耗时缓存
     neural_compute_cache: FxHashMap<u64, u64>,
+
+    /// 种族源头基因组：clan_hash -> 建族者的 genome（用于后代相似度比较）
+    clan_genomes: FxHashMap<u64, Genome>,
 }
 
 /// 种族缓存（祖先追溯模型）
@@ -143,6 +146,7 @@ impl World {
             neural_bridge: None,
             neural_output_cache: FxHashMap::default(),
             neural_compute_cache: FxHashMap::default(),
+            clan_genomes: FxHashMap::default(),
         };
         // 初始连喷三波，提供充足起始能量（直接落地，不杀伤）
         for _ in 0..3 {
@@ -288,6 +292,9 @@ impl World {
             config.initial_connections_min,
             config.initial_connections_max,
         );
+        // 自然生成：以自身基因建族
+        self.clan_genomes
+            .insert(creature.clan_hash, creature.genome.clone());
         self.notify_born(&creature);
         self.creatures.push(creature);
     }
@@ -905,44 +912,54 @@ impl World {
 
     /// 嘴动作：接触食物/痕迹自动吸收（不受冷却限制），对生物咬/喂（受冷却限制）
     fn action_mouth(&mut self, idx: usize, mouth: f64, config: &Config) {
-        // 嘴巴位置 = 生物中心 + heading方向 × 半径 × 1.05
         let body_radius = (self.creatures[idx].energy * 1.28).cbrt();
+        let mouth_stroke = body_radius * 0.25;
+        let mouth_arc_r = body_radius * 1.05 + mouth_stroke * 0.5;
         let heading = self.creatures[idx].heading;
-        let mx = self.creatures[idx].x + heading.cos() * body_radius * 1.05;
-        let my = self.creatures[idx].y + heading.sin() * body_radius * 1.05;
-        let mouth_range = body_radius * 0.5;
-        let query_range = mouth_range + config.contact_range;
+        let cx = self.creatures[idx].x;
+        let cy = self.creatures[idx].y;
 
-        // 接触食物自动吸收（不受冷却限制）
-        let nearby_energy = self.energy_grid.query(mx, my, query_range);
+        // 锥形吸收区域：从身体中心到嘴巴弧线外缘，heading ± 25° 扇形
+        let mouth_outer_r = mouth_arc_r + mouth_stroke * 0.5;
+        let half_arc: f64 = 0.4363; // 25° ≈ 0.4363 rad（与渲染一致）
+        let mouth_outer_r_sq = mouth_outer_r * mouth_outer_r;
+
+        // 接触食物自动吸收（锥形区域判定，不受冷却限制）
+        let nearby_energy = self.energy_grid.query(cx, cy, mouth_outer_r);
         for &particle_idx in &nearby_energy {
             if self.energy_particles[particle_idx].alive {
                 let px = self.energy_particles[particle_idx].x;
                 let py = self.energy_particles[particle_idx].y;
-                let dist = ((px - mx).powi(2) + (py - my).powi(2)).sqrt();
-                if dist < mouth_range {
-                    let energy = self.energy_particles[particle_idx].consume();
-                    self.creatures[idx].energy += energy;
-                    self.action_counts[1] += 1;
-                    break;
+                let dx = px - cx;
+                let dy = py - cy;
+                if dx * dx + dy * dy <= mouth_outer_r_sq {
+                    let angle_diff = (dy.atan2(dx) - heading).sin().atan2((dy.atan2(dx) - heading).cos());
+                    if angle_diff.abs() <= half_arc {
+                        let energy = self.energy_particles[particle_idx].consume();
+                        self.creatures[idx].energy += energy;
+                        self.action_counts[1] += 1;
+                        break;
+                    }
                 }
             }
         }
 
-        // 接触痕迹点自动吸收（不受冷却限制）
+        // 接触痕迹点自动吸收（锥形区域判定，不受冷却限制）
         if !self.trail_disabled {
             let my_genome_hash = self.creatures[idx].genome_hash;
-            let nearby_trails = self.trail_grid.query(mx, my, query_range);
+            let nearby_trails = self.trail_grid.query(cx, cy, mouth_outer_r);
             for &trail_idx in &nearby_trails {
                 let trail = &self.trail_points[trail_idx];
                 if trail.alive && trail.age > 2.0 && trail.genome_hash != my_genome_hash {
-                    let tx = trail.x;
-                    let ty = trail.y;
-                    let dist = ((tx - mx).powi(2) + (ty - my).powi(2)).sqrt();
-                    if dist < mouth_range {
-                        let energy = self.trail_points[trail_idx].consume();
-                        self.creatures[idx].energy += energy;
-                        break;
+                    let dx = trail.x - cx;
+                    let dy = trail.y - cy;
+                    if dx * dx + dy * dy <= mouth_outer_r_sq {
+                        let angle_diff = (dy.atan2(dx) - heading).sin().atan2((dy.atan2(dx) - heading).cos());
+                        if angle_diff.abs() <= half_arc {
+                            let energy = self.trail_points[trail_idx].consume();
+                            self.creatures[idx].energy += energy;
+                            break;
+                        }
                     }
                 }
             }
@@ -956,7 +973,10 @@ impl World {
             return;
         }
 
-        let nearby_creatures = self.creature_grid.query(mx, my, query_range);
+        let mx = cx + heading.cos() * mouth_arc_r;
+        let my = cy + heading.sin() * mouth_arc_r;
+        let bite_query_range = mouth_stroke + config.contact_range;
+        let nearby_creatures = self.creature_grid.query(mx, my, bite_query_range);
         for &other_idx in &nearby_creatures {
             if other_idx == idx || !self.creatures[other_idx].alive {
                 continue;
@@ -965,7 +985,7 @@ impl World {
             let oy = self.creatures[other_idx].y;
             let other_radius = (self.creatures[other_idx].energy * 1.28).cbrt();
             let dist = ((ox - mx).powi(2) + (oy - my).powi(2)).sqrt();
-            if dist >= mouth_range + other_radius {
+            if dist >= mouth_stroke + other_radius {
                 continue;
             }
 
@@ -1087,12 +1107,22 @@ impl World {
             )
         };
 
-        // 种族颜色继承：与父代相似度 >= 阈值则继承 clan_hash，否则新建
-        let similarity = self.creatures[idx].genome.similarity(&child.genome);
-        if similarity >= config.species_similarity_threshold {
-            child.clan_hash = self.creatures[idx].clan_hash;
+        // 种族颜色继承：与源头基因比较，相似度 >= 阈值则同族，否则建新族
+        let parent_clan = self.creatures[idx].clan_hash;
+        let is_same_clan = if let Some(founder_genome) = self.clan_genomes.get(&parent_clan) {
+            founder_genome.similarity(&child.genome) >= config.species_similarity_threshold
+        } else {
+            // 源头基因已丢失，回退为与父代比较
+            self.creatures[idx].genome.similarity(&child.genome)
+                >= config.species_similarity_threshold
+        };
+        if is_same_clan {
+            child.clan_hash = parent_clan;
+        } else {
+            // 建新族，记录源头基因
+            self.clan_genomes
+                .insert(child.clan_hash, child.genome.clone());
         }
-        // else: child.clan_hash 已默认为自身 genome_hash
 
         self.notify_born(&child);
         self.creatures.push(child);
@@ -1202,6 +1232,15 @@ impl World {
                 .collect();
             let mut cache = self.similarity_cache.borrow_mut();
             cache.retain(|(h1, h2), _| alive_hashes.contains(h1) && alive_hashes.contains(h2));
+
+            // 清理无活生物引用的种族源头基因
+            let alive_clans: rustc_hash::FxHashSet<u64> = self
+                .creatures
+                .iter()
+                .filter(|c| c.alive)
+                .map(|c| c.clan_hash)
+                .collect();
+            self.clan_genomes.retain(|k, _| alive_clans.contains(k));
         }
     }
 
@@ -1280,11 +1319,11 @@ impl World {
     }
 
     /// 获取渲染上下文数据（clan_hash 作为颜色标识，出生时确定，终身不变）
-    pub fn get_render_data(&self, _threshold: f64) -> FxHashMap<usize, u64> {
-        let mut creature_species: FxHashMap<usize, u64> = FxHashMap::default();
-        for (idx, creature) in self.creatures.iter().enumerate() {
+    pub fn get_render_data(&self, _threshold: f64) -> FxHashMap<u64, u64> {
+        let mut creature_species: FxHashMap<u64, u64> = FxHashMap::default();
+        for creature in &self.creatures {
             if creature.alive {
-                creature_species.insert(idx, creature.clan_hash);
+                creature_species.insert(creature.id, creature.clan_hash);
             }
         }
         creature_species

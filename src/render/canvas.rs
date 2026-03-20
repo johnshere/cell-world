@@ -6,8 +6,8 @@ use crate::world::World;
 
 /// 渲染上下文（种族颜色）
 pub struct RenderContext {
-    /// 生物索引 -> 种族XOR基因哈希（用于分散且稳定的颜色）
-    pub creature_species: FxHashMap<usize, u64>,
+    /// 生物 ID -> 种族哈希（用于稳定颜色，不受 Vec 索引重排影响）
+    pub creature_species: FxHashMap<u64, u64>,
 }
 
 /// 世界画布渲染器
@@ -208,8 +208,8 @@ impl WorldCanvas {
             }
             let pos = self.world_to_screen(Pos2::new(creature.x as f32, creature.y as f32), rect);
             if rect.contains(pos) {
-                // 根据种族最小基因哈希确定颜色（稳定标识）
-                let species_hash = ctx.creature_species.get(&idx).copied().unwrap_or(0);
+                // 根据种族哈希确定颜色（按 creature ID 查找，不受索引重排影响）
+                let species_hash = ctx.creature_species.get(&creature.id).copied().unwrap_or(0);
                 let color = species_to_color(species_hash);
 
                 let radius = ((creature.energy as f32 * 1.28).cbrt()).clamp(1.5, 8.0) * self.scale;
