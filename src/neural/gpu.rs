@@ -582,6 +582,14 @@ mod inner {
         gpu: GpuCompute,
         slots: SlotAllocator,
         last_tick_ns: u64,
+        /// 首次 tick（注入输入时）的直读输出值
+        first_outputs: FxHashMap<u64, [f32; 6]>,
+        /// 脉冲发放计数（每帧重置）
+        spike_counts: FxHashMap<u64, [u32; 6]>,
+        /// 帧内 tick 计数
+        tick_count: u32,
+        /// 输出模式缓存：creature_id -> output_modes (true=直读)
+        output_modes_cache: FxHashMap<u64, Vec<bool>>,
     }
 
     impl GpuExecutor {
@@ -591,6 +599,10 @@ mod inner {
                 gpu,
                 slots: SlotAllocator::new(MAX_CREATURES),
                 last_tick_ns: 0,
+                first_outputs: FxHashMap::default(),
+                spike_counts: FxHashMap::default(),
+                tick_count: 0,
+                output_modes_cache: FxHashMap::default(),
             })
         }
     }
@@ -599,6 +611,15 @@ mod inner {
         fn register(&mut self, id: u64, genome: &Genome) {
             if let Some(slot) = self.slots.allocate(id) {
                 self.gpu.upload_genome(slot, genome);
+                // 构建输出模式：threshold == 0 为直读
+                let output_modes: Vec<bool> = genome
+                    .nodes
+                    .iter()
+                    .filter(|n| matches!(n.node_type, super::super::genome::NodeType::Output))
+                    .map(|n| n.threshold == 0.0)
+                    .collect();
+                self.output_modes_cache.insert(id, output_modes);
+                self.spike_counts.insert(id, [0; 6]);
             }
         }
 
@@ -607,9 +628,16 @@ mod inner {
                 self.gpu.clear_slot(slot);
             }
             self.slots.free(id);
+            self.first_outputs.remove(&id);
+            self.output_modes_cache.remove(&id);
+            self.spike_counts.remove(&id);
         }
 
         fn inject_inputs(&mut self, inputs: &[CreatureInput]) {
+            self.tick_count = 0;
+            for counts in self.spike_counts.values_mut() {
+                *counts = [0; 6];
+            }
             for input in inputs {
                 if let Some(slot) = self.slots.get_slot(input.creature_id) {
                     self.gpu.upload_inputs(slot, &input.perception);
@@ -621,26 +649,81 @@ mod inner {
             let t0 = Instant::now();
             self.gpu.dispatch_tick();
             self.last_tick_ns = t0.elapsed().as_nanos() as u64;
+            self.tick_count += 1;
+
+            // 读取当前tick的输出
+            let raw = self.gpu.readback_outputs();
+            let inject = self.tick_count == 1; // 假设inject_inputs后第一个tick是注入的
+
+            for (&creature_id, &slot) in self.slots.active_entries() {
+                let base = slot * 6;
+                if base + 6 > raw.len() {
+                    continue;
+                }
+
+                let current_outputs = [
+                    raw[base],
+                    raw[base + 1],
+                    raw[base + 2],
+                    raw[base + 3],
+                    raw[base + 4],
+                    raw[base + 5],
+                ];
+
+                // 首次 tick：保存直读输出值
+                if inject {
+                    self.first_outputs.insert(creature_id, current_outputs);
+                }
+
+                // 累积脉冲发放
+                if let Some(modes) = self.output_modes_cache.get(&creature_id) {
+                    if let Some(counts) = self.spike_counts.get_mut(&creature_id) {
+                        for (j, (&v, &direct_read)) in
+                            current_outputs.iter().zip(modes.iter()).enumerate()
+                        {
+                            if !direct_read && v > 0.5 {
+                                counts[j] += 1;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         fn read_outputs(&self) -> Vec<CreatureOutput> {
-            let raw = self.gpu.readback_outputs();
             let active_count = self.slots.active_entries().count().max(1) as u64;
             let per_creature_ns = self.last_tick_ns / active_count;
             let mut results = Vec::new();
             for (&creature_id, &slot) in self.slots.active_entries() {
-                let base = slot * 6;
-                if base + 6 <= raw.len() {
-                    let mut outputs = [0.0f64; 6];
-                    for i in 0..6 {
-                        outputs[i] = raw[base + i] as f64;
-                    }
-                    results.push(CreatureOutput {
-                        creature_id,
-                        outputs,
-                        compute_ns: per_creature_ns,
-                    });
+                // 直读输出取首次 tick 的值，脉冲输出取发放率
+                let first = self
+                    .first_outputs
+                    .get(&creature_id)
+                    .copied()
+                    .unwrap_or([0.0; 6]);
+                let mut final_outputs = [0.0f64; 6];
+                for i in 0..6 {
+                    final_outputs[i] = first[i] as f64;
                 }
+
+                if let Some(modes) = self.output_modes_cache.get(&creature_id) {
+                    if let Some(counts) = self.spike_counts.get(&creature_id) {
+                        if self.tick_count > 0 {
+                            for (j, &direct_read) in modes.iter().enumerate().take(6) {
+                                if !direct_read {
+                                    let rate = counts[j] as f64 / self.tick_count as f64;
+                                    final_outputs[j] = rate * 2.0 - 1.0;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                results.push(CreatureOutput {
+                    creature_id,
+                    outputs: final_outputs,
+                    compute_ns: per_creature_ns,
+                });
             }
             results
         }

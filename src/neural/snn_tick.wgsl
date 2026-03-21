@@ -84,8 +84,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    let meta = creature_meta[creature_slot];
-    if node_local >= meta.node_count {
+    let creature_meta_data = creature_meta[creature_slot];
+    if node_local >= creature_meta_data.node_count {
         return;
     }
 
@@ -115,7 +115,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // 累加前驱信号：直读节点用 membrane*weight，脉冲节点用 weight
     let conn_base = creature_slot * MAX_CONNS;
-    for (var c = 0u; c < meta.conn_count; c++) {
+    for (var c = 0u; c < creature_meta_data.conn_count; c++) {
         let conn = connections[conn_base + c];
         if conn.to_node == node_local {
             let from_global = creature_slot * MAX_NODES + conn.from_node;
@@ -149,7 +149,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // 输出节点：写入 outputs buffer
     if is_output(prev.flags) {
-        let output_val: f32;
+        var output_val: f32 = 0.0;
         if is_direct_read(next_node.flags) {
             // tanh 近似
             let x = next_node.membrane;
@@ -159,14 +159,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             if is_fired(next_node.flags) {
                 output_val = 1.0;
             } else {
-                output_val = -1.0;
+                output_val = 0.0;
             }
         }
         // 输出 buffer：每个生物最多6个输出
         // 需要知道这是第几个输出节点（简化：用 node_local - input_count 作为近似）
         // 但这不完全正确，所以我们直接用 node_local 作为输出索引
         // 实际上输出节点的局部索引 = node_local - meta.input_count (如果隐藏层为0的初始情况)
-        let output_idx = node_local - meta.input_count;
+        let output_idx = node_local - creature_meta_data.input_count;
         if output_idx < 6u {
             outputs[creature_slot * 6u + output_idx] = output_val;
         }
