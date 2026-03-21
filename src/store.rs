@@ -126,6 +126,20 @@ impl Store {
         let path = self.dir.join(&filename);
         let _ = fs::remove_file(path);
     }
+
+    /// 清空优势种数据
+    pub fn clear_dominant(&mut self) {
+        // 删除文件
+        for template in &self.templates {
+            if template.auto_recorded == Some(true) {
+                let filename = format!("{}.json", sanitize_filename(&template.name));
+                let path = self.dir.join(&filename);
+                let _ = fs::remove_file(path);
+            }
+        }
+        // 从内存中移除
+        self.templates.retain(|t| t.auto_recorded != Some(true));
+    }
 }
 
 impl Default for Store {

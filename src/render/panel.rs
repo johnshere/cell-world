@@ -14,6 +14,7 @@ pub struct PanelAction {
     pub delete_selected: bool,
     pub save_selected: Option<String>,
     pub delete_template: Option<String>,
+    pub clear_dominant: bool,
 }
 
 /// 统计面板
@@ -278,6 +279,14 @@ impl StatsPanel {
                         action.delete_template = Some(name.to_string());
                     }
                 }
+            }
+
+            if ui
+                .button("清空")
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                action.clear_dominant = true;
             }
         });
 

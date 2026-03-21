@@ -11,7 +11,7 @@ use eframe::NativeOptions;
 fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1425.0, 900.0])
+            .with_maximized(true)
             .with_title("Cell World - Neural Emergence Simulator"),
         ..Default::default()
     };

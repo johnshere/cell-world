@@ -90,6 +90,9 @@ pub struct World {
 
     /// 种族源头基因组：clan_hash -> 建族者的 genome（用于后代相似度比较）
     clan_genomes: FxHashMap<u64, Genome>,
+
+    /// 火山喷发半径（动态根据可视空间计算）
+    pub volcano_radius: f64,
 }
 
 /// 种族缓存（祖先追溯模型）
@@ -147,6 +150,7 @@ impl World {
             neural_output_cache: FxHashMap::default(),
             neural_compute_cache: FxHashMap::default(),
             clan_genomes: FxHashMap::default(),
+            volcano_radius: config.volcano_radius,
         };
         // 初始连喷三波，提供充足起始能量（直接落地，不杀伤）
         for _ in 0..3 {
@@ -348,7 +352,7 @@ impl World {
             let angle = rng.gen_range(0.0..std::f64::consts::TAU);
             // 中心富集：u^1.5 分布，比 u² 稍平缓，远处粒子更多
             let u: f64 = rng.gen_range(0.0..1.0);
-            let r = u.powf(1.5) * config.volcano_radius;
+            let r = u.powf(1.5) * self.volcano_radius;
             let x = config.volcano_x + r * angle.cos();
             let y = config.volcano_y + r * angle.sin();
             let energy_id = self.next_energy_id;
@@ -480,7 +484,8 @@ impl World {
                 let outputs = bridge.read_outputs();
                 for o in &outputs {
                     self.neural_output_cache.insert(o.creature_id, o.outputs);
-                    self.neural_compute_cache.insert(o.creature_id, o.compute_ns);
+                    self.neural_compute_cache
+                        .insert(o.creature_id, o.compute_ns);
                 }
             }
         }
@@ -509,7 +514,8 @@ impl World {
             let creature_t0 = Instant::now();
 
             // 周围能量（粒子+生物）
-            let nearby_energy = self.compute_nearby_energy(self.creatures[i].x, self.creatures[i].y, config);
+            let nearby_energy =
+                self.compute_nearby_energy(self.creatures[i].x, self.creatures[i].y, config);
 
             // 基础代谢
             let age_multiplier = 1.0 + self.creatures[i].age * config.age_metabolism_factor;
@@ -561,7 +567,11 @@ impl World {
 
                 // 主线程耗时 + 异步 SNN 耗时
                 let main_ns = creature_t0.elapsed().as_nanos() as u64;
-                let snn_ns = self.neural_compute_cache.get(&self.creatures[i].id).copied().unwrap_or(0);
+                let snn_ns = self
+                    .neural_compute_cache
+                    .get(&self.creatures[i].id)
+                    .copied()
+                    .unwrap_or(0);
                 self.creatures[i].frame_compute_ns = main_ns + snn_ns;
             } else {
                 // 同步模式：SNN tick（首次注入输入，后续 tick_free，脉冲输出用发放率）
@@ -623,7 +633,12 @@ impl World {
 
         // 平均算力统计
         if alive_count > 0 {
-            let total_ns: u64 = self.creatures.iter().filter(|c| c.alive).map(|c| c.frame_compute_ns).sum();
+            let total_ns: u64 = self
+                .creatures
+                .iter()
+                .filter(|c| c.alive)
+                .map(|c| c.frame_compute_ns)
+                .sum();
             self.perf_stats.avg_compute_ns = total_ns as f64 / alive_count as f64;
         } else {
             self.perf_stats.avg_compute_ns = 0.0;
@@ -933,7 +948,9 @@ impl World {
                 let dx = px - cx;
                 let dy = py - cy;
                 if dx * dx + dy * dy <= mouth_outer_r_sq {
-                    let angle_diff = (dy.atan2(dx) - heading).sin().atan2((dy.atan2(dx) - heading).cos());
+                    let angle_diff = (dy.atan2(dx) - heading)
+                        .sin()
+                        .atan2((dy.atan2(dx) - heading).cos());
                     if angle_diff.abs() <= half_arc {
                         let energy = self.energy_particles[particle_idx].consume();
                         self.creatures[idx].energy += energy;
@@ -954,7 +971,9 @@ impl World {
                     let dx = trail.x - cx;
                     let dy = trail.y - cy;
                     if dx * dx + dy * dy <= mouth_outer_r_sq {
-                        let angle_diff = (dy.atan2(dx) - heading).sin().atan2((dy.atan2(dx) - heading).cos());
+                        let angle_diff = (dy.atan2(dx) - heading)
+                            .sin()
+                            .atan2((dy.atan2(dx) - heading).cos());
                         if angle_diff.abs() <= half_arc {
                             let energy = self.trail_points[trail_idx].consume();
                             self.creatures[idx].energy += energy;
@@ -999,17 +1018,13 @@ impl World {
                 let my_speed_norm = (self.creatures[idx].current_speed / 50.0).min(1.0);
                 let my_ally_energy = self.compute_nearby_ally_energy(idx, config);
                 let attacker_score =
-                    config.combat_power(my_energy, my_speed_norm, my_ally_energy)
-                        * bite_force;
+                    config.combat_power(my_energy, my_speed_norm, my_ally_energy) * bite_force;
 
                 // 防御方战力
                 let other_speed_norm = (self.creatures[other_idx].current_speed / 50.0).min(1.0);
                 let other_ally_energy = self.compute_nearby_ally_energy(other_idx, config);
-                let defender_score = config.combat_power(
-                    other_energy,
-                    other_speed_norm,
-                    other_ally_energy,
-                );
+                let defender_score =
+                    config.combat_power(other_energy, other_speed_norm, other_ally_energy);
 
                 let damage_ratio = attacker_score / (attacker_score + defender_score + 0.001);
                 let transfer = other_energy * damage_ratio * config.bite_transfer_rate;

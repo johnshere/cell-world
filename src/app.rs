@@ -320,16 +320,18 @@ impl CellWorldApp {
                     0.0..=1.0,
                 );
                 changed |= config_drag_f64(ui, "喂食效率", &mut c.feed_efficiency, 0.01, 0.1..=1.0);
-                changed |= ui.horizontal(|ui| {
-                    ui.label("算力系数");
-                    ui.add(
-                        egui::DragValue::new(&mut c.compute_energy_factor)
-                            .speed(0.1)
-                            .range(0.0..=200.0)
-                            .max_decimals(1),
-                    )
-                    .changed()
-                }).inner;
+                changed |= ui
+                    .horizontal(|ui| {
+                        ui.label("算力系数");
+                        ui.add(
+                            egui::DragValue::new(&mut c.compute_energy_factor)
+                                .speed(0.1)
+                                .range(0.0..=200.0)
+                                .max_decimals(1),
+                        )
+                        .changed()
+                    })
+                    .inner;
             });
 
             ui.collapsing("生物", |ui| {
@@ -394,13 +396,7 @@ impl CellWorldApp {
                     10.0,
                     100.0..=5000.0,
                 );
-                changed |= config_drag_f64(
-                    ui,
-                    "散热下限",
-                    &mut c.heat_floor,
-                    0.01,
-                    0.0..=1.0,
-                );
+                changed |= config_drag_f64(ui, "散热下限", &mut c.heat_floor, 0.01, 0.0..=1.0);
             });
 
             ui.collapsing("痕迹点", |ui| {
@@ -471,12 +467,12 @@ impl CellWorldApp {
             let t_range = (t_max - t_min).max(1.0);
 
             // Y 轴范围：同时考虑总能量和生命能量
-            let (e_min, e_max) = history.iter().fold(
-                (f64::MAX, f64::MIN),
-                |(lo, hi), &(_, total, creature)| {
-                    (lo.min(total).min(creature), hi.max(total).max(creature))
-                },
-            );
+            let (e_min, e_max) =
+                history
+                    .iter()
+                    .fold((f64::MAX, f64::MIN), |(lo, hi), &(_, total, creature)| {
+                        (lo.min(total).min(creature), hi.max(total).max(creature))
+                    });
             let e_min = e_min * 0.9;
             let e_max = e_max * 1.1;
             let e_range = (e_max - e_min).max(1.0);
@@ -488,16 +484,14 @@ impl CellWorldApp {
             let total_pts: Vec<egui::Pos2> = history
                 .iter()
                 .map(|&(t, e, _)| {
-                    let x = rect.left()
-                        + ((t - t_min) / t_range * chart_width_f32 as f64) as f32;
-                    let y = rect.bottom()
-                        - ((e - e_min) / e_range * chart_height_f32 as f64) as f32;
+                    let x = rect.left() + ((t - t_min) / t_range * chart_width_f32 as f64) as f32;
+                    let y =
+                        rect.bottom() - ((e - e_min) / e_range * chart_height_f32 as f64) as f32;
                     egui::pos2(x, y.clamp(rect.top(), rect.bottom()))
                 })
                 .collect();
             for pair in total_pts.windows(2) {
-                painter
-                    .line_segment([pair[0], pair[1]], egui::Stroke::new(1.5, color_total));
+                painter.line_segment([pair[0], pair[1]], egui::Stroke::new(1.5, color_total));
             }
             if let Some(&last) = total_pts.last() {
                 painter.circle_filled(last, 3.0, color_total);
@@ -507,16 +501,14 @@ impl CellWorldApp {
             let life_pts: Vec<egui::Pos2> = history
                 .iter()
                 .map(|&(t, _, c)| {
-                    let x = rect.left()
-                        + ((t - t_min) / t_range * chart_width_f32 as f64) as f32;
-                    let y = rect.bottom()
-                        - ((c - e_min) / e_range * chart_height_f32 as f64) as f32;
+                    let x = rect.left() + ((t - t_min) / t_range * chart_width_f32 as f64) as f32;
+                    let y =
+                        rect.bottom() - ((c - e_min) / e_range * chart_height_f32 as f64) as f32;
                     egui::pos2(x, y.clamp(rect.top(), rect.bottom()))
                 })
                 .collect();
             for pair in life_pts.windows(2) {
-                painter
-                    .line_segment([pair[0], pair[1]], egui::Stroke::new(1.5, color_life));
+                painter.line_segment([pair[0], pair[1]], egui::Stroke::new(1.5, color_life));
             }
             if let Some(&last) = life_pts.last() {
                 painter.circle_filled(last, 3.0, color_life);
@@ -893,9 +885,9 @@ impl eframe::App for CellWorldApp {
                 self.render_energy_trend(ui);
 
                 // 显示选中信息
-                selection_action =
-                    self.panel
-                        .render_selection(ui, &self.selection, &self.world);
+                selection_action = self
+                    .panel
+                    .render_selection(ui, &self.selection, &self.world);
 
                 // 滚动区域：仅包含设置面板
                 if self.panel.settings_open || self.panel.energy_settings_open {
@@ -975,6 +967,11 @@ impl eframe::App for CellWorldApp {
         if let Some(name) = panel_action.delete_template {
             self.store.delete(&name);
             self.panel.reset_template_selection();
+        }
+
+        // 处理清空优势种
+        if panel_action.clear_dominant {
+            self.store.clear_dominant();
         }
 
         // 主画布
