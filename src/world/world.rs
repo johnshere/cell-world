@@ -48,10 +48,6 @@ pub struct World {
     viewport_max_x: f64,
     viewport_max_y: f64,
 
-    // 初始世界范围（固定，用于陨石坠落）
-    pub initial_bounds: (f64, f64, f64, f64), // (min_x, min_y, max_x, max_y)
-    initial_bounds_set: bool,
-
     // 火山范围检查定时器
     volcano_range_check_timer: f64,
 
@@ -96,6 +92,9 @@ pub struct World {
 
     /// 火山喷发半径（动态根据可视空间计算）
     pub volcano_radius: f64,
+
+    /// 优势种库
+    pub dominant_species: Vec<DominantCandidate>,
 }
 
 /// 种族缓存（祖先追溯模型）
@@ -132,9 +131,7 @@ impl World {
             viewport_min_y: -500.0,
             viewport_max_x: 700.0,
             viewport_max_y: 500.0,
-            // 初始世界范围（首帧 set_viewport 时锁定）
-            initial_bounds: (-700.0, -500.0, 700.0, 500.0),
-            initial_bounds_set: false,
+
             volcano_range_check_timer: 0.0,
             perf_stats: PerfStats::default(),
             similarity_cache: RefCell::new(FxHashMap::default()),
@@ -155,6 +152,7 @@ impl World {
             neural_compute_cache: FxHashMap::default(),
             clan_genomes: FxHashMap::default(),
             volcano_radius: config.volcano_radius,
+            dominant_species: Vec::new(),
         };
         // 初始连喷三波，提供充足起始能量（直接落地，不杀伤）
         for _ in 0..3 {
@@ -214,11 +212,6 @@ impl World {
 
     /// 设置视窗范围
     pub fn set_viewport(&mut self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) {
-        // 首次调用时锁定初始世界范围
-        if !self.initial_bounds_set {
-            self.initial_bounds = (min_x, min_y, max_x, max_y);
-            self.initial_bounds_set = true;
-        }
         self.viewport_min_x = min_x;
         self.viewport_min_y = min_y;
         self.viewport_max_x = max_x;
@@ -293,12 +286,21 @@ impl World {
     // ========== 生成 ==========
 
     fn replenish_creatures(&mut self, config: &Config) {
+        let mut rng = rand::thread_rng();
         loop {
             let alive_count = self.creatures.iter().filter(|c| c.alive).count();
             if alive_count >= config.min_creatures {
                 break;
             }
-            self.spawn_creature(config);
+            if !self.dominant_species.is_empty() && rng.gen_bool(0.5) {
+                // 50% 从优势种库取一个
+                let idx = rng.gen_range(0..self.dominant_species.len());
+                let candidate = self.dominant_species[idx].clone();
+                self.spawn_from_template(config, &candidate.genome, config.initial_energy);
+            } else {
+                // 50% 随机生成
+                self.spawn_creature(config);
+            }
         }
     }
 
@@ -406,9 +408,12 @@ impl World {
     fn meteorite_fall(&mut self, config: &Config) {
         let mut rng = rand::thread_rng();
         let current_energy = config.current_meteorite_energy(self.time);
-        let (ib_min_x, ib_min_y, ib_max_x, ib_max_y) = self.initial_bounds;
-        let cx = rng.gen_range(ib_min_x..ib_max_x);
-        let cy = rng.gen_range(ib_min_y..ib_max_y);
+        // 陨石中心在火山半径内随机
+        let angle = rng.gen_range(0.0..std::f64::consts::TAU);
+        let u: f64 = rng.gen_range(0.0..1.0);
+        let r = u.sqrt() * config.volcano_radius;
+        let cx = config.volcano_x + r * angle.cos();
+        let cy = config.volcano_y + r * angle.sin();
         let angle = rng.gen_range(0.0..std::f64::consts::TAU);
         let dx = angle.cos();
         let dy = angle.sin();

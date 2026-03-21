@@ -69,6 +69,7 @@ impl CellWorldApp {
         let config = Config::load();
         let mut world = World::new(&config);
         let store = Store::new();
+        world.dominant_species = store.dominant_species().clone();
         let now = std::time::Instant::now();
 
         // 初始化异步神经线程（非 legacy 模式）

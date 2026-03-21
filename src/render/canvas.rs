@@ -171,20 +171,6 @@ impl WorldCanvas {
             }
         }
 
-        // 绘制初始世界范围矩形
-        {
-            let (ib_min_x, ib_min_y, ib_max_x, ib_max_y) = world.initial_bounds;
-            let top_left = self.world_to_screen(Pos2::new(ib_min_x as f32, ib_min_y as f32), rect);
-            let bottom_right =
-                self.world_to_screen(Pos2::new(ib_max_x as f32, ib_max_y as f32), rect);
-            let bounds_rect = Rect::from_min_max(top_left, bottom_right);
-            painter.rect_stroke(
-                bounds_rect,
-                0.0,
-                Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 25)),
-            );
-        }
-
         // 绘制火山标记（原点 0,0）
         {
             let volcano_pos = self.world_to_screen(Pos2::new(0.0, 0.0), rect);

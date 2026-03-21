@@ -140,6 +140,23 @@ impl Store {
         // 从内存中移除
         self.templates.retain(|t| t.auto_recorded != Some(true));
     }
+
+    /// 获取优势种列表
+    pub fn dominant_species(&self) -> Vec<crate::world::DominantCandidate> {
+        self.templates
+            .iter()
+            .filter(|t| t.auto_recorded == Some(true))
+            .map(|t| crate::world::DominantCandidate {
+                genome: t.genome.clone(),
+                genome_hash: 0, // 或许需要计算，但暂时0
+                score: t.score.unwrap_or(0.0),
+                population_ratio: t.population_ratio.unwrap_or(0.0),
+                avg_energy: t.avg_energy.unwrap_or(0.0),
+                avg_age: t.avg_age.unwrap_or(0.0),
+                max_generation: t.max_generation.unwrap_or(0),
+            })
+            .collect()
+    }
 }
 
 impl Default for Store {
