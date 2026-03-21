@@ -52,6 +52,9 @@ pub struct World {
     pub initial_bounds: (f64, f64, f64, f64), // (min_x, min_y, max_x, max_y)
     initial_bounds_set: bool,
 
+    // 火山范围检查定时器
+    volcano_range_check_timer: f64,
+
     // 性能统计
     pub perf_stats: PerfStats,
 
@@ -132,6 +135,7 @@ impl World {
             // 初始世界范围（首帧 set_viewport 时锁定）
             initial_bounds: (-700.0, -500.0, 700.0, 500.0),
             initial_bounds_set: false,
+            volcano_range_check_timer: 0.0,
             perf_stats: PerfStats::default(),
             similarity_cache: RefCell::new(FxHashMap::default()),
             cache_cleanup_timer: 0.0,
@@ -237,6 +241,27 @@ impl World {
 
         // 更新生物
         self.update_creatures(dt, config);
+
+        // 每5秒检查一次火山半径外的生物（动态读取配置）
+        self.volcano_range_check_timer += dt;
+        if self.volcano_range_check_timer >= 5.0 {
+            self.volcano_range_check_timer -= 5.0;
+
+            let volcano_x = config.volcano_x;
+            let volcano_y = config.volcano_y;
+            let limit_r = config.volcano_radius * 1.5;
+            let limit_r2 = limit_r * limit_r;
+
+            for creature in self.creatures.iter_mut() {
+                if creature.alive {
+                    let dx = creature.x - volcano_x;
+                    let dy = creature.y - volcano_y;
+                    if dx * dx + dy * dy > limit_r2 {
+                        creature.alive = false;
+                    }
+                }
+            }
+        }
 
         // 更新能量粒子
         self.update_energy_particles(dt, config);

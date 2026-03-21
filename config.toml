@@ -1,9 +1,9 @@
 # 初始模拟速度
-initial_speed = 4.0
+initial_speed = 5.0
 # 最小生物数量（低于此值自动补充）
 min_creatures = 60
 # 初始能量
-initial_energy = 60.0
+initial_energy = 160.0
 # 初始世界缩放比例
 initial_scale = 0.4000000059604645
 
@@ -13,13 +13,13 @@ volcano_x = 0.0
 # 火山坐标 Y
 volcano_y = 0.0
 # 火山喷发间隔（秒）
-volcano_interval = 30.0
+volcano_interval = 40.0
 # 火山喷射半径
-volcano_radius = 1500.0
+volcano_radius = 2000.0
 # 每次喷发粒子数
-volcano_count = 80
+volcano_count = 100
 # 火山粒子能量
-volcano_particle_energy = 60.0
+volcano_particle_energy = 40.0
 
 # === 陨石 ===
 # 陨石降落间隔（秒）
@@ -37,11 +37,11 @@ volcano_interval_cycle = 700.0
 # 火山间隔振幅比（0~0.9）
 volcano_interval_amplitude = 0.6
 # 火山能量正弦周期（秒）
-volcano_energy_cycle = 300.0
+volcano_energy_cycle = 2000.0
 # 火山能量振幅比（0~0.9）
-volcano_energy_amplitude = 0.5
+volcano_energy_amplitude = 0.6
 # 陨石间隔正弦周期（秒）
-meteorite_interval_cycle = 400.0
+meteorite_interval_cycle = 750.0
 # 陨石间隔振幅比（0~0.9）
 meteorite_interval_amplitude = 0.7
 # 陨石能量正弦周期（秒）
@@ -56,7 +56,7 @@ meteorite_decay_rate = 0.005
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 30.0
+volcano_kill_radius = 35.0
 # 陨石落地杀伤半径
 meteorite_kill_radius = 40.0
 
@@ -80,10 +80,10 @@ base_metabolism = 0.035
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
 age_metabolism_factor = 0.03
 # 移动消耗（每单位距离）
-move_cost = 0.0003
+move_cost = 0.002
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.04
+heat_dissipation_coefficient = 0.03
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
