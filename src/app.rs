@@ -627,7 +627,7 @@ impl CellWorldApp {
                                 ui.label("振幅:");
                                 changed |= ui.add(egui::DragValue::new($amp).speed(0.01).range(0.0..=0.9).fixed_decimals(2)).changed();
                                 ui.label("周期(秒):");
-                                changed |= ui.add(egui::DragValue::new($cycle).speed(10.0).range(0.0..=2000.0)).changed();
+                                changed |= ui.add(egui::DragValue::new($cycle).speed(10.0)).changed();
                             });
 
                             // 绘制正弦曲线

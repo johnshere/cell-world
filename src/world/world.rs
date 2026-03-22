@@ -487,16 +487,29 @@ impl World {
     fn compute_nearby_energy(&self, x: f64, y: f64, config: &Config) -> f64 {
         let range = config.vision_range;
         let mut total = 0.0;
-        // 粒子
+        const DIST_MIN_SQ: f64 = 0.01; // 最小距离平方，避免除零
+                                       // 粒子
         for &idx in &self.energy_grid.query(x, y, range) {
-            if self.energy_particles[idx].alive {
-                total += self.energy_particles[idx].energy;
+            let p = &self.energy_particles[idx];
+            if p.alive {
+                let dx = p.x - x;
+                let dy = p.y - y;
+                let dist_sq = dx * dx + dy * dy;
+                if dist_sq > DIST_MIN_SQ {
+                    total += p.energy / dist_sq;
+                }
             }
         }
         // 生物
         for &idx in &self.creature_grid.query(x, y, range) {
-            if self.creatures[idx].alive {
-                total += self.creatures[idx].energy;
+            let c = &self.creatures[idx];
+            if c.alive {
+                let dx = c.x - x;
+                let dy = c.y - y;
+                let dist_sq = dx * dx + dy * dy;
+                if dist_sq > DIST_MIN_SQ {
+                    total += c.energy / dist_sq;
+                }
             }
         }
         total
@@ -731,6 +744,13 @@ impl World {
         // 眼睛视锥内能量累加（粒子+生物，用于能量密度通道）
         let mut eye_group_energy = [0.0_f64; 2];
         let mut eye_particle_energy = [0.0_f64; 2];
+        // 同族相对速度
+        let mut eye_ally_rel_vx = [0.0; 2];
+        let mut eye_ally_rel_vy = [0.0; 2];
+
+        // 自身速度向量
+        let self_vx = self.creatures[creature_idx].current_speed * heading.cos();
+        let self_vy = self.creatures[creature_idx].current_speed * heading.sin();
 
         // 临时取出缓冲区
         let mut creature_buf = std::mem::take(&mut self.creature_query_buf);
@@ -809,6 +829,13 @@ impl World {
                         if is_ally {
                             if eye_dist < eye_ally[eye_i] {
                                 eye_ally[eye_i] = eye_dist;
+                                // 计算相对速度
+                                let other_vx = other.current_speed * other.heading.cos();
+                                let other_vy = other.current_speed * other.heading.sin();
+                                eye_ally_rel_vx[eye_i] =
+                                    (other_vx - self_vx).clamp(-25.0, 25.0) / 25.0;
+                                eye_ally_rel_vy[eye_i] =
+                                    (other_vy - self_vy).clamp(-25.0, 25.0) / 25.0;
                             }
                         } else if eye_dist < eye_enemy[eye_i] {
                             eye_enemy[eye_i] = eye_dist;
@@ -864,6 +891,12 @@ impl World {
             ((eye_particle_energy[0] + eye_group_energy[0]) / config.energy_denominator).min(1.0);
         self.creatures[creature_idx].perception_cache[7] =
             ((eye_particle_energy[1] + eye_group_energy[1]) / config.energy_denominator).min(1.0);
+
+        // 同族相对速度向量差
+        self.creatures[creature_idx].perception_cache[10] = eye_ally_rel_vx[0];
+        self.creatures[creature_idx].perception_cache[11] = eye_ally_rel_vy[0];
+        self.creatures[creature_idx].perception_cache[12] = eye_ally_rel_vx[1];
+        self.creatures[creature_idx].perception_cache[13] = eye_ally_rel_vy[1];
     }
 
     // ========== 动作系统（6输出） ==========

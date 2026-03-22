@@ -35,8 +35,8 @@ pub struct Creature {
     // 当前速度（每帧更新，用于战力计算）
     pub current_speed: f64,
 
-    // 感知结果缓存（10维：左眼4 + 右眼4 + 自身2）
-    pub perception_cache: [f64; 10],
+    // 感知结果缓存（14维：左眼5 + 右眼5 + 自身2 + 左右眼同族相对速度2x2）
+    pub perception_cache: [f64; 14],
 
     // 上一帧 SNN 输出缓存
     pub last_outputs: [f64; 6],
@@ -83,7 +83,7 @@ impl Creature {
             genome_hash,
             clan_hash: genome_hash, // 默认用自身 hash，繁殖时由调用者覆盖
             current_speed: 0.0,
-            perception_cache: [0.0; 10],
+            perception_cache: [0.0; 14],
             last_outputs: [0.0; 6],
             eye_cooldown_timer: 0.0,
             mouth_cooldown_timer: 0.0,
