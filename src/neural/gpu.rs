@@ -285,7 +285,7 @@ mod inner {
 
             let total_nodes = MAX_CREATURES * MAX_NODES;
             let total_conns = MAX_CREATURES * MAX_CONNS;
-            let total_outputs = MAX_CREATURES * 6;
+            let total_outputs = MAX_CREATURES * 7;
 
             let nodes_size = (total_nodes * std::mem::size_of::<GpuNode>()) as u64;
             let conns_size = (total_conns * std::mem::size_of::<GpuConnection>()) as u64;
@@ -468,7 +468,7 @@ mod inner {
         }
 
         /// 上传感知输入（设置输入节点的 membrane 和 fired）
-        pub fn upload_inputs(&mut self, slot: usize, perception: &[f64; 14]) {
+        pub fn upload_inputs(&mut self, slot: usize, perception: &[f64; 13]) {
             if slot >= MAX_CREATURES {
                 return;
             }
@@ -550,7 +550,7 @@ mod inner {
 
         /// 读回输出（阻塞）
         pub fn readback_outputs(&self) -> Vec<f32> {
-            let output_count = MAX_CREATURES * 6;
+            let output_count = MAX_CREATURES * 7;
             let output_size = (output_count * std::mem::size_of::<f32>()) as u64;
 
             let mut encoder = self
@@ -583,9 +583,9 @@ mod inner {
         slots: SlotAllocator,
         last_tick_ns: u64,
         /// 首次 tick（注入输入时）的直读输出值
-        first_outputs: FxHashMap<u64, [f32; 6]>,
+        first_outputs: FxHashMap<u64, [f32; 7]>,
         /// 脉冲发放计数（每帧重置）
-        spike_counts: FxHashMap<u64, [u32; 6]>,
+        spike_counts: FxHashMap<u64, [u32; 7]>,
         /// 帧内 tick 计数
         tick_count: u32,
         /// 输出模式缓存：creature_id -> output_modes (true=直读)
@@ -619,7 +619,7 @@ mod inner {
                     .map(|n| n.threshold == 0.0)
                     .collect();
                 self.output_modes_cache.insert(id, output_modes);
-                self.spike_counts.insert(id, [0; 6]);
+                self.spike_counts.insert(id, [0; 7]);
             }
         }
 
@@ -636,7 +636,7 @@ mod inner {
         fn inject_inputs(&mut self, inputs: &[CreatureInput]) {
             self.tick_count = 0;
             for counts in self.spike_counts.values_mut() {
-                *counts = [0; 6];
+                *counts = [0; 7];
             }
             for input in inputs {
                 if let Some(slot) = self.slots.get_slot(input.creature_id) {
@@ -656,8 +656,8 @@ mod inner {
             let inject = self.tick_count == 1; // 假设inject_inputs后第一个tick是注入的
 
             for (&creature_id, &slot) in self.slots.active_entries() {
-                let base = slot * 6;
-                if base + 6 > raw.len() {
+                let base = slot * 7;
+                if base + 7 > raw.len() {
                     continue;
                 }
 
@@ -668,6 +668,7 @@ mod inner {
                     raw[base + 3],
                     raw[base + 4],
                     raw[base + 5],
+                    raw[base + 6],
                 ];
 
                 // 首次 tick：保存直读输出值
@@ -700,16 +701,16 @@ mod inner {
                     .first_outputs
                     .get(&creature_id)
                     .copied()
-                    .unwrap_or([0.0; 6]);
-                let mut final_outputs = [0.0f64; 6];
-                for i in 0..6 {
+                    .unwrap_or([0.0; 7]);
+                let mut final_outputs = [0.0f64; 7];
+                for i in 0..7 {
                     final_outputs[i] = first[i] as f64;
                 }
 
                 if let Some(modes) = self.output_modes_cache.get(&creature_id) {
                     if let Some(counts) = self.spike_counts.get(&creature_id) {
                         if self.tick_count > 0 {
-                            for (j, &direct_read) in modes.iter().enumerate().take(6) {
+                            for (j, &direct_read) in modes.iter().enumerate().take(7) {
                                 if !direct_read {
                                     let rate = counts[j] as f64 / self.tick_count as f64;
                                     final_outputs[j] = rate * 2.0 - 1.0;

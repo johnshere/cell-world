@@ -3,6 +3,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::genome::{Genome, NodeType};
 
 /// SNN 节点状态
+#[derive(Clone)]
 struct SnnNode {
     /// 膜电位（有状态，不清零）
     membrane: f64,
@@ -19,6 +20,7 @@ struct SnnNode {
 }
 
 /// 脉冲神经网络（从基因组构建，支持回环连接）
+#[derive(Clone)]
 pub struct SpikingNetwork {
     nodes: FxHashMap<usize, SnnNode>,
     /// 拓扑排序后的节点顺序
@@ -37,6 +39,22 @@ pub struct SpikingNetwork {
     recurrent_inputs: FxHashMap<usize, Vec<(usize, f64)>>,
     /// 回环源节点的上一 tick 状态: node_id -> (membrane, fired)
     prev_state: FxHashMap<usize, (f64, bool)>,
+}
+
+impl Default for SpikingNetwork {
+    fn default() -> Self {
+        Self {
+            nodes: FxHashMap::default(),
+            eval_order: Vec::new(),
+            input_ids: Vec::new(),
+            input_ids_set: FxHashSet::default(),
+            output_ids: Vec::new(),
+            output_modes: Vec::new(),
+            forward_inputs: FxHashMap::default(),
+            recurrent_inputs: FxHashMap::default(),
+            prev_state: FxHashMap::default(),
+        }
+    }
 }
 
 impl SpikingNetwork {
@@ -212,8 +230,8 @@ impl SpikingNetwork {
     /// 执行多 tick：首次注入输入，后续 tick_free
     /// 直读输出取首次 tick 值，脉冲输出取发放率
     pub fn tick_multi(&mut self, inputs: &[f64], ticks: usize) -> Vec<f64> {
-        let n = self.output_ids.len().min(6);
-        let mut spike_counts = [0u32; 6];
+        let n = self.output_ids.len().min(7);
+        let mut spike_counts = [0u32; 7];
 
         // 第 1 tick: 注入输入（直读输出在此刻最有意义）
         let first_outputs = self.tick(inputs);

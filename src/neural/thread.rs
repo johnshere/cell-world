@@ -24,13 +24,13 @@ pub trait TickExecutor: Send {
 pub struct CpuExecutor {
     networks: FxHashMap<u64, SpikingNetwork>,
     /// 待注入的输入（注入后清空）
-    pending_inputs: FxHashMap<u64, [f64; 14]>,
-    current_outputs: FxHashMap<u64, [f64; 6]>,
+    pending_inputs: FxHashMap<u64, [f64; 13]>,
+    current_outputs: FxHashMap<u64, [f64; 7]>,
     /// 首次 tick（注入输入时）的直读输出值
-    first_outputs: FxHashMap<u64, [f64; 6]>,
+    first_outputs: FxHashMap<u64, [f64; 7]>,
     compute_times: FxHashMap<u64, u64>,
     /// 脉冲发放计数（每帧重置）
-    spike_counts: FxHashMap<u64, [u32; 6]>,
+    spike_counts: FxHashMap<u64, [u32; 7]>,
     /// 帧内 tick 计数
     tick_count: u32,
     /// 输出模式缓存：creature_id -> output_modes
@@ -57,9 +57,9 @@ impl TickExecutor for CpuExecutor {
         let network = SpikingNetwork::from_genome(genome);
         let modes = network.output_modes().to_vec();
         self.networks.insert(id, network);
-        self.current_outputs.insert(id, [0.0; 6]);
+        self.current_outputs.insert(id, [0.0; 7]);
         self.output_modes_cache.insert(id, modes);
-        self.spike_counts.insert(id, [0; 6]);
+        self.spike_counts.insert(id, [0; 7]);
     }
 
     fn unregister(&mut self, id: u64) {
@@ -76,7 +76,7 @@ impl TickExecutor for CpuExecutor {
         self.compute_times.clear();
         self.tick_count = 0;
         for counts in self.spike_counts.values_mut() {
-            *counts = [0; 6];
+            *counts = [0; 7];
         }
         for input in inputs {
             self.pending_inputs
@@ -106,7 +106,7 @@ impl TickExecutor for CpuExecutor {
             if let Some(modes) = self.output_modes_cache.get(&id) {
                 if let Some(counts) = self.spike_counts.get_mut(&id) {
                     for (j, (&v, &direct_read)) in
-                        outputs.iter().zip(modes.iter()).enumerate().take(6)
+                        outputs.iter().zip(modes.iter()).enumerate().take(7)
                     {
                         if !direct_read && v > 0.5 {
                             counts[j] += 1;
@@ -115,9 +115,9 @@ impl TickExecutor for CpuExecutor {
                 }
             }
 
-            if outputs.len() >= 6 {
-                let mut arr = [0.0; 6];
-                arr.copy_from_slice(&outputs[..6]);
+            if outputs.len() >= 7 {
+                let mut arr = [0.0; 7];
+                arr.copy_from_slice(&outputs[..7]);
                 // 注入帧的首次 tick：保存直读输出值
                 if inject {
                     self.first_outputs.insert(id, arr);
@@ -136,12 +136,12 @@ impl TickExecutor for CpuExecutor {
             .iter()
             .map(|(&id, &_outputs)| {
                 // 直读输出取首次注入时的值，脉冲输出取发放率
-                let first = self.first_outputs.get(&id).copied().unwrap_or([0.0; 6]);
+                let first = self.first_outputs.get(&id).copied().unwrap_or([0.0; 7]);
                 let mut final_outputs = first;
                 if let Some(modes) = self.output_modes_cache.get(&id) {
                     if let Some(counts) = self.spike_counts.get(&id) {
                         if self.tick_count > 0 {
-                            for (j, &direct_read) in modes.iter().enumerate().take(6) {
+                            for (j, &direct_read) in modes.iter().enumerate().take(7) {
                                 if !direct_read {
                                     let rate =
                                         counts[j] as f64 / self.tick_count as f64;

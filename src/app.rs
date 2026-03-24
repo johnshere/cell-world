@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::render::{
     format_dhms, PanelAction, RenderContext, Selection, StatsPanel, VisibleWorldBounds, WorldCanvas,
 };
+use crate::snapshot::WorldSnapshot;
 use crate::store::{CreatureTemplate, Store};
 use crate::world::World;
 use eframe::egui;
@@ -44,6 +45,10 @@ pub struct CellWorldApp {
     last_render_ctx_update: std::time::Instant,
     // 帧级性能统计
     frame_perf: FramePerfStats,
+    // 快照恢复：启动时如果存在存档，暂存在此
+    pending_restore: Option<WorldSnapshot>,
+    // 保存确认弹框
+    snapshot_confirm_save: bool,
 }
 
 impl CellWorldApp {
@@ -81,6 +86,9 @@ impl CellWorldApp {
         let initial_speed = config.initial_speed;
         let initial_scale = config.initial_scale;
 
+        // 尝试加载存档
+        let pending_restore = WorldSnapshot::load();
+
         Self {
             world,
             config,
@@ -100,6 +108,8 @@ impl CellWorldApp {
             render_ctx_cache: None,
             last_render_ctx_update: now,
             frame_perf: FramePerfStats::default(),
+            pending_restore,
+            snapshot_confirm_save: false,
         }
     }
 }
@@ -128,8 +138,8 @@ impl CellWorldApp {
                 .open(log_path)
             {
                 let _ = writeln!(file, "# Cell World 运行日志\n");
-                let _ = writeln!(file, "| 时间 | 生物 | 粒子 | 痕迹 | 总能 | 代 | 种群 | 寿命(均/中/长/短/死) | 行为(移动/吸收/咬/喂/繁殖) |");
-                let _ = writeln!(file, "|------|------|------|------|------|----|------|----------------------|----------------------------|");
+                let _ = writeln!(file, "| 时间 | 生物 | 粒子 | 痕迹 | 总能 | 代 | 种群 | 寿命(均/中/长/短/死) | 行为(移动/吸收/咬/繁殖) |");
+                let _ = writeln!(file, "|------|------|------|------|------|----|------|----------------------|------------------------|");
             }
             // 性能分析日志
             if let Ok(mut file) = OpenOptions::new()
@@ -151,7 +161,7 @@ impl CellWorldApp {
             let death = &stats.death_age_stats;
             let _ = writeln!(
                 file,
-                "| {:.0} | {} | {} | {} | {:.0} | {} | {} | {:.1}/{:.1}/{:.1}/{:.1}/{} | {}/{}/{}/{}/{} |",
+                "| {:.0} | {} | {} | {} | {:.0} | {} | {} | {:.1}/{:.1}/{:.1}/{:.1}/{} | {}/{}/{}/{} |",
                 stats.time,
                 stats.creature_count,
                 stats.energy_particle_count,
@@ -160,7 +170,7 @@ impl CellWorldApp {
                 stats.max_generation,
                 stats.species_count,
                 death.avg, death.median, death.max, death.min, death.count,
-                acts[0], acts[1], acts[2], acts[3], acts[4]
+                acts[0], acts[1], acts[2], acts[3]
             );
         }
 
@@ -264,32 +274,54 @@ impl CellWorldApp {
 /// 配置项辅助：f64 拖拽值
 fn config_drag_f64(
     ui: &mut egui::Ui,
-    label: &str,
+    title: &str,
+    desc: &str,
     value: &mut f64,
     speed: f64,
     range: std::ops::RangeInclusive<f64>,
 ) -> bool {
-    ui.horizontal(|ui| {
-        ui.label(label);
-        ui.add(egui::DragValue::new(value).speed(speed).range(range))
-            .changed()
-    })
-    .inner
+    let changed = ui
+        .horizontal(|ui| {
+            ui.label(title);
+            let r = ui
+                .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add(egui::DragValue::new(value).speed(speed).range(range))
+                        .changed()
+                })
+                .inner;
+            r
+        })
+        .inner;
+    if !desc.is_empty() {
+        ui.label(egui::RichText::new(desc).color(egui::Color32::from_gray(110)).size(10.0));
+    }
+    changed
 }
 
 /// 配置项辅助：usize 拖拽值
 fn config_drag_usize(
     ui: &mut egui::Ui,
-    label: &str,
+    title: &str,
+    desc: &str,
     value: &mut usize,
     range: std::ops::RangeInclusive<usize>,
 ) -> bool {
-    ui.horizontal(|ui| {
-        ui.label(label);
-        ui.add(egui::DragValue::new(value).speed(0.1).range(range))
-            .changed()
-    })
-    .inner
+    let changed = ui
+        .horizontal(|ui| {
+            ui.label(title);
+            let r = ui
+                .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add(egui::DragValue::new(value).speed(0.1).range(range))
+                        .changed()
+                })
+                .inner;
+            r
+        })
+        .inner;
+    if !desc.is_empty() {
+        ui.label(egui::RichText::new(desc).color(egui::Color32::from_gray(110)).size(10.0));
+    }
+    changed
 }
 
 impl CellWorldApp {
@@ -302,130 +334,133 @@ impl CellWorldApp {
             let c = &mut self.config;
             let mut changed = false;
 
-            ui.collapsing("代谢", |ui| {
-                changed |=
-                    config_drag_f64(ui, "基础代谢", &mut c.base_metabolism, 0.001, 0.01..=0.5);
+            ui.collapsing("进化与竞争", |ui| {
                 changed |= config_drag_f64(
-                    ui,
-                    "年龄代谢倍率",
-                    &mut c.age_metabolism_factor,
-                    0.001,
-                    0.0..=0.2,
+                    ui, "变异率", "所有NEAT变异共用此概率",
+                    &mut c.mutation_rate, 0.01, 0.01..=0.5,
                 );
-                changed |= config_drag_f64(ui, "移动消耗", &mut c.move_cost, 0.0001, 0.0001..=0.01);
+                changed |= config_drag_usize(
+                    ui, "初始连接min", "新生物最少神经连接数",
+                    &mut c.initial_connections_min, 1..=20,
+                );
+                changed |= config_drag_usize(
+                    ui, "初始连接max", "新生物最多神经连接数",
+                    &mut c.initial_connections_max, 2..=30,
+                );
                 changed |= config_drag_f64(
-                    ui,
-                    "体温逸散系数",
-                    &mut c.heat_dissipation_coefficient,
-                    0.001,
-                    0.0..=1.0,
+                    ui, "种族相似阈值", "基因相似度>=此值视为同族",
+                    &mut c.species_similarity_threshold, 0.01, 0.5..=1.0,
                 );
-                changed |= config_drag_f64(ui, "喂食效率", &mut c.feed_efficiency, 0.01, 0.1..=1.0);
+                changed |= config_drag_f64(
+                    ui, "繁殖冷却", "两次繁殖间最短间隔(秒)",
+                    &mut c.reproduce_cooldown, 0.5, 1.0..=60.0,
+                );
+                changed |= config_drag_f64(
+                    ui, "速度战力权重", "移速对战力的加成系数",
+                    &mut c.combat_speed_weight, 0.01, 0.0..=2.0,
+                );
+                changed |= config_drag_f64(
+                    ui, "同族援助权重", "附近同族对战力的加成，越大群体越强",
+                    &mut c.combat_ally_weight, 0.1, 0.0..=10.0,
+                );
+                changed |= config_drag_f64(
+                    ui, "咬转移率", "咬合时能量转移比例",
+                    &mut c.bite_transfer_rate, 0.01, 0.01..=1.0,
+                );
+            });
+
+            ui.collapsing("环境压力", |ui| {
+                changed |= config_drag_f64(
+                    ui, "散热系数", "体温逸散=此值*周长*heat_factor*dt",
+                    &mut c.heat_dissipation_coefficient, 0.005, 0.0..=1.0,
+                );
+                changed |= config_drag_f64(
+                    ui, "能量分母", "nearby_energy归一化分母，越大需更多聚集才降温",
+                    &mut c.energy_denominator, 50.0, 100.0..=5000.0,
+                );
+                changed |= config_drag_f64(
+                    ui, "散热下限", "聚集区散热最低比例(0~1)",
+                    &mut c.heat_floor, 0.01, 0.0..=1.0,
+                );
+                changed |= config_drag_f64(
+                    ui, "基础代谢", "每秒固定能量消耗",
+                    &mut c.base_metabolism, 0.001, 0.01..=0.5,
+                );
+                changed |= config_drag_f64(
+                    ui, "年龄代谢倍率", "age*此值=额外代谢倍率",
+                    &mut c.age_metabolism_factor, 0.001, 0.0..=0.2,
+                );
+                changed |= config_drag_f64(
+                    ui, "移动消耗", "每单位距离消耗*速度",
+                    &mut c.move_cost, 0.0001, 0.0001..=0.01,
+                );
+            });
+
+            ui.collapsing("感知系统", |ui| {
+                changed |= config_drag_f64(
+                    ui, "视觉半径", "眼睛最大探测距离(px)",
+                    &mut c.vision_range, 1.0, 50.0..=500.0,
+                );
+                changed |= config_drag_f64(
+                    ui, "扫描速度", "眼睛扫描速度(度/秒)",
+                    &mut c.eye_scan_speed, 10.0, 50.0..=1000.0,
+                );
+                changed |= config_drag_f64(
+                    ui, "接触距离", "嘴巴/接触判定距离(px)",
+                    &mut c.contact_range, 0.5, 5.0..=50.0,
+                );
+                changed |= config_drag_f64(
+                    ui, "嘴巴冷却", "咬合动作冷却时间(秒)",
+                    &mut c.mouth_cooldown, 0.01, 0.1..=5.0,
+                );
+            });
+
+            ui.collapsing("生物基础", |ui| {
+                changed |= config_drag_f64(
+                    ui, "初始能量", "新生成生物的能量",
+                    &mut c.initial_energy, 1.0, 10.0..=500.0,
+                );
+                changed |= config_drag_usize(
+                    ui, "最小生物数", "低于此数自动补充",
+                    &mut c.min_creatures, 5..=200,
+                );
                 changed |= ui
                     .horizontal(|ui| {
                         ui.label("算力系数");
-                        ui.add(
-                            egui::DragValue::new(&mut c.compute_energy_factor)
-                                .speed(0.1)
-                                .range(0.0..=200.0)
-                                .max_decimals(1),
-                        )
-                        .changed()
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add(
+                                egui::DragValue::new(&mut c.compute_energy_factor)
+                                    .speed(0.1)
+                                    .range(0.0..=200.0)
+                                    .max_decimals(1),
+                            )
+                            .changed()
+                        })
+                        .inner
                     })
                     .inner;
-            });
-
-            ui.collapsing("生物", |ui| {
-                changed |=
-                    config_drag_f64(ui, "初始能量", &mut c.initial_energy, 1.0, 10.0..=200.0);
-                changed |= config_drag_usize(ui, "最小生物数", &mut c.min_creatures, 5..=100);
-            });
-
-            ui.collapsing("感知", |ui| {
-                changed |= config_drag_f64(ui, "视觉半径", &mut c.vision_range, 1.0, 50.0..=500.0);
-                changed |= config_drag_f64(ui, "接触距离", &mut c.contact_range, 0.5, 5.0..=50.0);
-            });
-
-            ui.collapsing("进化", |ui| {
-                changed |= config_drag_f64(ui, "变异率", &mut c.mutation_rate, 0.01, 0.01..=0.5);
-                changed |=
-                    config_drag_usize(ui, "初始连接数min", &mut c.initial_connections_min, 1..=20);
-                changed |=
-                    config_drag_usize(ui, "初始连接数max", &mut c.initial_connections_max, 2..=30);
-                changed |= config_drag_f64(
-                    ui,
-                    "种族相似度阈值",
-                    &mut c.species_similarity_threshold,
-                    0.01,
-                    0.5..=1.0,
-                );
-                changed |= config_drag_f64(
-                    ui,
-                    "繁殖冷却(秒)",
-                    &mut c.reproduce_cooldown,
-                    0.5,
-                    1.0..=60.0,
-                );
-            });
-
-            ui.collapsing("战力", |ui| {
-                changed |=
-                    config_drag_f64(ui, "速度权重", &mut c.combat_speed_weight, 0.01, 0.0..=2.0);
-                changed |= config_drag_f64(
-                    ui,
-                    "同族援助权重",
-                    &mut c.combat_ally_weight,
-                    0.01,
-                    0.0..=2.0,
-                );
-            });
-
-            ui.collapsing("器官系统", |ui| {
-                changed |=
-                    config_drag_f64(ui, "眼睛冷却(秒)", &mut c.eye_cooldown, 0.001, 0.01..=1.0);
-                changed |=
-                    config_drag_f64(ui, "嘴巴冷却(秒)", &mut c.mouth_cooldown, 0.01, 0.1..=5.0);
-                changed |=
-                    config_drag_f64(ui, "咬转移率", &mut c.bite_transfer_rate, 0.01, 0.01..=0.8);
-            });
-
-            ui.collapsing("散热", |ui| {
-                changed |= config_drag_f64(
-                    ui,
-                    "能量分母",
-                    &mut c.energy_denominator,
-                    10.0,
-                    100.0..=5000.0,
-                );
-                changed |= config_drag_f64(ui, "散热下限", &mut c.heat_floor, 0.01, 0.0..=1.0);
+                ui.label(egui::RichText::new("CPU算力转能量，0=禁用").color(egui::Color32::from_gray(110)).size(10.0));
             });
 
             ui.collapsing("痕迹点", |ui| {
-                changed |=
-                    config_drag_f64(ui, "衰减率(/秒)", &mut c.trail_decay_rate, 0.01, 0.01..=0.5);
                 changed |= config_drag_f64(
-                    ui,
-                    "抑制半径(px)",
-                    &mut c.trail_suppress_radius,
-                    1.0,
-                    5.0..=100.0,
+                    ui, "衰减率", "每秒能量衰减比例",
+                    &mut c.trail_decay_rate, 0.01, 0.01..=0.5,
                 );
                 changed |= config_drag_f64(
-                    ui,
-                    "生成间隔(秒)",
-                    &mut c.trail_emit_interval,
-                    0.01,
-                    0.05..=2.0,
+                    ui, "抑制半径", "范围内有他人痕迹则不产生(px)",
+                    &mut c.trail_suppress_radius, 1.0, 5.0..=100.0,
+                );
+                changed |= config_drag_f64(
+                    ui, "生成间隔", "每个生物独立计时(秒)",
+                    &mut c.trail_emit_interval, 0.01, 0.05..=2.0,
                 );
             });
 
             ui.collapsing("其他", |ui| {
                 changed |= config_drag_f64(
-                    ui,
-                    "优势种最低年龄",
-                    &mut c.dominant_min_age,
-                    10.0,
-                    100.0..=2000.0,
+                    ui, "优势种最低年龄", "种群最老成员须达此年龄",
+                    &mut c.dominant_min_age, 10.0, 100.0..=2000.0,
                 );
             });
 
@@ -578,38 +613,26 @@ impl CellWorldApp {
 
             ui.collapsing("基础参数", |ui| {
                 changed |=
-                    config_drag_f64(ui, "火山半径", &mut c.volcano_radius, 1.0, 100.0..=5000.0);
-                changed |= config_drag_usize(ui, "火山粒子数", &mut c.volcano_count, 10..=2000);
-                changed |= config_drag_usize(ui, "陨石粒子数", &mut c.meteorite_count, 5..=1000);
+                    config_drag_f64(ui, "火山半径", "喷发散布半径(px)", &mut c.volcano_radius, 1.0, 100.0..=5000.0);
+                changed |= config_drag_usize(ui, "火山粒子数", "每次喷发粒子数", &mut c.volcano_count, 10..=2000);
+                changed |= config_drag_usize(ui, "陨石粒子数", "每颗陨石粒子数", &mut c.meteorite_count, 5..=1000);
                 changed |=
-                    config_drag_f64(ui, "陨石长度", &mut c.meteorite_length, 1.0, 50.0..=500.0);
+                    config_drag_f64(ui, "陨石长度", "陨石散布线段长度(px)", &mut c.meteorite_length, 1.0, 50.0..=500.0);
                 changed |= config_drag_f64(
-                    ui,
-                    "火山衰减率",
-                    &mut c.volcano_decay_rate,
-                    0.001,
-                    0.001..=0.1,
+                    ui, "火山衰减率", "粒子能量每秒衰减比例",
+                    &mut c.volcano_decay_rate, 0.001, 0.001..=0.1,
                 );
                 changed |= config_drag_f64(
-                    ui,
-                    "陨石衰减率",
-                    &mut c.meteorite_decay_rate,
-                    0.001,
-                    0.001..=0.1,
+                    ui, "陨石衰减率", "粒子能量每秒衰减比例",
+                    &mut c.meteorite_decay_rate, 0.001, 0.001..=0.1,
                 );
                 changed |= config_drag_f64(
-                    ui,
-                    "火山杀伤半径",
-                    &mut c.volcano_kill_radius,
-                    0.5,
-                    1.0..=50.0,
+                    ui, "火山杀伤半径", "落地时杀死半径内生物(px)",
+                    &mut c.volcano_kill_radius, 0.5, 1.0..=50.0,
                 );
                 changed |= config_drag_f64(
-                    ui,
-                    "陨石杀伤半径",
-                    &mut c.meteorite_kill_radius,
-                    0.5,
-                    1.0..=50.0,
+                    ui, "陨石杀伤半径", "落地时杀死半径内生物(px)",
+                    &mut c.meteorite_kill_radius, 0.5, 1.0..=50.0,
                 );
             });
 
@@ -816,6 +839,84 @@ impl CellWorldApp {
 
 impl eframe::App for CellWorldApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 启动恢复弹框
+        if self.pending_restore.is_some() {
+            let mut chose_restore = false;
+            let mut chose_new = false;
+            egui::Window::new("发现存档")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label("检测到世界存档，是否恢复？");
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("恢复存档").clicked() {
+                            chose_restore = true;
+                        }
+                        if ui.button("新开始").clicked() {
+                            chose_new = true;
+                        }
+                    });
+                });
+            if chose_restore {
+                if let Some(snapshot) = self.pending_restore.take() {
+                    let mut world = snapshot.into_world(&self.config);
+                    world.dominant_species = self.store.dominant_species().clone();
+                    // 重建 neural bridge
+                    if self.config.neural_backend != "legacy" {
+                        let bridge = crate::neural::thread::spawn_neural_thread(&self.config);
+                        world.set_neural_bridge(bridge);
+                    }
+                    self.world = world;
+                    self.render_ctx_cache = None;
+                }
+            }
+            if chose_new {
+                self.pending_restore = None;
+            }
+            // 有弹框时暂停世界逻辑
+            ctx.request_repaint();
+            return;
+        }
+
+        // 保存确认弹框
+        if self.snapshot_confirm_save {
+            let mut chose_save = false;
+            let mut chose_cancel = false;
+            let has_existing = WorldSnapshot::exists();
+            egui::Window::new("保存存档")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    if has_existing {
+                        ui.label("将覆盖现有存档，确定保存？");
+                    } else {
+                        ui.label("保存当前世界存档？");
+                    }
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("确定").clicked() {
+                            chose_save = true;
+                        }
+                        if ui.button("取消").clicked() {
+                            chose_cancel = true;
+                        }
+                    });
+                });
+            if chose_save {
+                let snapshot = WorldSnapshot::capture(&self.world);
+                if let Err(e) = snapshot.save() {
+                    eprintln!("保存快照失败: {}", e);
+                }
+                self.snapshot_confirm_save = false;
+            }
+            if chose_cancel {
+                self.snapshot_confirm_save = false;
+            }
+        }
+
         // 计算 delta time
         let now = std::time::Instant::now();
         let dt = now.duration_since(self.last_update).as_secs_f64();
@@ -893,12 +994,15 @@ impl eframe::App for CellWorldApp {
                 // 滚动区域：仅包含设置面板
                 if self.panel.settings_open || self.panel.energy_settings_open {
                     egui::ScrollArea::vertical().show(ui, |ui| {
+                        let margin = egui::Margin { right: 6.0, ..Default::default() };
+                        egui::Frame::none().inner_margin(margin).show(ui, |ui| {
                         if self.panel.settings_open {
                             self.render_settings_inline(ui);
                         }
                         if self.panel.energy_settings_open {
                             self.render_energy_settings_inline(ui);
                         }
+                        });
                     });
                 }
             });
@@ -907,6 +1011,11 @@ impl eframe::App for CellWorldApp {
         if (self.speed - old_speed).abs() > f64::EPSILON {
             self.config.initial_speed = self.speed;
             self.config.save();
+        }
+
+        // 处理保存快照
+        if panel_action.save_snapshot {
+            self.snapshot_confirm_save = true;
         }
 
         // 处理添加生物按钮（每次添加5个）
@@ -944,6 +1053,7 @@ impl eframe::App for CellWorldApp {
             if let Selection::Creature(id) = self.selection {
                 if let Some(creature) = self.world.creatures.iter().find(|c| c.id == id && c.alive)
                 {
+                    let saved_name = name.clone();
                     let template = CreatureTemplate {
                         name,
                         genome: creature.genome.clone(),
@@ -959,6 +1069,11 @@ impl eframe::App for CellWorldApp {
                     };
                     if let Err(e) = self.store.save(template) {
                         eprintln!("保存失败: {}", e);
+                    } else {
+                        // 保存成功后，自动选中新模板
+                        if let Some(idx) = self.store.names().iter().position(|n| *n == saved_name) {
+                            self.panel.selected_template = idx + 1; // +1 因为第0项是"随机"
+                        }
                     }
                 }
             }

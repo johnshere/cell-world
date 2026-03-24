@@ -61,7 +61,8 @@ pub struct Config {
     pub species_similarity_threshold: f64,
     /// 体温逸散系数
     pub heat_dissipation_coefficient: f64,
-    /// 喂食效率（固定比例，无体型限制）
+    /// 喂食效率（已废弃，保留兼容旧config）
+    #[serde(default)]
     pub feed_efficiency: f64,
     /// 战力公式：速度权重（越快越强）
     pub combat_speed_weight: f64,
@@ -74,8 +75,11 @@ pub struct Config {
     pub initial_scale: f32,
 
     // === 器官冷却 ===
-    /// 眼睛冷却时间（秒）
+    /// 眼睛冷却时间（秒）— 已废弃，保留兼容旧config
     pub eye_cooldown: f64,
+    /// 眼睛扫描速度（度/秒）
+    #[serde(default = "default_eye_scan_speed")]
+    pub eye_scan_speed: f64,
     /// 嘴巴冷却时间（秒）
     pub mouth_cooldown: f64,
     /// 咬合能量转移率
@@ -138,6 +142,10 @@ pub struct Config {
     /// 异步模式 tick 频率 (ticks/s)
     #[serde(default = "default_neural_tick_rate")]
     pub neural_tick_rate: f64,
+}
+
+fn default_eye_scan_speed() -> f64 {
+    280.0
 }
 
 fn default_snn_ticks_per_frame() -> usize {
@@ -251,7 +259,7 @@ impl Config {
     ) -> f64 {
         let energy_factor = energy / 100.0;
         let speed_factor = 1.0 + self.combat_speed_weight * speed_norm;
-        let ally_norm = (ally_total_energy / 500.0).min(1.0);
+        let ally_norm = (ally_total_energy / 300.0).min(1.0);
         let ally_factor = 1.0 + self.combat_ally_weight * ally_norm;
         energy_factor * speed_factor * ally_factor
     }

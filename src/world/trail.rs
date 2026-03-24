@@ -1,4 +1,9 @@
+#[cfg(feature = "persistence")]
+use serde::{Deserialize, Serialize};
+
 /// 痕迹点（生物移动时留下的能量痕迹）
+#[derive(Clone)]
+#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
 pub struct TrailPoint {
     pub x: f64,
     pub y: f64,

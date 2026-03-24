@@ -1,5 +1,5 @@
 # 初始模拟速度
-initial_speed = 6.0
+initial_speed = 4.0
 # 最小生物数量（低于此值自动补充）
 min_creatures = 50
 # 初始能量
@@ -15,15 +15,15 @@ volcano_y = 0.0
 # 火山喷发间隔（秒）
 volcano_interval = 20.0
 # 火山喷射半径
-volcano_radius = 2000.0
+volcano_radius = 1600.0
 # 每次喷发粒子数
-volcano_count = 140
+volcano_count = 160
 # 火山粒子能量
 volcano_particle_energy = 80.0
 
 # === 陨石 ===
 # 陨石降落间隔（秒）
-meteorite_interval = 25.0
+meteorite_interval = 20.0
 # 每颗陨石粒子数
 meteorite_count = 20
 # 陨石散布线段长度
@@ -39,7 +39,7 @@ volcano_interval_amplitude = 0.4
 # 火山能量正弦周期（秒）
 volcano_energy_cycle = 10000.0
 # 火山能量振幅比（0~0.9）
-volcano_energy_amplitude = 0.8
+volcano_energy_amplitude = 0.6
 # 陨石间隔正弦周期（秒）
 meteorite_interval_cycle = 750.0
 # 陨石间隔振幅比（0~0.9）
@@ -56,34 +56,36 @@ meteorite_decay_rate = 0.005
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 40.0
+volcano_kill_radius = 35.0
 # 陨石落地杀伤半径
 meteorite_kill_radius = 40.0
 
 # === 器官冷却 ===
-# 眼睛冷却时间（秒）
+# 眼睛冷却时间（秒）— 已废弃
 eye_cooldown = 0.075
+# 眼睛扫描速度（度/秒）
+eye_scan_speed = 400.0
 # 嘴巴冷却时间（秒）
-mouth_cooldown = 1.0
+mouth_cooldown = 0.5
 # 咬合能量转移率
-bite_transfer_rate = 0.8
+bite_transfer_rate = 0.9
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
-energy_denominator = 800.0
+energy_denominator = 1100.0
 # 散热下限（指数衰减底板）
-heat_floor = 0.15
+heat_floor = 0.05
 
 # === 代谢 ===
 # 基础代谢率（每秒固定消耗）
-base_metabolism = 0.035
+base_metabolism = 0.025
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
-age_metabolism_factor = 0.03
+age_metabolism_factor = 0.015
 # 移动消耗（每单位距离）
 move_cost = 0.002
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.03
+heat_dissipation_coefficient = 0.04
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -108,10 +110,10 @@ species_similarity_threshold = 0.9
 # 战力公式：速度权重（越快越强）
 combat_speed_weight = 0.3
 # 战力公式：同族援助权重（附近同族越多越强）
-combat_ally_weight = 0.8
+combat_ally_weight = 3.0
 
 # 优势种检测：种群最老成员最低年龄
-dominant_min_age = 350.0
+dominant_min_age = 200.0
 
 # === 痕迹点 ===
 # 痕迹点能量衰减率（/秒）

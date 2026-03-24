@@ -162,13 +162,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 output_val = 0.0;
             }
         }
-        // 输出 buffer：每个生物最多6个输出
-        // 需要知道这是第几个输出节点（简化：用 node_local - input_count 作为近似）
-        // 但这不完全正确，所以我们直接用 node_local 作为输出索引
-        // 实际上输出节点的局部索引 = node_local - meta.input_count (如果隐藏层为0的初始情况)
+        // 输出 buffer：每个生物最多7个输出
         let output_idx = node_local - creature_meta_data.input_count;
-        if output_idx < 6u {
-            outputs[creature_slot * 6u + output_idx] = output_val;
+        if output_idx < 7u {
+            outputs[creature_slot * 7u + output_idx] = output_val;
         }
     }
 }

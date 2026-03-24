@@ -2,6 +2,7 @@ mod app;
 mod config;
 mod neural;
 mod render;
+mod snapshot;
 mod store;
 mod world;
 

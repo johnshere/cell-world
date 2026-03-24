@@ -1,7 +1,14 @@
+use rand::Rng;
+
+#[cfg(feature = "persistence")]
+use serde::{Deserialize, Serialize};
+
 use crate::neural::Genome;
 use crate::neural::SpikingNetwork;
 
 /// 生物
+#[derive(Clone)]
+#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
 pub struct Creature {
     // 唯一标识
     pub id: u64,
@@ -20,6 +27,7 @@ pub struct Creature {
 
     // 遗传
     pub genome: Genome,
+    #[cfg_attr(feature = "persistence", serde(skip))]
     pub brain: SpikingNetwork,
     pub generation: usize,
 
@@ -35,14 +43,17 @@ pub struct Creature {
     // 当前速度（每帧更新，用于战力计算）
     pub current_speed: f64,
 
-    // 感知结果缓存（14维：左眼5 + 右眼5 + 自身2 + 左右眼同族相对速度2x2）
-    pub perception_cache: [f64; 14],
+    // 感知结果缓存（13维：左眼6 + 右眼6 + 自身1）
+    pub perception_cache: [f64; 13],
 
     // 上一帧 SNN 输出缓存
-    pub last_outputs: [f64; 6],
+    pub last_outputs: [f64; 7],
 
     // 器官冷却计时器（<=0 可触发）
-    pub eye_cooldown_timer: f64,
+    pub eye_cooldown_timer: f64, // 已废弃，保留兼容
+
+    // 扫描眼偏移量（弧度，[0]=左眼，[1]=右眼，从0到total_fov循环）
+    pub eye_scan_offset: [f64; 2],
     pub mouth_cooldown_timer: f64,
 
     // 痕迹生成计时器（<=0 可生成）
@@ -67,6 +78,7 @@ impl Creature {
     ) -> Self {
         let brain = SpikingNetwork::from_genome(&genome);
         let genome_hash = genome.hash();
+        let heading = rand::thread_rng().gen_range(0.0..std::f64::consts::TAU);
 
         Self {
             id,
@@ -75,7 +87,7 @@ impl Creature {
             energy,
             age: 0.0,
             alive: true,
-            heading: 0.0,
+            heading,
             genome,
             brain,
             generation,
@@ -83,9 +95,10 @@ impl Creature {
             genome_hash,
             clan_hash: genome_hash, // 默认用自身 hash，繁殖时由调用者覆盖
             current_speed: 0.0,
-            perception_cache: [0.0; 14],
-            last_outputs: [0.0; 6],
+            perception_cache: [0.0; 13],
+            last_outputs: [0.0; 7],
             eye_cooldown_timer: 0.0,
+            eye_scan_offset: [0.0; 2],
             mouth_cooldown_timer: 0.0,
             trail_emit_timer: 0.0,
             reproduce_cooldown_timer: 0.0,

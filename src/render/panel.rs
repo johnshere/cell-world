@@ -15,6 +15,7 @@ pub struct PanelAction {
     pub save_selected: Option<String>,
     pub delete_template: Option<String>,
     pub clear_dominant: bool,
+    pub save_snapshot: bool,
 }
 
 /// 统计面板
@@ -22,7 +23,7 @@ pub struct StatsPanel {
     update_interval: f64,
     last_update: Instant,
     cached_stats: CachedStats,
-    selected_template: usize,
+    pub selected_template: usize,
     save_dialog_open: bool,
     save_name: String,
     pub settings_open: bool,
@@ -50,8 +51,8 @@ pub struct CachedStats {
     pub volcano_countdown: f64,
     pub max_generation: usize,
     pub avg_energy: f64,
-    // 行为触发统计（5事件：移动/吸收/咬/喂/繁殖）
-    pub action_counts: [usize; 5],
+    // 行为触发统计（4事件：移动/吸收/咬/繁殖）
+    pub action_counts: [usize; 4],
     pub death_age_stats: DeathAgeStats,
     pub species_count: usize,
     pub top_species: Vec<RankedEntry>,
@@ -172,6 +173,14 @@ impl StatsPanel {
         ui.horizontal(|ui| {
             ui.heading("Cell World");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .button("💾")
+                    .on_hover_text("保存世界快照")
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    action.save_snapshot = true;
+                }
                 if ui
                     .button("⚙")
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -335,12 +344,11 @@ impl StatsPanel {
         };
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
-                "行为: 移动:{}│吸收:{}│咬:{}│喂:{}│繁殖:{}",
+                "行为: 移动:{}│吸收:{}│咬:{}│繁殖:{}",
                 format_count(acts[0]),
                 format_count(acts[1]),
                 format_count(acts[2]),
-                format_count(acts[3]),
-                format_count(acts[4])
+                format_count(acts[3])
             ));
         });
 
@@ -471,8 +479,9 @@ impl StatsPanel {
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.label(format!(
-                            "冷却: 眼:{:.2}s 嘴:{:.1}s",
-                            creature.eye_cooldown_timer.max(0.0),
+                            "扫描: L:{:.0}° R:{:.0}° 嘴:{:.1}s",
+                            creature.eye_scan_offset[0].to_degrees(),
+                            creature.eye_scan_offset[1].to_degrees(),
                             creature.mouth_cooldown_timer.max(0.0),
                         ));
                     });

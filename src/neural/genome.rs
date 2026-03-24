@@ -59,19 +59,20 @@ pub struct Genome {
 }
 
 impl Genome {
-    /// 输入维度 = 10
-    /// 左眼 [0..3]: 食物接近度, 同族接近度, 异族接近度, 热感温度
-    /// 右眼 [4..7]: 食物接近度, 同族接近度, 异族接近度, 热感温度
-    /// 自身 [8..9]: 能量, 当前环境温度
-    pub const INPUT_SIZE: usize = 14;
-    /// 输出维度（固定6个）
+    /// 输入维度 = 13
+    /// 左眼 [0..5]: 扫描角归一化, 目标接近度, 目标能量, 实体类型(0/0.33/0.67/1.0), 是否同族, 能量密度
+    /// 右眼 [6..11]: 扫描角归一化, 目标接近度, 目标能量, 实体类型, 是否同族, 能量密度
+    /// 自身 [12]: 能量(/2000)
+    pub const INPUT_SIZE: usize = 13;
+    /// 输出维度（固定7个）
     /// [0] 转向角  tanh(-1~1)
     /// [1] 速度    tanh(-1~1) → abs后映射
-    /// [2] 嘴      tanh(-1~1)  负=咬, 正=喂, 接触食物自动吸收
+    /// [2] 嘴      tanh(-1~1)  负=咬, 接触食物自动吸收
     /// [3] 繁殖    tanh(-1~1)  >0.2时触发
     /// [4] 繁殖阈值 sigmoid(0~1) → 映射到 20~200 能量
     /// [5] 子代能量比例 sigmoid(0~1) → 映射到 0.1~0.5
-    pub const OUTPUT_SIZE: usize = 6;
+    /// [6] 痕迹强度 正半轴(0~1) → 映射到 0~0.3 (叠加于移动消耗的额外能量投放)
+    pub const OUTPUT_SIZE: usize = 7;
 
     /// 创建最小基因组（只有输入输出，无隐藏层）
     pub fn random_minimal(min_connections: usize, max_connections: usize) -> Self {
@@ -90,24 +91,10 @@ impl Genome {
             });
         }
 
-        // 创建输出节点
-        // 转向(0)/速度(1)/阈值(4)/比例(5) → threshold=0 直读
-        // 嘴(2)/繁殖(3) → threshold>0 脉冲
+        // 创建输出节点（全部直读模式，冷却由 execute_actions 控制）
         for i in 0..Self::OUTPUT_SIZE {
             let output_id = Self::INPUT_SIZE + i;
-            let (decay, threshold, refractory) = match i {
-                2 => (
-                    rng.gen_range(0.5..0.9),
-                    rng.gen_range(0.3..0.8),
-                    rng.gen_range(1..=2),
-                ),
-                3 => (
-                    rng.gen_range(0.5..0.9),
-                    rng.gen_range(0.3..0.8),
-                    rng.gen_range(0..=2),
-                ),
-                _ => (0.0, 0.0, 0),
-            };
+            let (decay, threshold, refractory) = (0.0, 0.0, 0);
             nodes.push(NodeGene {
                 id: output_id,
                 node_type: NodeType::Output,

@@ -1,11 +1,17 @@
+#[cfg(feature = "persistence")]
+use serde::{Deserialize, Serialize};
+
 /// 粒子来源
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
 pub enum ParticleSource {
     Volcano,
     Meteorite,
 }
 
 /// 能量粒子（阳光）
+#[derive(Clone)]
+#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
 pub struct EnergyParticle {
     pub id: u64,
     pub x: f64,
