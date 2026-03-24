@@ -1,7 +1,7 @@
 # 初始模拟速度
-initial_speed = 4.0
+initial_speed = 8.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 50
+min_creatures = 35
 # 初始能量
 initial_energy = 160.0
 # 初始世界缩放比例
@@ -15,15 +15,15 @@ volcano_y = 0.0
 # 火山喷发间隔（秒）
 volcano_interval = 20.0
 # 火山喷射半径
-volcano_radius = 1600.0
+volcano_radius = 2000.0
 # 每次喷发粒子数
 volcano_count = 160
 # 火山粒子能量
-volcano_particle_energy = 80.0
+volcano_particle_energy = 100.0
 
 # === 陨石 ===
 # 陨石降落间隔（秒）
-meteorite_interval = 20.0
+meteorite_interval = 30.0
 # 每颗陨石粒子数
 meteorite_count = 20
 # 陨石散布线段长度
@@ -35,19 +35,19 @@ meteorite_particle_energy = 150.0
 # 火山间隔正弦周期（秒）
 volcano_interval_cycle = 700.0
 # 火山间隔振幅比（0~0.9）
-volcano_interval_amplitude = 0.4
+volcano_interval_amplitude = 0.5
 # 火山能量正弦周期（秒）
 volcano_energy_cycle = 10000.0
 # 火山能量振幅比（0~0.9）
-volcano_energy_amplitude = 0.6
+volcano_energy_amplitude = 0.5
 # 陨石间隔正弦周期（秒）
 meteorite_interval_cycle = 750.0
 # 陨石间隔振幅比（0~0.9）
-meteorite_interval_amplitude = 0.7
+meteorite_interval_amplitude = 0.6
 # 陨石能量正弦周期（秒）
 meteorite_energy_cycle = 250.0
 # 陨石能量振幅比（0~0.9）
-meteorite_energy_amplitude = 0.7
+meteorite_energy_amplitude = 0.6
 
 # 火山粒子衰减率（每秒）
 volcano_decay_rate = 0.01
@@ -82,10 +82,10 @@ base_metabolism = 0.025
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
 age_metabolism_factor = 0.015
 # 移动消耗（每单位距离）
-move_cost = 0.002
+move_cost = 0.0005
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.035
+heat_dissipation_coefficient = 0.04
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -138,3 +138,4 @@ snn_ticks_per_frame = 10
 neural_backend = "auto"
 # 异步模式 tick 频率 (ticks/s)
 neural_tick_rate = 600.0
+min_landing_damage_ratio = 0.2
