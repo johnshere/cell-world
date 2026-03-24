@@ -39,10 +39,17 @@ pub struct Config {
     /// 陨石粒子衰减率（每秒）
     pub meteorite_decay_rate: f64,
 
-    /// 基础代谢率（每秒固定消耗）
+    /// 基础代谢率（已废弃，保留兼容旧config）
+    #[serde(default = "default_base_metabolism")]
     pub base_metabolism: f64,
     /// 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
     pub age_metabolism_factor: f64,
+    /// 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
+    #[serde(default = "default_metabolism_exponent")]
+    pub metabolism_exponent: f64,
+    /// 最大速度（px/s）
+    #[serde(default = "default_max_speed")]
+    pub max_speed: f64,
     /// 移动消耗（每单位距离）
     pub move_cost: f64,
 
@@ -147,8 +154,17 @@ pub struct Config {
     pub neural_tick_rate: f64,
 }
 
+fn default_max_speed() -> f64 {
+    20.0
+}
 fn default_min_landing_damage_ratio() -> f64 {
     0.15
+}
+fn default_base_metabolism() -> f64 {
+    0.025
+}
+fn default_metabolism_exponent() -> f64 {
+    1.5
 }
 fn default_eye_scan_speed() -> f64 {
     280.0

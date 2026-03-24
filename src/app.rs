@@ -168,7 +168,7 @@ impl CellWorldApp {
                 stats.trail_count,
                 stats.total_energy,
                 stats.max_generation,
-                stats.species_count,
+                stats.clan_count,
                 death.avg, death.median, death.max, death.min, death.count,
                 acts[0], acts[1], acts[2], acts[3]
             );
@@ -383,8 +383,8 @@ impl CellWorldApp {
                     &mut c.heat_floor, 0.01, 0.0..=1.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "基础代谢", "每秒固定能量消耗",
-                    &mut c.base_metabolism, 0.001, 0.01..=0.5,
+                    ui, "代谢指数", "energy^此值，越大大体型越重",
+                    &mut c.metabolism_exponent, 0.1, 1.0..=5.0,
                 );
                 changed |= config_drag_f64(
                     ui, "年龄代谢倍率", "age*此值=额外代谢倍率",
@@ -1116,6 +1116,36 @@ impl eframe::App for CellWorldApp {
         if let Some(name) = panel_action.delete_template {
             self.store.delete(&name);
             self.panel.reset_template_selection();
+        }
+
+        // 保存种族代表基因
+        if let Some(clan_hash) = panel_action.save_clan {
+            // 找到该族中能量最高的活生物作为代表
+            if let Some(representative) = self
+                .world
+                .creatures
+                .iter()
+                .filter(|c| c.alive && c.clan_hash == clan_hash)
+                .max_by(|a, b| a.energy.partial_cmp(&b.energy).unwrap())
+            {
+                let name = format!("族_{:08X}", clan_hash);
+                let template = CreatureTemplate {
+                    name: name.clone(),
+                    genome: representative.genome.clone(),
+                    initial_energy: representative.energy,
+                    version: None,
+                    score: None,
+                    population_ratio: None,
+                    avg_energy: None,
+                    avg_age: None,
+                    max_generation: None,
+                    recorded_at: None,
+                    auto_recorded: None,
+                };
+                if let Err(e) = self.store.save(template) {
+                    eprintln!("保存族失败: {}", e);
+                }
+            }
         }
 
         // 处理清空优势种

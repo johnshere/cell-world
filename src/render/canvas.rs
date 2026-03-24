@@ -447,7 +447,7 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> Color32 {
 }
 
 /// 根据种族基因哈希生成颜色
-fn species_to_color(species_hash: u64) -> Color32 {
+pub fn species_to_color(species_hash: u64) -> Color32 {
     // 使用混合哈希函数使任意哈希值都能产生分散的色相
     // 基于 splitmix64 的快速混合
     let mut h = species_hash;
