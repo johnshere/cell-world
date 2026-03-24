@@ -85,7 +85,7 @@ age_metabolism_factor = 0.015
 move_cost = 0.002
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.04
+heat_dissipation_coefficient = 0.035
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 

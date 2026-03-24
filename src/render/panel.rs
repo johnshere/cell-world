@@ -28,8 +28,8 @@ pub struct StatsPanel {
     save_name: String,
     pub settings_open: bool,
     pub energy_settings_open: bool,
-    /// 能量历史 (world_time, total_energy, creature_energy)
-    pub energy_history: Vec<(f64, f64, f64)>,
+    /// 能量历史 (world_time, total_energy, creature_energy, particle_initial_energy)
+    pub energy_history: Vec<(f64, f64, f64, f64)>,
 }
 
 /// 排名数据
@@ -48,6 +48,7 @@ pub struct CachedStats {
     pub trail_count: usize,
     pub total_energy: f64,
     pub creature_energy: f64,
+    pub particle_initial_energy: f64,
     pub volcano_countdown: f64,
     pub max_generation: usize,
     pub avg_energy: f64,
@@ -116,6 +117,7 @@ impl StatsPanel {
                 trail_count: stats.trail_count,
                 total_energy: stats.total_energy,
                 creature_energy: stats.creature_energy,
+                particle_initial_energy: stats.particle_initial_energy,
                 volcano_countdown: self.cached_stats.volcano_countdown,
                 max_generation: stats.max_generation,
                 avg_energy: stats.avg_energy,
@@ -134,15 +136,19 @@ impl StatsPanel {
                 dominant_candidate: stats.dominant_candidate.clone(),
                 avg_compute_ns: world.perf_stats.avg_compute_ns,
             };
-            // 记录能量历史（总能量 + 生命能量）
-            self.energy_history
-                .push((stats.time, stats.total_energy, stats.creature_energy));
+            // 记录能量历史（总能量 + 生命能量 + 粒子理论总能量）
+            self.energy_history.push((
+                stats.time,
+                stats.total_energy,
+                stats.creature_energy,
+                stats.particle_initial_energy,
+            ));
             // 按时间裁剪：只保留最近30分钟
             let cutoff = stats.time - 1800.0;
             if let Some(pos) = self
                 .energy_history
                 .iter()
-                .position(|&(t, _, _)| t >= cutoff)
+                .position(|&(t, _, _, _)| t >= cutoff)
             {
                 if pos > 0 {
                     self.energy_history.drain(..pos);

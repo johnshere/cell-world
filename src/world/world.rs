@@ -1491,6 +1491,12 @@ impl World {
             .filter(|e| e.alive)
             .map(|e| e.energy)
             .sum();
+        let particle_initial_energy: f64 = self
+            .energy_particles
+            .iter()
+            .filter(|e| e.alive)
+            .map(|e| e.initial_energy)
+            .sum();
         let trail_energy: f64 = self
             .trail_points
             .iter()
@@ -1537,6 +1543,7 @@ impl World {
             trail_count,
             total_energy,
             creature_energy,
+            particle_initial_energy,
             max_generation,
             avg_energy,
             action_counts: self.action_counts,
@@ -1838,6 +1845,7 @@ pub struct WorldStats {
     pub trail_count: usize,
     pub total_energy: f64,
     pub creature_energy: f64,
+    pub particle_initial_energy: f64,
     pub max_generation: usize,
     pub avg_energy: f64,
     pub action_counts: [usize; 4],

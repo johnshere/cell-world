@@ -502,24 +502,48 @@ impl CellWorldApp {
             let t_max = history.last().unwrap().0;
             let t_range = (t_max - t_min).max(1.0);
 
-            // Y 轴范围：同时考虑总能量和生命能量
-            let (e_min, e_max) =
-                history
-                    .iter()
-                    .fold((f64::MAX, f64::MIN), |(lo, hi), &(_, total, creature)| {
-                        (lo.min(total).min(creature), hi.max(total).max(creature))
-                    });
+            // Y 轴范围：同时考虑总能量、生命能量和粒子理论总能量
+            let (e_min, e_max) = history.iter().fold(
+                (f64::MAX, f64::MIN),
+                |(lo, hi), &(_, total, creature, particle_init)| {
+                    (
+                        lo.min(total).min(creature).min(particle_init),
+                        hi.max(total).max(creature).max(particle_init),
+                    )
+                },
+            );
             let e_min = e_min * 0.9;
             let e_max = e_max * 1.1;
             let e_range = (e_max - e_min).max(1.0);
 
             let color_total = egui::Color32::from_rgb(100, 200, 255);
             let color_life = egui::Color32::from_rgb(100, 255, 130);
+            let color_particle_init = egui::Color32::from_rgb(255, 180, 80);
+
+            // 绘制粒子理论总能量曲线
+            let particle_init_pts: Vec<egui::Pos2> = history
+                .iter()
+                .map(|&(t, _, _, pi)| {
+                    let x = rect.left() + ((t - t_min) / t_range * chart_width_f32 as f64) as f32;
+                    let y =
+                        rect.bottom() - ((pi - e_min) / e_range * chart_height_f32 as f64) as f32;
+                    egui::pos2(x, y.clamp(rect.top(), rect.bottom()))
+                })
+                .collect();
+            for pair in particle_init_pts.windows(2) {
+                painter.line_segment(
+                    [pair[0], pair[1]],
+                    egui::Stroke::new(1.5, color_particle_init),
+                );
+            }
+            if let Some(&last) = particle_init_pts.last() {
+                painter.circle_filled(last, 3.0, color_particle_init);
+            }
 
             // 绘制总能量曲线
             let total_pts: Vec<egui::Pos2> = history
                 .iter()
-                .map(|&(t, e, _)| {
+                .map(|&(t, e, _, _)| {
                     let x = rect.left() + ((t - t_min) / t_range * chart_width_f32 as f64) as f32;
                     let y =
                         rect.bottom() - ((e - e_min) / e_range * chart_height_f32 as f64) as f32;
@@ -536,7 +560,7 @@ impl CellWorldApp {
             // 绘制生命能量曲线
             let life_pts: Vec<egui::Pos2> = history
                 .iter()
-                .map(|&(t, _, c)| {
+                .map(|&(t, _, c, _)| {
                     let x = rect.left() + ((t - t_min) / t_range * chart_width_f32 as f64) as f32;
                     let y =
                         rect.bottom() - ((c - e_min) / e_range * chart_height_f32 as f64) as f32;
@@ -588,6 +612,10 @@ impl CellWorldApp {
         // 图例 + 当前值
         let stats = self.panel.stats();
         ui.horizontal(|ui| {
+            ui.colored_label(
+                egui::Color32::from_rgb(255, 180, 80),
+                format!("粒子理论: {:.0}", stats.particle_initial_energy),
+            );
             ui.colored_label(
                 egui::Color32::from_rgb(100, 200, 255),
                 format!("总能量: {:.0}", stats.total_energy),
