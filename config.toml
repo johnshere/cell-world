@@ -80,12 +80,12 @@ heat_floor = 0.05
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
 age_metabolism_factor = 0.015
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
-metabolism_exponent = 1.5
+metabolism_exponent = 1.6
 # 移动消耗（每单位距离）
 move_cost = 0.0005
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.04
+heat_dissipation_coefficient = 0.025
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -98,7 +98,7 @@ contact_range = 15.0
 
 # === 进化 ===
 # 变异率（所有变异逻辑共用）
-mutation_rate = 0.15
+mutation_rate = 0.17
 # 初始连接数最小值
 initial_connections_min = 6
 # 初始连接数最大值
@@ -139,3 +139,5 @@ neural_backend = "auto"
 # 异步模式 tick 频率 (ticks/s)
 neural_tick_rate = 600.0
 min_landing_damage_ratio = 0.2
+base_metabolism = 0.025
+max_speed = 20.0
