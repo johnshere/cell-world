@@ -372,7 +372,7 @@ impl CellWorldApp {
             ui.collapsing("环境压力", |ui| {
                 changed |= config_drag_f64(
                     ui, "散热系数", "体温逸散=此值*周长*heat_factor*dt",
-                    &mut c.heat_dissipation_coefficient, 0.005, 0.0..=1.0,
+                    &mut c.heat_dissipation_coefficient, 0.001, 0.0..=1.0,
                 );
                 changed |= config_drag_f64(
                     ui, "能量分母", "nearby_energy归一化分母，越大需更多聚集才降温",
@@ -661,6 +661,10 @@ impl CellWorldApp {
                 changed |= config_drag_f64(
                     ui, "陨石杀伤半径", "落地时杀死半径内生物(px)",
                     &mut c.meteorite_kill_radius, 0.5, 1.0..=50.0,
+                );
+                changed |= config_drag_f64(
+                    ui, "落地最低伤害", "落地至少削掉此比例能量(0~1)",
+                    &mut c.min_landing_damage_ratio, 0.01, 0.0..=1.0,
                 );
             });
 

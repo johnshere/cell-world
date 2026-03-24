@@ -114,6 +114,9 @@ pub struct Config {
     pub volcano_kill_radius: f64,
     /// 陨石落地杀伤半径
     pub meteorite_kill_radius: f64,
+    /// 落地最低伤害比例（保证至少削掉此比例能量）
+    #[serde(default = "default_min_landing_damage_ratio")]
+    pub min_landing_damage_ratio: f64,
 
     // === 痕迹点 ===
     /// 痕迹点能量衰减率（/秒）
@@ -144,6 +147,9 @@ pub struct Config {
     pub neural_tick_rate: f64,
 }
 
+fn default_min_landing_damage_ratio() -> f64 {
+    0.15
+}
 fn default_eye_scan_speed() -> f64 {
     280.0
 }

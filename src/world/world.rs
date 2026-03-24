@@ -489,13 +489,14 @@ impl World {
                 ParticleSource::Volcano,
             ));
             self.energy_grid_dirty = true;
-            // 落地削弱：damage_ratio = particle_energy / (particle_energy + creature_energy)
+            // 落地削弱：damage_ratio = max(p/(p+c), min_ratio)
             for c in &mut self.creatures {
                 if c.alive {
                     let dx = c.x - x;
                     let dy = c.y - y;
                     if dx * dx + dy * dy < kill_r2 {
-                        let ratio = current_energy / (current_energy + c.energy);
+                        let ratio = (current_energy / (current_energy + c.energy))
+                            .max(config.min_landing_damage_ratio);
                         c.energy -= c.energy * ratio;
                     }
                 }
@@ -539,13 +540,14 @@ impl World {
                 ParticleSource::Meteorite,
             ));
             self.energy_grid_dirty = true;
-            // 落地削弱：damage_ratio = particle_energy / (particle_energy + creature_energy)
+            // 落地削弱：damage_ratio = max(p/(p+c), min_ratio)
             for c in &mut self.creatures {
                 if c.alive {
                     let cdx = c.x - x;
                     let cdy = c.y - y;
                     if cdx * cdx + cdy * cdy < kill_r2 {
-                        let ratio = current_energy / (current_energy + c.energy);
+                        let ratio = (current_energy / (current_energy + c.energy))
+                            .max(config.min_landing_damage_ratio);
                         c.energy -= c.energy * ratio;
                     }
                 }
