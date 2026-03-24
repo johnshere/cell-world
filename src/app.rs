@@ -893,13 +893,14 @@ impl eframe::App for CellWorldApp {
                 });
             if chose_restore {
                 if let Some(snapshot) = self.pending_restore.take() {
-                    let mut world = snapshot.into_world(&self.config);
+                    let (mut world, config) = snapshot.into_world();
                     world.dominant_species = self.store.dominant_species().clone();
                     // 重建 neural bridge
-                    if self.config.neural_backend != "legacy" {
-                        let bridge = crate::neural::thread::spawn_neural_thread(&self.config);
+                    if config.neural_backend != "legacy" {
+                        let bridge = crate::neural::thread::spawn_neural_thread(&config);
                         world.set_neural_bridge(bridge);
                     }
+                    self.config = config;
                     self.world = world;
                     self.render_ctx_cache = None;
                 }
@@ -938,7 +939,7 @@ impl eframe::App for CellWorldApp {
                     });
                 });
             if chose_save {
-                let snapshot = WorldSnapshot::capture(&self.world);
+                let snapshot = WorldSnapshot::capture(&self.world, &self.config);
                 if let Err(e) = snapshot.save() {
                     eprintln!("保存快照失败: {}", e);
                 }

@@ -163,7 +163,7 @@ impl WorldCanvas {
                 let pos = self.world_to_screen(Pos2::new(trail.x as f32, trail.y as f32), rect);
                 let age_ratio = (1.0 - trail.age / 38.0).max(0.0) as f32;
                 let alpha = (80.0 * age_ratio) as u8;
-                let color = species_to_color(trail.genome_hash);
+                let color = species_to_color(trail.clan_hash);
                 let trail_color =
                     Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
                 let radius = (trail.visual_radius as f32 * 0.2 * age_ratio * self.scale)

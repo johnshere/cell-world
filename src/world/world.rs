@@ -843,8 +843,7 @@ impl World {
         let eye_range = config.vision_range;
         let total_fov = 140.0_f64.to_radians();
         let body_radius = (self.creatures[creature_idx].energy * 1.28).cbrt();
-        let my_genome_hash = self.creatures[creature_idx].genome_hash;
-        let threshold = config.species_similarity_threshold;
+        let my_clan_hash = self.creatures[creature_idx].clan_hash;
 
         // 波束方向：左眼从 heading+20° 逆时针扫，右眼从 heading-20° 顺时针扫
         let scan_offsets = [
@@ -941,7 +940,7 @@ impl World {
                 continue;
             }
             let angle = dy.atan2(dx);
-            let is_ally = if trail.genome_hash == my_genome_hash { 1.0 } else { 0.0 };
+            let is_ally = if trail.clan_hash == my_clan_hash { 1.0 } else { 0.0 };
 
             for eye_i in 0..2 {
                 // 全FOV → 能量密度
@@ -981,9 +980,7 @@ impl World {
                 continue;
             }
             let angle = dy.atan2(dx);
-            let similarity =
-                self.get_similarity(&self.creatures[creature_idx], &self.creatures[idx]);
-            let is_ally = if similarity >= threshold { 1.0 } else { 0.0 };
+            let is_ally = if self.creatures[idx].clan_hash == my_clan_hash { 1.0 } else { 0.0 };
 
             for eye_i in 0..2 {
                 // 全FOV → 能量密度
@@ -1116,12 +1113,12 @@ impl World {
                     }
                     if trail_energy > 0.001 {
                         let creator_id = self.creatures[creature_idx].id;
-                        let genome_hash = self.creatures[creature_idx].genome_hash;
+                        let clan_hash = self.creatures[creature_idx].clan_hash;
                         self.trail_points.push(TrailPoint::new(
                             cx,
                             cy,
                             trail_energy,
-                            genome_hash,
+                            clan_hash,
                             creator_id,
                             creature_radius,
                         ));
@@ -1246,9 +1243,8 @@ impl World {
             let damage_ratio = attacker_score / (attacker_score + defender_score + 0.001);
             let transfer = other_energy * damage_ratio * config.bite_transfer_rate;
 
-            let similarity =
-                self.get_similarity(&self.creatures[idx], &self.creatures[other_idx]);
-            let efficiency = 1.0 - similarity;
+            let same_clan = self.creatures[idx].clan_hash == self.creatures[other_idx].clan_hash;
+            let efficiency = if same_clan { 0.0 } else { 1.0 };
             self.creatures[other_idx].energy -= transfer;
             self.creatures[idx].energy += transfer * efficiency;
             self.action_counts[2] += 1;
@@ -1263,16 +1259,14 @@ impl World {
     fn compute_nearby_ally_energy(&self, creature_idx: usize, config: &Config) -> f64 {
         let cx = self.creatures[creature_idx].x;
         let cy = self.creatures[creature_idx].y;
+        let my_clan = self.creatures[creature_idx].clan_hash;
         let nearby = self.creature_grid.query(cx, cy, config.vision_range);
-        let threshold = config.species_similarity_threshold;
         let mut total = 0.0;
         for &other_idx in &nearby {
             if other_idx == creature_idx || !self.creatures[other_idx].alive {
                 continue;
             }
-            let similarity =
-                self.get_similarity(&self.creatures[creature_idx], &self.creatures[other_idx]);
-            if similarity >= threshold {
+            if self.creatures[other_idx].clan_hash == my_clan {
                 total += self.creatures[other_idx].energy;
             }
         }
@@ -1354,6 +1348,7 @@ impl World {
 
     fn find_mate(&self, idx: usize, config: &Config) -> Option<Genome> {
         let creature = &self.creatures[idx];
+        let my_clan = creature.clan_hash;
         let nearby = self
             .creature_grid
             .query(creature.x, creature.y, config.contact_range);
@@ -1364,11 +1359,8 @@ impl World {
             }
             let other = &self.creatures[other_idx];
             let dist = ((other.x - creature.x).powi(2) + (other.y - creature.y).powi(2)).sqrt();
-            if dist < config.contact_range {
-                let similarity = self.get_similarity(creature, other);
-                if similarity >= config.species_similarity_threshold {
-                    return Some(other.genome.clone());
-                }
+            if dist < config.contact_range && other.clan_hash == my_clan {
+                return Some(other.genome.clone());
             }
         }
         None

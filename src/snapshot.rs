@@ -28,11 +28,13 @@ pub struct WorldSnapshot {
     pub trail_disabled: bool,
     pub clan_genomes: FxHashMap<u64, Genome>,
     pub dominant_species: Vec<DominantCandidate>,
+    /// 存档时的完整配置（恢复时使用，保证环境一致）
+    pub config: Config,
 }
 
 impl WorldSnapshot {
     /// 从 World 提取快照
-    pub fn capture(world: &World) -> Self {
+    pub fn capture(world: &World, config: &Config) -> Self {
         Self {
             version: 1,
             world_time: world.time,
@@ -50,6 +52,7 @@ impl WorldSnapshot {
             trail_disabled: world.trail_disabled,
             clan_genomes: world.clan_genomes().clone(),
             dominant_species: world.dominant_species.clone(),
+            config: config.clone(),
         }
     }
 
@@ -73,8 +76,14 @@ impl WorldSnapshot {
         std::path::Path::new(SNAPSHOT_PATH).exists()
     }
 
+    /// 返回存档中的配置
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
     /// 重建完整 World
-    pub fn into_world(mut self, config: &Config) -> World {
+    pub fn into_world(mut self) -> (World, Config) {
+        let config = self.config.clone();
         // 从 genome 重建每个生物的 brain
         for creature in &mut self.creatures {
             creature.brain = SpikingNetwork::from_genome(&creature.genome);
@@ -96,7 +105,7 @@ impl WorldSnapshot {
             trail_grid.insert(i, t.x, t.y);
         }
 
-        World::from_snapshot(
+        let world = World::from_snapshot(
             self.creatures,
             self.energy_particles,
             self.trail_points,
@@ -115,7 +124,8 @@ impl WorldSnapshot {
             self.trail_disabled,
             self.clan_genomes,
             self.dominant_species,
-            config,
-        )
+            &config,
+        );
+        (world, config)
     }
 }
