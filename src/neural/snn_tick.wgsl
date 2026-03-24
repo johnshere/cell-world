@@ -154,7 +154,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // tanh 近似
             let x = next_node.membrane;
             let x2 = x * x;
-            output_val = x * (27.0 + x2) / (27.0 + 9.0 * x2);
+            output_val = clamp(x * (27.0 + x2) / (27.0 + 9.0 * x2), -1.0, 1.0);
         } else {
             if is_fired(next_node.flags) {
                 output_val = 1.0;

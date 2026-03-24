@@ -43,6 +43,9 @@ pub struct Config {
     pub base_metabolism: f64,
     /// 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
     pub age_metabolism_factor: f64,
+    /// 最大速度（px/s）
+    #[serde(default = "default_max_speed")]
+    pub max_speed: f64,
     /// 移动消耗（每单位距离）
     pub move_cost: f64,
 
@@ -147,6 +150,9 @@ pub struct Config {
     pub neural_tick_rate: f64,
 }
 
+fn default_max_speed() -> f64 {
+    20.0
+}
 fn default_min_landing_damage_ratio() -> f64 {
     0.15
 }

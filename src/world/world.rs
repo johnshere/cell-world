@@ -1066,7 +1066,7 @@ impl World {
         let angular_speed = turn_amount.abs() / dt;
         self.creatures[creature_idx].energy -= turn_amount.abs() * config.move_cost * angular_speed;
 
-        let actual_speed = speed.abs() * 10.0;
+        let actual_speed = speed.abs() * config.max_speed;
         self.creatures[creature_idx].current_speed = actual_speed;
         let mut move_cost = 0.0;
         if actual_speed > 0.05 {
@@ -1229,13 +1229,13 @@ impl World {
             let other_energy = self.creatures[other_idx].energy;
 
             // 攻击方战力 × 咬合力
-            let my_speed_norm = (self.creatures[idx].current_speed / 10.0).min(1.0);
+            let my_speed_norm = (self.creatures[idx].current_speed / config.max_speed).min(1.0);
             let my_ally_energy = self.compute_nearby_ally_energy(idx, config);
             let attacker_score =
                 config.combat_power(my_energy, my_speed_norm, my_ally_energy) * bite_force;
 
             // 防御方战力
-            let other_speed_norm = (self.creatures[other_idx].current_speed / 10.0).min(1.0);
+            let other_speed_norm = (self.creatures[other_idx].current_speed / config.max_speed).min(1.0);
             let other_ally_energy = self.compute_nearby_ally_energy(other_idx, config);
             let defender_score =
                 config.combat_power(other_energy, other_speed_norm, other_ally_energy);
