@@ -691,9 +691,11 @@ impl World {
                 &mut nearby_creature_buf,
             );
 
-            // 基础代谢
+            // 基础代谢（体型指数缩放）
+            let energy_ratio = self.creatures[i].energy / config.initial_energy;
+            let size_factor = energy_ratio.powf(config.metabolism_exponent);
             let age_multiplier = 1.0 + self.creatures[i].age * config.age_metabolism_factor;
-            let metabolism_cost = config.base_metabolism * age_multiplier * dt;
+            let metabolism_cost = 0.025 * size_factor * age_multiplier * dt;
             self.creatures[i].energy -= metabolism_cost;
 
             // 冷却递减
@@ -1503,23 +1505,22 @@ impl World {
             creature_energy / alive_creatures.len() as f64
         };
 
-        // 种族聚类（祖先追溯模型）
+        // 种族统计（按 clan_hash 聚合）
+        let mut clan_counts: FxHashMap<u64, usize> = FxHashMap::default();
+        for c in &alive_creatures {
+            *clan_counts.entry(c.clan_hash).or_insert(0) += 1;
+        }
+        let clan_count = clan_counts.len();
+        let mut clan_vec: Vec<(u64, usize)> = clan_counts.into_iter().collect();
+        clan_vec.sort_by(|a, b| b.1.cmp(&a.1));
+        clan_vec.truncate(3);
+
+        // 优势种检测（仍使用祖先追溯模型）
         self.ensure_clan_cache(species_threshold);
         let cache = self.clan_cache.borrow();
         let cache = cache.as_ref().unwrap();
-        let species_count = cache.species_count;
-        let top_species = cache.top_species.clone();
         let creature_clan_map = cache.creature_clan_map.clone();
 
-        // 构建生物ID -> 族长ID映射
-        let mut id_species_map: FxHashMap<u64, u64> = FxHashMap::default();
-        for (i, creature) in alive_creatures.iter().enumerate() {
-            if let Some(&leader_id) = creature_clan_map.get(&i) {
-                id_species_map.insert(creature.id, leader_id);
-            }
-        }
-
-        // 优势种检测
         let dominant_candidate = self.detect_dominant(
             &alive_creatures,
             &creature_clan_map,
@@ -1540,9 +1541,8 @@ impl World {
             avg_energy,
             action_counts: self.action_counts,
             death_age_stats: self.death_age_stats.clone(),
-            species_count,
-            top_species,
-            creature_species_map: id_species_map,
+            clan_count,
+            top_clans: clan_vec,
             dominant_candidate,
         }
     }
@@ -1842,9 +1842,9 @@ pub struct WorldStats {
     pub avg_energy: f64,
     pub action_counts: [usize; 4],
     pub death_age_stats: DeathAgeStats,
-    pub species_count: usize,
-    pub top_species: Vec<RankedEntry>,
-    pub creature_species_map: FxHashMap<u64, u64>,
+    pub clan_count: usize,
+    /// 种族前三: (clan_hash, count)
+    pub top_clans: Vec<(u64, usize)>,
     pub dominant_candidate: Option<DominantCandidate>,
 }
 

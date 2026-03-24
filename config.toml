@@ -77,10 +77,10 @@ energy_denominator = 1100.0
 heat_floor = 0.05
 
 # === 代谢 ===
-# 基础代谢率（每秒固定消耗）
-base_metabolism = 0.025
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
 age_metabolism_factor = 0.015
+# 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
+metabolism_exponent = 1.5
 # 移动消耗（每单位距离）
 move_cost = 0.002
 # === 体温 ===

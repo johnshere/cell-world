@@ -1,7 +1,7 @@
 use egui::Ui;
-use rustc_hash::FxHashMap;
 use std::time::Instant;
 
+use super::canvas::species_to_color;
 use super::Selection;
 use crate::config::Config;
 use crate::store::Store;
@@ -16,6 +16,8 @@ pub struct PanelAction {
     pub delete_template: Option<String>,
     pub clear_dominant: bool,
     pub save_snapshot: bool,
+    /// 保存指定族的代表基因（clan_hash）
+    pub save_clan: Option<u64>,
 }
 
 /// 统计面板
@@ -55,9 +57,8 @@ pub struct CachedStats {
     // 行为触发统计（4事件：移动/吸收/咬/繁殖）
     pub action_counts: [usize; 4],
     pub death_age_stats: DeathAgeStats,
-    pub species_count: usize,
-    pub top_species: Vec<RankedEntry>,
-    pub creature_species_map: FxHashMap<u64, u64>,
+    pub clan_count: usize,
+    pub top_clans: Vec<(u64, usize)>,
     pub dominant_candidate: Option<DominantCandidate>,
     pub avg_compute_ns: f64,
 }
@@ -123,16 +124,8 @@ impl StatsPanel {
                 avg_energy: stats.avg_energy,
                 action_counts: stats.action_counts,
                 death_age_stats: stats.death_age_stats.clone(),
-                species_count: stats.species_count,
-                top_species: stats
-                    .top_species
-                    .iter()
-                    .map(|e| RankedEntry {
-                        id: e.id,
-                        count: e.count,
-                    })
-                    .collect(),
-                creature_species_map: stats.creature_species_map.clone(),
+                clan_count: stats.clan_count,
+                top_clans: stats.top_clans.clone(),
                 dominant_candidate: stats.dominant_candidate.clone(),
                 avg_compute_ns: world.perf_stats.avg_compute_ns,
             };
@@ -319,7 +312,7 @@ impl StatsPanel {
             ui.label("│");
             ui.label(format!("代:{}", self.cached_stats.max_generation));
             ui.label("│");
-            ui.label(format!("种群:{}", self.cached_stats.species_count));
+            ui.label(format!("种族:{}", self.cached_stats.clan_count));
             if self.cached_stats.avg_compute_ns > 0.0 {
                 ui.label("│");
                 ui.label(format!("算力:{:.0}ns", self.cached_stats.avg_compute_ns));
@@ -369,11 +362,17 @@ impl StatsPanel {
             });
         }
 
-        // 种群排行
+        // 种族排行
         ui.separator();
-        ui.label("种群前三:");
-        for (i, entry) in self.cached_stats.top_species.iter().enumerate() {
-            ui.label(format!("{}. {} 个体", i + 1, entry.count));
+        ui.label(format!("种族 ({})", self.cached_stats.clan_count));
+        for (i, &(clan_hash, count)) in self.cached_stats.top_clans.iter().enumerate() {
+            ui.horizontal(|ui| {
+                let color = species_to_color(clan_hash);
+                ui.colored_label(color, format!("{}. {} 个体", i + 1, count));
+                if ui.small_button("💾").on_hover_text("保存该族代表基因").clicked() {
+                    action.save_clan = Some(clan_hash);
+                }
+            });
         }
 
         action
