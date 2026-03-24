@@ -385,7 +385,6 @@ impl StatsPanel {
         selection: &Selection,
         world: &World,
     ) -> PanelAction {
-        let creature_species_map = &self.cached_stats.creature_species_map;
         let mut action = PanelAction::default();
 
         match selection {
@@ -439,71 +438,56 @@ impl StatsPanel {
 
                     ui.separator();
 
+                    // 基本状态
+                    let body_radius = (creature.energy * 1.28_f64).cbrt();
                     ui.horizontal(|ui| {
-                        ui.label("位置:");
-                        ui.label(format!("({:.1}, {:.1})", creature.x, creature.y));
+                        ui.label(format!(
+                            "能量:{:.0}  体型:{:.1}  代:{}", creature.energy, body_radius, creature.generation
+                        ));
                     });
                     ui.horizontal(|ui| {
-                        ui.label("能量:");
-                        ui.label(format!("{:.1}", creature.energy));
+                        ui.label(format!(
+                            "年龄:{:.1}s  速度:{:.1}  朝向:{:.0}°",
+                            creature.age, creature.current_speed, creature.heading.to_degrees()
+                        ));
                     });
                     ui.horizontal(|ui| {
-                        ui.label("年龄:");
-                        ui.label(format!("{:.1}s", creature.age));
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("朝向:");
-                        ui.label(format!("{:.1}°", creature.heading.to_degrees()));
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("种群ID:");
-                        let species_id =
-                            creature_species_map.get(&creature.id).copied().unwrap_or(0);
-                        ui.label(format!("{}", species_id));
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("基因哈希:");
-                        ui.label(format!("{:08X}", creature.genome_hash));
+                        ui.label(format!("位置: ({:.0}, {:.0})", creature.x, creature.y));
                     });
 
-                    // 算力耗时
-                    if creature.frame_compute_ns > 0 {
-                        ui.horizontal(|ui| {
-                            ui.label("算力:");
-                            let ns = creature.frame_compute_ns;
-                            if ns >= 1_000_000 {
-                                ui.label(format!("{:.2}ms", ns as f64 / 1_000_000.0));
-                            } else if ns >= 1_000 {
-                                ui.label(format!("{:.1}μs", ns as f64 / 1_000.0));
-                            } else {
-                                ui.label(format!("{}ns", ns));
-                            }
-                        });
-                    }
-
-                    // 冷却状态
+                    // 冷却
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.label(format!(
-                            "扫描: L:{:.0}° R:{:.0}° 嘴:{:.1}s",
-                            creature.eye_scan_offset[0].to_degrees(),
-                            creature.eye_scan_offset[1].to_degrees(),
+                            "嘴:{:.1}s  繁殖:{:.1}s  痕迹:{:.1}s",
                             creature.mouth_cooldown_timer.max(0.0),
+                            creature.reproduce_cooldown_timer.max(0.0),
+                            creature.trail_emit_timer.max(0.0),
                         ));
                     });
 
-                    // 神经网络信息
+                    // 神经网络输出（实时决策）
                     ui.separator();
-                    ui.label("神经网络");
+                    let o = &creature.last_outputs;
+                    ui.label("决策输出");
                     ui.horizontal(|ui| {
-                        ui.label("节点数:");
-                        ui.label(format!("{}", creature.genome.nodes.len()));
+                        ui.label(format!("转向:{:+.2}  速度:{:.2}", o[0], o[1]));
                     });
                     ui.horizontal(|ui| {
-                        ui.label("连接数:");
-                        ui.label(format!("{}", creature.genome.connections.len()));
+                        let mouth_str = if o[2] < -0.1 { "咬" } else { "闭" };
+                        ui.label(format!(
+                            "嘴:{:.2}({})  繁殖意愿:{:.2}", o[2], mouth_str, o[3]
+                        ));
                     });
-                    ui.label("输出: 转向/速度/嘴/繁殖");
+                    ui.horizontal(|ui| {
+                        // sigmoid映射：繁殖阈值 20~200，子代比例 0.1~0.5
+                        let threshold = 20.0 + 180.0 / (1.0 + (-o[4]).exp());
+                        let child_ratio = 0.1 + 0.4 / (1.0 + (-o[5]).exp());
+                        ui.label(format!(
+                            "繁殖阈值:{:.0}  子代比例:{:.0}%  痕迹:{:.2}",
+                            threshold, child_ratio * 100.0, o[6].max(0.0)
+                        ));
+                    });
                 }
             }
             Selection::Energy(id) => {
