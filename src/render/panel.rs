@@ -48,7 +48,7 @@ pub struct CachedStats {
     pub trail_count: usize,
     pub total_energy: f64,
     pub creature_energy: f64,
-    pub particle_initial_energy: f64,
+    pub theoretical_energy: f64,
     pub volcano_countdown: f64,
     pub max_generation: usize,
     pub avg_energy: f64,
@@ -117,7 +117,7 @@ impl StatsPanel {
                 trail_count: stats.trail_count,
                 total_energy: stats.total_energy,
                 creature_energy: stats.creature_energy,
-                particle_initial_energy: stats.particle_initial_energy,
+                theoretical_energy: stats.theoretical_energy,
                 volcano_countdown: self.cached_stats.volcano_countdown,
                 max_generation: stats.max_generation,
                 avg_energy: stats.avg_energy,
@@ -136,12 +136,12 @@ impl StatsPanel {
                 dominant_candidate: stats.dominant_candidate.clone(),
                 avg_compute_ns: world.perf_stats.avg_compute_ns,
             };
-            // 记录能量历史（总能量 + 生命能量 + 粒子理论总能量）
+            // 记录能量历史（总能量 + 生命能量 + 理论投放能量）
             self.energy_history.push((
                 stats.time,
                 stats.total_energy,
                 stats.creature_energy,
-                stats.particle_initial_energy,
+                stats.theoretical_energy,
             ));
             // 按时间裁剪：只保留最近30分钟
             let cutoff = stats.time - 1800.0;

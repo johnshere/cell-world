@@ -614,7 +614,7 @@ impl CellWorldApp {
         ui.horizontal(|ui| {
             ui.colored_label(
                 egui::Color32::from_rgb(255, 180, 80),
-                format!("粒子理论: {:.0}", stats.particle_initial_energy),
+                format!("理论投放: {:.0}", stats.theoretical_energy),
             );
             ui.colored_label(
                 egui::Color32::from_rgb(100, 200, 255),
