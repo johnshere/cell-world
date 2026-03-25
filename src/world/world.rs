@@ -844,8 +844,8 @@ impl World {
 
     /// 连续扫描感知：每帧推进扫描角度
     fn compute_perception_scanning(&mut self, creature_idx: usize, dt: f64, config: &Config) {
-        // 自身状态 [12] 始终更新
-        self.creatures[creature_idx].perception_cache[12] =
+        // 自身状态 [16] 始终更新
+        self.creatures[creature_idx].perception_cache[16] =
             (self.creatures[creature_idx].energy / 2000.0).min(1.0);
 
         // 推进扫描角度
@@ -866,6 +866,7 @@ impl World {
         let cx = self.creatures[creature_idx].x;
         let cy = self.creatures[creature_idx].y;
         let heading = self.creatures[creature_idx].heading;
+        let my_speed = self.creatures[creature_idx].current_speed;
         let eye_range = config.vision_range;
         let total_fov = 140.0_f64.to_radians();
         let body_radius = (self.creatures[creature_idx].energy * 1.28).cbrt();
@@ -1027,13 +1028,24 @@ impl World {
             }
         }
 
-        // 延迟计算：只对最终最近的生物目标算 similarity（每眼最多1次）
+        // 延迟计算：只对最终最近的生物目标算 similarity + 朝向差 + 速度差（每眼最多1次）
+        let mut nearest_heading_diff = [0.0_f64; 2];
+        let mut nearest_speed_diff = [0.0_f64; 2];
         for eye_i in 0..2 {
             if let Some(other_idx) = nearest_creature_idx[eye_i] {
                 if nearest_type[eye_i] == 1.0 {
                     nearest_is_ally[eye_i] = self.creatures[creature_idx]
                         .genome
                         .similarity(&self.creatures[other_idx].genome);
+                    // 朝向差: angle_diff(target.heading, self.heading) / π → [-1, 1]
+                    nearest_heading_diff[eye_i] = angle_diff(
+                        self.creatures[other_idx].heading,
+                        heading,
+                    ) / std::f64::consts::PI;
+                    // 速度差: (target.speed - self.speed) / max_speed → clamp [-1, 1]
+                    nearest_speed_diff[eye_i] = ((self.creatures[other_idx].current_speed - my_speed)
+                        / config.max_speed)
+                        .clamp(-1.0, 1.0);
                 }
             }
         }
@@ -1043,8 +1055,8 @@ impl World {
         self.energy_query_buf = energy_buf;
         self.trail_query_buf = trail_buf;
 
-        // === 写入13通道 ===
-        // 左眼 [0..5]: scan_angle_norm, proximity, target_energy/200, entity_type, is_ally, energy_density
+        // === 写入17通道 ===
+        // 左眼 [0..7]: scan_angle_norm, proximity, target_energy/200, entity_type, is_ally, energy_density, heading_diff, speed_diff
         let proximity_l = if nearest_dist[0] < f64::MAX {
             body_radius / (body_radius + nearest_dist[0])
         } else {
@@ -1057,20 +1069,24 @@ impl World {
         self.creatures[creature_idx].perception_cache[4] = nearest_is_ally[0];
         self.creatures[creature_idx].perception_cache[5] =
             (eye_energy_density[0] / config.energy_denominator).min(1.0);
+        self.creatures[creature_idx].perception_cache[6] = nearest_heading_diff[0];
+        self.creatures[creature_idx].perception_cache[7] = nearest_speed_diff[0];
 
-        // 右眼 [6..11]: scan_angle_norm, proximity, target_energy/200, entity_type, is_ally, energy_density
+        // 右眼 [8..15]: scan_angle_norm, proximity, target_energy/200, entity_type, is_ally, energy_density, heading_diff, speed_diff
         let proximity_r = if nearest_dist[1] < f64::MAX {
             body_radius / (body_radius + nearest_dist[1])
         } else {
             0.0
         };
-        self.creatures[creature_idx].perception_cache[6] = scan_norm[1];
-        self.creatures[creature_idx].perception_cache[7] = proximity_r;
-        self.creatures[creature_idx].perception_cache[8] = (nearest_energy[1] / 200.0).min(1.0);
-        self.creatures[creature_idx].perception_cache[9] = nearest_type[1];
-        self.creatures[creature_idx].perception_cache[10] = nearest_is_ally[1];
-        self.creatures[creature_idx].perception_cache[11] =
+        self.creatures[creature_idx].perception_cache[8] = scan_norm[1];
+        self.creatures[creature_idx].perception_cache[9] = proximity_r;
+        self.creatures[creature_idx].perception_cache[10] = (nearest_energy[1] / 200.0).min(1.0);
+        self.creatures[creature_idx].perception_cache[11] = nearest_type[1];
+        self.creatures[creature_idx].perception_cache[12] = nearest_is_ally[1];
+        self.creatures[creature_idx].perception_cache[13] =
             (eye_energy_density[1] / config.energy_denominator).min(1.0);
+        self.creatures[creature_idx].perception_cache[14] = nearest_heading_diff[1];
+        self.creatures[creature_idx].perception_cache[15] = nearest_speed_diff[1];
     }
 
     // ========== 动作系统（7输出） ==========

@@ -24,7 +24,7 @@ pub trait TickExecutor: Send {
 pub struct CpuExecutor {
     networks: FxHashMap<u64, SpikingNetwork>,
     /// 待注入的输入（注入后清空）
-    pending_inputs: FxHashMap<u64, [f64; 13]>,
+    pending_inputs: FxHashMap<u64, [f64; 17]>,
     current_outputs: FxHashMap<u64, [f64; 7]>,
     /// 首次 tick（注入输入时）的直读输出值
     first_outputs: FxHashMap<u64, [f64; 7]>,

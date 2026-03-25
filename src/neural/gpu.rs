@@ -468,7 +468,7 @@ mod inner {
         }
 
         /// 上传感知输入（设置输入节点的 membrane 和 fired）
-        pub fn upload_inputs(&mut self, slot: usize, perception: &[f64; 13]) {
+        pub fn upload_inputs(&mut self, slot: usize, perception: &[f64; 17]) {
             if slot >= MAX_CREATURES {
                 return;
             }
