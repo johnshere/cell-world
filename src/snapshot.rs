@@ -89,6 +89,10 @@ impl WorldSnapshot {
             creature.genome.ensure_sorted_cache();
             creature.brain = SpikingNetwork::from_genome(&creature.genome);
         }
+        // 重建 clan_genomes 中的排序缓存（serde skip 导致反序列化后为空）
+        for genome in self.clan_genomes.values_mut() {
+            genome.ensure_sorted_cache();
+        }
 
         // 构建空间索引
         let cell_size = config.vision_range * 1.5;

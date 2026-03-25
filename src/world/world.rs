@@ -491,12 +491,15 @@ impl World {
             self.energy_grid_dirty = true;
             // 落地杀伤：damage = c × (1 - exp(-p × multiplier / c))
             for c in &mut self.creatures {
-                if c.alive {
+                if c.alive && c.energy > 0.0 {
                     let dx = c.x - x;
                     let dy = c.y - y;
                     if dx * dx + dy * dy < kill_r2 {
                         let damage = c.energy * (1.0 - (-current_energy * config.landing_damage_multiplier / c.energy).exp());
-                        c.energy -= damage;
+                        c.energy = (c.energy - damage).max(0.0);
+                        if c.energy <= 0.0 {
+                            c.alive = false;
+                        }
                     }
                 }
             }
@@ -541,12 +544,15 @@ impl World {
             self.energy_grid_dirty = true;
             // 落地杀伤：damage = c × (1 - exp(-p × multiplier / c))
             for c in &mut self.creatures {
-                if c.alive {
+                if c.alive && c.energy > 0.0 {
                     let cdx = c.x - x;
                     let cdy = c.y - y;
                     if cdx * cdx + cdy * cdy < kill_r2 {
                         let damage = c.energy * (1.0 - (-current_energy * config.landing_damage_multiplier / c.energy).exp());
-                        c.energy -= damage;
+                        c.energy = (c.energy - damage).max(0.0);
+                        if c.energy <= 0.0 {
+                            c.alive = false;
+                        }
                     }
                 }
             }
@@ -587,9 +593,9 @@ impl World {
         }
     }
 
-    // ========== 周围能量（粒子+生物） ==========
+    // ========== 周围能量（粒子+生物+痕迹） ==========
 
-    /// 查询 vision_range 内所有粒子能量 + 生物能量（复用缓冲区避免每次分配 Vec）
+    /// 查询 vision_range 内所有粒子能量 + 生物能量 + 痕迹能量（复用缓冲区避免每次分配 Vec）
     fn compute_nearby_energy(
         &self,
         x: f64,
@@ -597,6 +603,7 @@ impl World {
         config: &Config,
         energy_buf: &mut Vec<usize>,
         creature_buf: &mut Vec<usize>,
+        trail_buf: &mut Vec<usize>,
     ) -> f64 {
         let range = config.vision_range;
         let mut total = 0.0;
@@ -618,12 +625,27 @@ impl World {
         self.creature_grid.query_into(x, y, range, creature_buf);
         for &idx in creature_buf.iter() {
             let c = &self.creatures[idx];
-            if c.alive {
+            if c.alive && c.energy > 0.0 {
                 let dx = c.x - x;
                 let dy = c.y - y;
                 let dist_sq = dx * dx + dy * dy;
                 if dist_sq > DIST_MIN_SQ {
                     total += c.energy / dist_sq;
+                }
+            }
+        }
+        // 痕迹
+        if !self.trail_disabled {
+            self.trail_grid.query_into(x, y, range, trail_buf);
+            for &idx in trail_buf.iter() {
+                let t = &self.trail_points[idx];
+                if t.alive {
+                    let dx = t.x - x;
+                    let dy = t.y - y;
+                    let dist_sq = dx * dx + dy * dy;
+                    if dist_sq > DIST_MIN_SQ {
+                        total += t.energy / dist_sq;
+                    }
                 }
             }
         }
@@ -664,6 +686,7 @@ impl World {
         // nearby_energy 查询缓冲区复用
         let mut nearby_energy_buf = Vec::new();
         let mut nearby_creature_buf = Vec::new();
+        let mut nearby_trail_buf = Vec::new();
 
         // 分阶段整体计时（替代逐生物累加）
         let perceive_start = Instant::now();
@@ -680,13 +703,14 @@ impl World {
                 total_start // 占位，不会使用
             };
 
-            // 周围能量（粒子+生物）
+            // 周围能量（粒子+生物+痕迹）
             let nearby_energy = self.compute_nearby_energy(
                 self.creatures[i].x,
                 self.creatures[i].y,
                 config,
                 &mut nearby_energy_buf,
                 &mut nearby_creature_buf,
+                &mut nearby_trail_buf,
             );
 
             // 基础代谢（体型指数缩放）
@@ -712,7 +736,9 @@ impl World {
 
             self.creatures[i].age += dt;
 
-            if self.creatures[i].energy <= 0.0 {
+            // 能量 <= 0 或异常值（NaN/Inf）→ 死亡
+            let e = self.creatures[i].energy;
+            if e <= 0.0 || e.is_nan() || e.is_infinite() {
                 self.creatures[i].alive = false;
                 continue;
             }
@@ -1257,8 +1283,9 @@ impl World {
             // 咬合效率 = 1 - 基因相似度：相似度越高获取越少，渐变而非悬崖
             let similarity = self.creatures[idx].genome.similarity(&self.creatures[other_idx].genome);
             let efficiency = 1.0 - similarity;
-            self.creatures[other_idx].energy -= transfer;
-            self.creatures[idx].energy += transfer * efficiency;
+            let actual_transfer = transfer.min(self.creatures[other_idx].energy);
+            self.creatures[other_idx].energy -= actual_transfer;
+            self.creatures[idx].energy += actual_transfer * efficiency;
             self.action_counts[2] += 1;
 
             // 重置嘴巴冷却

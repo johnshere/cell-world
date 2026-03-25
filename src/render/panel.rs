@@ -167,6 +167,7 @@ impl StatsPanel {
         speed: &mut f64,
         paused: &mut bool,
         _config: &mut Config,
+        store: &Store,
     ) -> PanelAction {
         let mut action = PanelAction::default();
 
@@ -180,14 +181,6 @@ impl StatsPanel {
                     .clicked()
                 {
                     action.save_snapshot = true;
-                }
-                if ui
-                    .button("📋")
-                    .on_hover_text("基因库")
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .clicked()
-                {
-                    self.templates_open = !self.templates_open;
                 }
                 if ui
                     .button("⚙")
@@ -256,21 +249,6 @@ impl StatsPanel {
 
         ui.separator();
 
-        // 统计 + 随机投放按钮
-        ui.horizontal(|ui| {
-            ui.label("统计");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .button("+随机")
-                    .on_hover_text("投放5个随机生物")
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .clicked()
-                {
-                    action.spawn = Some(None);
-                }
-            });
-        });
-
         // 统计
         ui.horizontal_wrapped(|ui| {
             ui.label(format!("生物:{}", self.cached_stats.creature_count));
@@ -335,147 +313,151 @@ impl StatsPanel {
             });
         }
 
-        action
-    }
-
-    /// 渲染基因库弹窗（模板管理+种族保存）
-    pub fn render_templates_window(
-        &mut self,
-        ctx: &egui::Context,
-        store: &Store,
-    ) -> PanelAction {
-        let mut action = PanelAction::default();
-        if !self.templates_open {
-            return action;
-        }
-
-        let mut open = self.templates_open;
-        egui::Window::new("基因库")
-            .open(&mut open)
-            .default_width(360.0)
-            .resizable(true)
-            .show(ctx, |ui| {
-                let templates = store.templates();
-                let auto_count = templates.iter().filter(|t| t.auto_recorded == Some(true)).count();
-                let manual_count = templates.len() - auto_count;
-
-                ui.horizontal(|ui| {
-                    ui.label(format!("自动记录: {}  手动保存: {}", auto_count, manual_count));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if auto_count > 0 {
-                            if ui.button("清空自动记录").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                                action.clear_dominant = true;
-                            }
-                        }
-                    });
-                });
-                ui.separator();
-
-                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
-                    if templates.is_empty() {
-                        ui.label("暂无保存的基因模板");
-                        return;
-                    }
-
-                    for template in templates {
-                        let is_auto = template.auto_recorded == Some(true);
-                        let tag = if is_auto { "⚡" } else { "📌" };
-
-                        egui::Frame::none()
-                            .inner_margin(egui::Margin::symmetric(4.0, 3.0))
-                            .stroke(egui::Stroke::new(0.5, egui::Color32::from_gray(60)))
-                            .rounding(3.0)
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(format!("{} {}", tag, template.name));
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            if ui
-                                                .small_button("🗑")
-                                                .on_hover_text("删除")
-                                                .clicked()
-                                            {
-                                                action.delete_template =
-                                                    Some(template.name.clone());
-                                            }
-                                            if ui
-                                                .small_button("投放")
-                                                .on_hover_text("投放5个该模板生物")
-                                                .clicked()
-                                            {
-                                                action.spawn =
-                                                    Some(Some(template.name.clone()));
-                                            }
-                                        },
-                                    );
-                                });
-
-                                // 信息行
-                                let mut info_parts: Vec<String> = Vec::new();
-                                info_parts.push(format!("能量:{:.0}", template.initial_energy));
-                                if let Some(score) = template.score {
-                                    info_parts.push(format!("评分:{:.1}", score));
-                                }
-                                if let Some(ratio) = template.population_ratio {
-                                    info_parts.push(format!("占比:{:.0}%", ratio * 100.0));
-                                }
-                                if let Some(age) = template.avg_age {
-                                    info_parts.push(format!("均龄:{:.0}s", age));
-                                }
-                                if let Some(gen) = template.max_generation {
-                                    info_parts.push(format!("代:{}", gen));
-                                }
-                                if let Some(avg_e) = template.avg_energy {
-                                    info_parts.push(format!("均能:{:.0}", avg_e));
-                                }
-
-                                ui.label(
-                                    egui::RichText::new(info_parts.join("  "))
-                                        .small()
-                                        .color(egui::Color32::from_gray(160)),
-                                );
-
-                                // 基因结构信息
-                                let conn_count = template.genome.connections.len();
-                                let node_count = template.genome.nodes.len();
-                                let hidden = node_count.saturating_sub(
-                                    crate::neural::Genome::INPUT_SIZE
-                                        + crate::neural::Genome::OUTPUT_SIZE,
-                                );
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "节点:{} (隐:{})  连接:{}",
-                                        node_count, hidden, conn_count
-                                    ))
-                                    .small()
-                                    .color(egui::Color32::from_gray(120)),
-                                );
-                            });
-                        ui.add_space(2.0);
-                    }
-                });
-
-                // 种族快速保存区
-                if !self.cached_stats.top_clans.is_empty() {
-                    ui.separator();
-                    ui.label("当前种族");
-                    for (i, &(clan_hash, count)) in self.cached_stats.top_clans.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            let color = species_to_color(clan_hash);
-                            ui.colored_label(color, format!("{}. {} 个体", i + 1, count));
-                            if ui
-                                .small_button("💾")
-                                .on_hover_text("保存该族代表基因")
-                                .clicked()
-                            {
-                                action.save_clan = Some(clan_hash);
-                            }
-                        });
-                    }
+        // 基因库折叠区
+        ui.separator();
+        ui.horizontal(|ui| {
+            let label = if self.templates_open { "📋 基因库 ▾" } else { "📋 基因库 ▸" };
+            if ui.button(label)
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                self.templates_open = !self.templates_open;
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .button("+随机")
+                    .on_hover_text("投放5个随机生物")
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    action.spawn = Some(None);
                 }
             });
-        self.templates_open = open;
+        });
+
+        if self.templates_open {
+            let templates = store.templates();
+            let auto_count = templates.iter().filter(|t| t.auto_recorded == Some(true)).count();
+            let manual_count = templates.len() - auto_count;
+
+            ui.horizontal(|ui| {
+                ui.label(format!("自动:{} 手动:{}", auto_count, manual_count));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if auto_count > 0 {
+                        if ui.small_button("清空自动").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            action.clear_dominant = true;
+                        }
+                    }
+                });
+            });
+
+            egui::ScrollArea::vertical()
+                .id_salt("gene_bank_scroll")
+                .max_height(300.0)
+                .show(ui, |ui| {
+                if templates.is_empty() {
+                    ui.label("暂无保存的基因模板");
+                    return;
+                }
+
+                for template in templates {
+                    let is_auto = template.auto_recorded == Some(true);
+                    let tag = if is_auto { "⚡" } else { "📌" };
+
+                    egui::Frame::none()
+                        .inner_margin(egui::Margin::symmetric(4.0, 3.0))
+                        .stroke(egui::Stroke::new(0.5, egui::Color32::from_gray(60)))
+                        .rounding(3.0)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("{} {}", tag, template.name));
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui
+                                            .small_button("🗑")
+                                            .on_hover_text("删除")
+                                            .clicked()
+                                        {
+                                            action.delete_template =
+                                                Some(template.name.clone());
+                                        }
+                                        if ui
+                                            .small_button("投放")
+                                            .on_hover_text("投放5个该模板生物")
+                                            .clicked()
+                                        {
+                                            action.spawn =
+                                                Some(Some(template.name.clone()));
+                                        }
+                                    },
+                                );
+                            });
+
+                            // 信息行
+                            let mut info_parts: Vec<String> = Vec::new();
+                            info_parts.push(format!("能量:{:.0}", template.initial_energy));
+                            if let Some(score) = template.score {
+                                info_parts.push(format!("评分:{:.1}", score));
+                            }
+                            if let Some(ratio) = template.population_ratio {
+                                info_parts.push(format!("占比:{:.0}%", ratio * 100.0));
+                            }
+                            if let Some(age) = template.avg_age {
+                                info_parts.push(format!("均龄:{:.0}s", age));
+                            }
+                            if let Some(gen) = template.max_generation {
+                                info_parts.push(format!("代:{}", gen));
+                            }
+                            if let Some(avg_e) = template.avg_energy {
+                                info_parts.push(format!("均能:{:.0}", avg_e));
+                            }
+
+                            ui.label(
+                                egui::RichText::new(info_parts.join("  "))
+                                    .small()
+                                    .color(egui::Color32::from_gray(160)),
+                            );
+
+                            // 基因结构信息
+                            let conn_count = template.genome.connections.len();
+                            let node_count = template.genome.nodes.len();
+                            let hidden = node_count.saturating_sub(
+                                crate::neural::Genome::INPUT_SIZE
+                                    + crate::neural::Genome::OUTPUT_SIZE,
+                            );
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "节点:{} (隐:{})  连接:{}",
+                                    node_count, hidden, conn_count
+                                ))
+                                .small()
+                                .color(egui::Color32::from_gray(120)),
+                            );
+                        });
+                    ui.add_space(2.0);
+                }
+            });
+
+            // 种族快速保存区
+            if !self.cached_stats.top_clans.is_empty() {
+                ui.separator();
+                ui.label("当前种族");
+                for (i, &(clan_hash, count)) in self.cached_stats.top_clans.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        let color = species_to_color(clan_hash);
+                        ui.colored_label(color, format!("{}. {} 个体", i + 1, count));
+                        if ui
+                            .small_button("💾")
+                            .on_hover_text("保存该族代表基因")
+                            .clicked()
+                        {
+                            action.save_clan = Some(clan_hash);
+                        }
+                    });
+                }
+            }
+        }
 
         action
     }

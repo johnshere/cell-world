@@ -1013,6 +1013,7 @@ impl eframe::App for CellWorldApp {
                     &mut self.speed,
                     &mut self.paused,
                     &mut self.config,
+                    &self.store,
                 );
 
                 // 能量趋势常驻显示
@@ -1038,22 +1039,6 @@ impl eframe::App for CellWorldApp {
                     });
                 }
             });
-
-        // 基因库弹窗（独立 Window，不在 SidePanel 内）
-        let templates_action = self.panel.render_templates_window(ctx, &self.store);
-        // 合并弹窗产生的操作
-        if templates_action.spawn.is_some() {
-            panel_action.spawn = templates_action.spawn;
-        }
-        if templates_action.delete_template.is_some() {
-            panel_action.delete_template = templates_action.delete_template;
-        }
-        if templates_action.clear_dominant {
-            panel_action.clear_dominant = true;
-        }
-        if templates_action.save_clan.is_some() {
-            panel_action.save_clan = templates_action.save_clan;
-        }
 
         // 速度变化时同步到配置文件
         if (self.speed - old_speed).abs() > f64::EPSILON {
