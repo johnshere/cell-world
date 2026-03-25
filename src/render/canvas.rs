@@ -1,4 +1,7 @@
-use egui::{epaint::PathShape, Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{
+    epaint::{Mesh, PathShape, Vertex},
+    Color32, Pos2, Rect, Sense, Stroke, Ui, Vec2,
+};
 use rustc_hash::FxHashMap;
 
 use super::Selection;
@@ -46,10 +49,8 @@ impl WorldCanvas {
 
     /// 计算当前可见的世界坐标范围
     pub fn get_visible_world_bounds(&self, screen_rect: Rect) -> VisibleWorldBounds {
-        // 屏幕左上角对应的世界坐标
         let min_x = (-self.offset.x / self.scale) as f64;
         let min_y = (-self.offset.y / self.scale) as f64;
-        // 屏幕右下角对应的世界坐标
         let max_x = ((screen_rect.width() - self.offset.x) / self.scale) as f64;
         let max_y = ((screen_rect.height() - self.offset.y) / self.scale) as f64;
 
@@ -73,6 +74,13 @@ impl WorldCanvas {
         let available_size = ui.available_size();
         let (response, painter) = ui.allocate_painter(available_size, Sense::click_and_drag());
         let rect = response.rect;
+
+        // 计算白色像素 UV（用于批量 Mesh 渲染纯色四边形）
+        let font_image_size = ui.ctx().fonts(|f| f.font_image_size());
+        let white_uv = Pos2::new(
+            0.5 / font_image_size[0] as f32,
+            0.5 / font_image_size[1] as f32,
+        );
 
         // 首次渲染时设置默认缩放并居中视窗（原点在屏幕中心）
         if !self.initialized {
@@ -113,42 +121,20 @@ impl WorldCanvas {
         let vis_min_y = vis.min_y - margin;
         let vis_max_y = vis.max_y + margin;
 
-        // === LOD 和自适应渲染质量 ===
+        // === LOD ===
         let draw_explode = self.scale > 0.4;
         let draw_trails = self.scale > 0.12 && !world.trail_disabled;
         let creature_dot_mode = self.scale <= 0.15;
-        // 缩放越小 → 可见实体越多 → 降低渲染上限
-        let zoom_factor: f64 = if self.scale < 0.2 {
-            0.4
-        } else if self.scale < 0.4 {
-            0.7
-        } else {
-            1.0
-        };
-        // 帧率低时进一步降低渲染数量
-        let fps_factor: f64 = if self.fps > 1.0 && self.fps < 30.0 {
-            (self.fps / 30.0).clamp(0.3, 1.0)
-        } else {
-            1.0
-        };
-        let quality = zoom_factor * fps_factor;
-        let max_particles = (4000.0 * quality) as usize;
-        let max_trails = (3000.0 * quality) as usize;
 
-        // 绘制能量粒子（LOD + 数量限制）
+        // ===== 绘制能量粒子（批量 Mesh，跳过 egui 曲面细分）=====
         {
-            let stride = if world.energy_particles.len() > max_particles * 2 {
-                world.energy_particles.len() / max_particles
-            } else {
-                1
-            };
-            for (i, particle) in world.energy_particles.iter().enumerate() {
-                if stride > 1 && i % stride != 0 {
-                    // 选中粒子始终绘制
-                    if *selection != Selection::Energy(particle.id) {
-                        continue;
-                    }
-                }
+            let mut mesh = Mesh::default();
+            mesh.vertices
+                .reserve(world.energy_particles.len().min(8000) * 4);
+            mesh.indices
+                .reserve(world.energy_particles.len().min(8000) * 6);
+
+            for particle in &world.energy_particles {
                 if !particle.alive {
                     continue;
                 }
@@ -162,45 +148,48 @@ impl WorldCanvas {
                 }
                 let pos =
                     self.world_to_screen(Pos2::new(particle.x as f32, particle.y as f32), rect);
-                // 爆炸特效（仅高缩放时绘制，减少 Shape 开销）
+                // 爆炸特效（仅高缩放，单独 Shape — 数量有限）
                 if draw_explode {
                     let age = particle.age as f32;
-                    let explode_duration = 1.5_f32;
-                    if age < explode_duration {
-                        let progress = age / explode_duration;
+                    if age < 1.5 {
+                        let progress = age / 1.5;
                         let radius = (1.5 + 2.5 * progress) * self.scale;
-                        let r = 255u8;
                         let g = (80.0 + 140.0 * progress) as u8;
                         let b = (20.0 + 80.0 * progress) as u8;
                         let alpha = (80.0 + 175.0 * progress) as u8;
-                        let color = Color32::from_rgba_unmultiplied(r, g, b, alpha);
-                        painter.circle_filled(pos, radius, color);
+                        painter.circle_filled(
+                            pos,
+                            radius,
+                            Color32::from_rgba_unmultiplied(255, g, b, alpha),
+                        );
                     }
                 }
+                // 基础粒子 → 四边形加入批量 Mesh（微粒与圆无视觉差异）
                 let alpha = (particle.energy / particle.initial_energy).clamp(0.0, 1.0) as f32;
                 let color =
                     Color32::from_rgba_unmultiplied(255, 220, 100, (alpha * 200.0) as u8);
-                let radius = 1.064 * self.scale;
-                painter.circle_filled(pos, radius, color);
+                let r = 1.064 * self.scale;
+                add_quad(&mut mesh, pos, r, color, white_uv);
 
-                // 选中描边
+                // 选中描边（极少触发）
                 if *selection == Selection::Energy(particle.id) {
-                    painter.circle_stroke(pos, radius + 2.0, selection_stroke);
+                    painter.circle_stroke(pos, r + 2.0, selection_stroke);
                 }
+            }
+            if !mesh.vertices.is_empty() {
+                painter.add(egui::Shape::Mesh(mesh));
             }
         }
 
-        // 绘制痕迹点（LOD：缩放过小时完全跳过 + 数量限制）
+        // ===== 绘制痕迹点（批量 Mesh）=====
         if draw_trails {
-            let stride = if world.trail_points.len() > max_trails * 2 {
-                world.trail_points.len() / max_trails
-            } else {
-                1
-            };
-            for (i, trail) in world.trail_points.iter().enumerate() {
-                if stride > 1 && i % stride != 0 {
-                    continue;
-                }
+            let mut mesh = Mesh::default();
+            mesh.vertices
+                .reserve(world.trail_points.len().min(6000) * 4);
+            mesh.indices
+                .reserve(world.trail_points.len().min(6000) * 6);
+
+            for trail in &world.trail_points {
                 if !trail.alive {
                     continue;
                 }
@@ -216,12 +205,19 @@ impl WorldCanvas {
                     self.world_to_screen(Pos2::new(trail.x as f32, trail.y as f32), rect);
                 let age_ratio = (1.0 - trail.age / 38.0).max(0.0) as f32;
                 let alpha = (80.0 * age_ratio) as u8;
-                let color = species_to_color(trail.clan_hash);
-                let trail_color =
-                    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
-                let radius = (trail.visual_radius as f32 * 0.2 * age_ratio * self.scale)
+                let base_color = species_to_color(trail.clan_hash);
+                let color = Color32::from_rgba_unmultiplied(
+                    base_color.r(),
+                    base_color.g(),
+                    base_color.b(),
+                    alpha,
+                );
+                let r = (trail.visual_radius as f32 * 0.2 * age_ratio * self.scale)
                     .max(0.3 * self.scale);
-                painter.circle_filled(pos, radius, trail_color);
+                add_quad(&mut mesh, pos, r, color, white_uv);
+            }
+            if !mesh.vertices.is_empty() {
+                painter.add(egui::Shape::Mesh(mesh));
             }
         }
 
@@ -257,7 +253,17 @@ impl WorldCanvas {
             }
         }
 
-        // 绘制生物（LOD：极小缩放时简化为单色点）
+        // ===== 绘制生物 =====
+        // 极低缩放时用批量 Mesh 渲染点
+        let mut dot_mesh = if creature_dot_mode {
+            let mut m = Mesh::default();
+            m.vertices.reserve(world.creatures.len() * 4);
+            m.indices.reserve(world.creatures.len() * 6);
+            Some(m)
+        } else {
+            None
+        };
+
         for creature in &world.creatures {
             if !creature.alive {
                 continue;
@@ -277,9 +283,11 @@ impl WorldCanvas {
             let is_selected = *selection == Selection::Creature(creature.id);
 
             if creature_dot_mode && !is_selected {
-                // 极低缩放：仅绘制单色点，跳过器官
+                // 极低缩放：仅绘制单色点，加入批量 Mesh
                 let dot_r = (1.0_f32).max(self.scale);
-                painter.circle_filled(pos, dot_r, color);
+                if let Some(ref mut mesh) = dot_mesh {
+                    add_quad(mesh, pos, dot_r, color, white_uv);
+                }
             } else {
                 let radius =
                     ((creature.energy as f32 * 1.28).cbrt()).clamp(1.5, 8.0) * self.scale;
@@ -345,6 +353,12 @@ impl WorldCanvas {
                 if is_selected {
                     painter.circle_stroke(pos, radius + 2.0, Stroke::new(1.0, Color32::WHITE));
                 }
+            }
+        }
+
+        if let Some(mesh) = dot_mesh {
+            if !mesh.vertices.is_empty() {
+                painter.add(egui::Shape::Mesh(mesh));
             }
         }
 
@@ -485,6 +499,34 @@ impl Default for WorldCanvas {
     fn default() -> Self {
         Self::new(0.6)
     }
+}
+
+/// 向 Mesh 添加一个纯色四边形（替代 circle_filled，跳过曲面细分）
+#[inline]
+fn add_quad(mesh: &mut Mesh, center: Pos2, half_size: f32, color: Color32, uv: Pos2) {
+    let idx = mesh.vertices.len() as u32;
+    mesh.vertices.push(Vertex {
+        pos: Pos2::new(center.x - half_size, center.y - half_size),
+        uv,
+        color,
+    });
+    mesh.vertices.push(Vertex {
+        pos: Pos2::new(center.x + half_size, center.y - half_size),
+        uv,
+        color,
+    });
+    mesh.vertices.push(Vertex {
+        pos: Pos2::new(center.x + half_size, center.y + half_size),
+        uv,
+        color,
+    });
+    mesh.vertices.push(Vertex {
+        pos: Pos2::new(center.x - half_size, center.y + half_size),
+        uv,
+        color,
+    });
+    mesh.indices
+        .extend_from_slice(&[idx, idx + 1, idx + 2, idx, idx + 2, idx + 3]);
 }
 
 /// HSL 转 RGB
