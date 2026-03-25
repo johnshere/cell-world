@@ -86,6 +86,7 @@ impl WorldSnapshot {
         let config = self.config.clone();
         // 从 genome 重建每个生物的 brain
         for creature in &mut self.creatures {
+            creature.genome.ensure_sorted_cache();
             creature.brain = SpikingNetwork::from_genome(&creature.genome);
         }
 

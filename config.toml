@@ -1,5 +1,5 @@
 # 初始模拟速度
-initial_speed = 8.0
+initial_speed = 3.0
 # 最小生物数量（低于此值自动补充）
 min_creatures = 35
 # 初始能量
@@ -15,7 +15,7 @@ volcano_y = 0.0
 # 火山喷发间隔（秒）
 volcano_interval = 20.0
 # 火山喷射半径
-volcano_radius = 2000.0
+volcano_radius = 1500.0
 # 每次喷发粒子数
 volcano_count = 160
 # 火山粒子能量
@@ -80,12 +80,12 @@ heat_floor = 0.05
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
 age_metabolism_factor = 0.015
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
-metabolism_exponent = 1.6
+metabolism_exponent = 2.5
 # 移动消耗（每单位距离）
 move_cost = 0.0005
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.025
+heat_dissipation_coefficient = 0.035
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -138,6 +138,7 @@ snn_ticks_per_frame = 10
 neural_backend = "auto"
 # 异步模式 tick 频率 (ticks/s)
 neural_tick_rate = 600.0
-min_landing_damage_ratio = 0.2
+landing_damage_multiplier = 1.0
 base_metabolism = 0.025
 max_speed = 20.0
+min_landing_damage_ratio = 0.2

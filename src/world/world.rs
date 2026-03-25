@@ -489,15 +489,14 @@ impl World {
                 ParticleSource::Volcano,
             ));
             self.energy_grid_dirty = true;
-            // 落地削弱：damage_ratio = max(p/(p+c), min_ratio)
+            // 落地杀伤：damage = c × (1 - exp(-p × multiplier / c))
             for c in &mut self.creatures {
                 if c.alive {
                     let dx = c.x - x;
                     let dy = c.y - y;
                     if dx * dx + dy * dy < kill_r2 {
-                        let ratio = (current_energy / (current_energy + c.energy))
-                            .max(config.min_landing_damage_ratio);
-                        c.energy -= c.energy * ratio;
+                        let damage = c.energy * (1.0 - (-current_energy * config.landing_damage_multiplier / c.energy).exp());
+                        c.energy -= damage;
                     }
                 }
             }
@@ -540,15 +539,14 @@ impl World {
                 ParticleSource::Meteorite,
             ));
             self.energy_grid_dirty = true;
-            // 落地削弱：damage_ratio = max(p/(p+c), min_ratio)
+            // 落地杀伤：damage = c × (1 - exp(-p × multiplier / c))
             for c in &mut self.creatures {
                 if c.alive {
                     let cdx = c.x - x;
                     let cdy = c.y - y;
                     if cdx * cdx + cdy * cdy < kill_r2 {
-                        let ratio = (current_energy / (current_energy + c.energy))
-                            .max(config.min_landing_damage_ratio);
-                        c.energy -= c.energy * ratio;
+                        let damage = c.energy * (1.0 - (-current_energy * config.landing_damage_multiplier / c.energy).exp());
+                        c.energy -= damage;
                     }
                 }
             }
@@ -963,7 +961,8 @@ impl World {
             }
         }
 
-        // === 生物 ===
+        // === 生物（延迟 similarity 计算：只记录最近生物索引，扫完后算一次） ===
+        let mut nearest_creature_idx: [Option<usize>; 2] = [None; 2];
         self.creature_grid
             .query_into(cx, cy, eye_range, &mut creature_buf);
         for &idx in &creature_buf {
@@ -982,7 +981,6 @@ impl World {
                 continue;
             }
             let angle = dy.atan2(dx);
-            let is_ally = if self.creatures[idx].clan_hash == my_clan_hash { 1.0 } else { 0.0 };
 
             for eye_i in 0..2 {
                 // 全FOV → 能量密度
@@ -992,13 +990,24 @@ impl World {
                         eye_energy_density[eye_i] += other.energy / dist_sq;
                     }
                 }
-                // 窄波束 → 最近目标
+                // 窄波束 → 最近目标（不算 similarity，只记索引）
                 let diff_beam = angle_diff(angle, beam_angles[eye_i]);
                 if diff_beam.abs() <= beam_half_width && dist < nearest_dist[eye_i] {
                     nearest_dist[eye_i] = dist;
                     nearest_energy[eye_i] = other.energy;
                     nearest_type[eye_i] = 1.0; // 生物
-                    nearest_is_ally[eye_i] = is_ally;
+                    nearest_creature_idx[eye_i] = Some(idx);
+                }
+            }
+        }
+
+        // 延迟计算：只对最终最近的生物目标算 similarity（每眼最多1次）
+        for eye_i in 0..2 {
+            if let Some(other_idx) = nearest_creature_idx[eye_i] {
+                if nearest_type[eye_i] == 1.0 {
+                    nearest_is_ally[eye_i] = self.creatures[creature_idx]
+                        .genome
+                        .similarity(&self.creatures[other_idx].genome);
                 }
             }
         }
@@ -1245,8 +1254,9 @@ impl World {
             let damage_ratio = attacker_score / (attacker_score + defender_score + 0.001);
             let transfer = other_energy * damage_ratio * config.bite_transfer_rate;
 
-            let same_clan = self.creatures[idx].clan_hash == self.creatures[other_idx].clan_hash;
-            let efficiency = if same_clan { 0.0 } else { 1.0 };
+            // 咬合效率 = 1 - 基因相似度：相似度越高获取越少，渐变而非悬崖
+            let similarity = self.creatures[idx].genome.similarity(&self.creatures[other_idx].genome);
+            let efficiency = 1.0 - similarity;
             self.creatures[other_idx].energy -= transfer;
             self.creatures[idx].energy += transfer * efficiency;
             self.action_counts[2] += 1;
@@ -1257,20 +1267,19 @@ impl World {
         }
     }
 
-    /// 计算指定生物附近同族总能量（用于战力计算，范围=vision_range）
+    /// 计算指定生物附近同族总能量（按基因相似度加权，范围=vision_range）
     fn compute_nearby_ally_energy(&self, creature_idx: usize, config: &Config) -> f64 {
         let cx = self.creatures[creature_idx].x;
         let cy = self.creatures[creature_idx].y;
-        let my_clan = self.creatures[creature_idx].clan_hash;
         let nearby = self.creature_grid.query(cx, cy, config.vision_range);
         let mut total = 0.0;
         for &other_idx in &nearby {
             if other_idx == creature_idx || !self.creatures[other_idx].alive {
                 continue;
             }
-            if self.creatures[other_idx].clan_hash == my_clan {
-                total += self.creatures[other_idx].energy;
-            }
+            // 按基因相似度加权援助：相似度越高援助越大，渐变过渡
+            let similarity = self.creatures[creature_idx].genome.similarity(&self.creatures[other_idx].genome);
+            total += self.creatures[other_idx].energy * similarity;
         }
         total
     }
@@ -1350,7 +1359,6 @@ impl World {
 
     fn find_mate(&self, idx: usize, config: &Config) -> Option<Genome> {
         let creature = &self.creatures[idx];
-        let my_clan = creature.clan_hash;
         let nearby = self
             .creature_grid
             .query(creature.x, creature.y, config.contact_range);
@@ -1361,7 +1369,10 @@ impl World {
             }
             let other = &self.creatures[other_idx];
             let dist = ((other.x - creature.x).powi(2) + (other.y - creature.y).powi(2)).sqrt();
-            if dist < config.contact_range && other.clan_hash == my_clan {
+            // 基因相似度 >= 阈值即可配对，不再要求同 clan_hash
+            if dist < config.contact_range
+                && creature.genome.similarity(&other.genome) >= config.species_similarity_threshold
+            {
                 return Some(other.genome.clone());
             }
         }

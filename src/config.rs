@@ -121,9 +121,12 @@ pub struct Config {
     pub volcano_kill_radius: f64,
     /// 陨石落地杀伤半径
     pub meteorite_kill_radius: f64,
-    /// 落地最低伤害比例（保证至少削掉此比例能量）
-    #[serde(default = "default_min_landing_damage_ratio")]
+    /// 落地最低伤害比例（已废弃，保留兼容旧config）
+    #[serde(default)]
     pub min_landing_damage_ratio: f64,
+    /// 落地杀伤系数（新公式：damage = c × (1 - exp(-p × multiplier / c))）
+    #[serde(default = "default_landing_damage_multiplier")]
+    pub landing_damage_multiplier: f64,
 
     // === 痕迹点 ===
     /// 痕迹点能量衰减率（/秒）
@@ -157,8 +160,8 @@ pub struct Config {
 fn default_max_speed() -> f64 {
     20.0
 }
-fn default_min_landing_damage_ratio() -> f64 {
-    0.15
+fn default_landing_damage_multiplier() -> f64 {
+    1.0
 }
 fn default_base_metabolism() -> f64 {
     0.025

@@ -72,7 +72,9 @@ impl Store {
                 let path = entry.path();
                 if path.extension().map(|e| e == "json").unwrap_or(false) {
                     if let Ok(content) = fs::read_to_string(&path) {
-                        if let Ok(template) = serde_json::from_str::<CreatureTemplate>(&content) {
+                        if let Ok(mut template) = serde_json::from_str::<CreatureTemplate>(&content)
+                        {
+                            template.genome.ensure_sorted_cache();
                             self.templates.push(template);
                         }
                     }

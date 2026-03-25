@@ -56,12 +56,15 @@ pub struct Genome {
     pub nodes: Vec<NodeGene>,
     pub connections: Vec<ConnectionGene>,
     next_node_id: usize,
+    /// 预排序的启用连接缓存（用于快速 similarity 比较，避免每次重复排序+分配）
+    #[cfg_attr(feature = "persistence", serde(skip))]
+    sorted_conns_cache: Vec<(usize, usize, i64)>,
 }
 
 impl Genome {
     /// 输入维度 = 13
-    /// 左眼 [0..5]: 扫描角归一化, 目标接近度, 目标能量, 实体类型(0/0.33/0.67/1.0), 是否同族, 能量密度
-    /// 右眼 [6..11]: 扫描角归一化, 目标接近度, 目标能量, 实体类型, 是否同族, 能量密度
+    /// 左眼 [0..5]: 扫描角归一化, 目标接近度, 目标能量, 实体类型(0/0.33/0.67/1.0), 基因相似度(生物)/同族(痕迹), 能量密度
+    /// 右眼 [6..11]: 扫描角归一化, 目标接近度, 目标能量, 实体类型, 基因相似度/同族, 能量密度
     /// 自身 [12]: 能量(/2000)
     pub const INPUT_SIZE: usize = 13;
     /// 输出维度（固定7个）
@@ -117,11 +120,33 @@ impl Genome {
         }
 
         let next_node_id = Self::INPUT_SIZE + Self::OUTPUT_SIZE;
-        Self {
+        let mut genome = Self {
             nodes,
             connections,
             next_node_id,
+            sorted_conns_cache: Vec::new(),
+        };
+        genome.rebuild_sorted_cache();
+        genome
+    }
+
+    /// 确保排序缓存已初始化（反序列化后缓存为空，需要重建）
+    pub fn ensure_sorted_cache(&mut self) {
+        if self.sorted_conns_cache.is_empty() && !self.connections.is_empty() {
+            self.rebuild_sorted_cache();
         }
+    }
+
+    /// 重建预排序连接缓存（创建/变异/交叉后调用）
+    fn rebuild_sorted_cache(&mut self) {
+        self.sorted_conns_cache = self
+            .connections
+            .iter()
+            .filter(|c| c.enabled)
+            .map(|c| (c.in_node, c.out_node, (c.weight * 1000.0) as i64))
+            .collect();
+        self.sorted_conns_cache
+            .sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
     }
 
     /// 变异（所有变异逻辑使用同一个概率）
@@ -177,6 +202,7 @@ impl Genome {
             }
         }
 
+        child.rebuild_sorted_cache();
         child
     }
 
@@ -305,22 +331,9 @@ impl Genome {
 
     /// 计算与另一个基因组的相似度（排序归并，零 HashMap 分配）
     pub fn similarity(&self, other: &Genome) -> f64 {
-        // 收集并排序启用的连接
-        let mut self_conns: Vec<(usize, usize, f64)> = self
-            .connections
-            .iter()
-            .filter(|c| c.enabled)
-            .map(|c| (c.in_node, c.out_node, c.weight))
-            .collect();
-        self_conns.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
-
-        let mut other_conns: Vec<(usize, usize, f64)> = other
-            .connections
-            .iter()
-            .filter(|c| c.enabled)
-            .map(|c| (c.in_node, c.out_node, c.weight))
-            .collect();
-        other_conns.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        // 使用预排序缓存，零分配零排序
+        let self_conns = &self.sorted_conns_cache;
+        let other_conns = &other.sorted_conns_cache;
 
         if self_conns.is_empty() && other_conns.is_empty() {
             return 1.0;
@@ -337,7 +350,9 @@ impl Genome {
             let k2 = (other_conns[j].0, other_conns[j].1);
             match k1.cmp(&k2) {
                 std::cmp::Ordering::Equal => {
-                    similarity_sum += 1.0 - (self_conns[i].2 - other_conns[j].2).abs() / 4.0;
+                    // weight 已乘1000存为 i64，差值/4000 等价于原来的 /4.0
+                    let diff = (self_conns[i].2 - other_conns[j].2).unsigned_abs();
+                    similarity_sum += 1.0 - diff as f64 / 4000.0;
                     total += 1;
                     i += 1;
                     j += 1;
@@ -418,10 +433,13 @@ impl Genome {
 
         let next_node_id = fitter.next_node_id.max(weaker.next_node_id);
 
-        Genome {
+        let mut genome = Genome {
             nodes: child_nodes,
             connections: child_connections,
             next_node_id,
-        }
+            sorted_conns_cache: Vec::new(),
+        };
+        genome.rebuild_sorted_cache();
+        genome
     }
 }

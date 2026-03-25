@@ -663,8 +663,8 @@ impl CellWorldApp {
                     &mut c.meteorite_kill_radius, 0.5, 1.0..=50.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "落地最低伤害", "落地至少削掉此比例能量(0~1)",
-                    &mut c.min_landing_damage_ratio, 0.01, 0.0..=1.0,
+                    ui, "落地杀伤系数", "落地杀伤乘数(0.1~3.0)",
+                    &mut c.landing_damage_multiplier, 0.1, 0.1..=3.0,
                 );
             });
 
