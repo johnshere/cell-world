@@ -76,10 +76,10 @@ impl NeuralBridge {
         self.input_consumed.store(false, Ordering::Release);
     }
 
-    /// 读取输出（世界线程调用）
+    /// 读取输出（世界线程调用，take 替代 clone 避免分配）
     pub fn read_outputs(&self) -> Vec<CreatureOutput> {
-        if let Ok(front) = self.output_front.lock() {
-            front.clone()
+        if let Ok(mut front) = self.output_front.lock() {
+            std::mem::take(&mut *front)
         } else {
             Vec::new()
         }
@@ -104,10 +104,10 @@ impl NeuralBridge {
 
     // === 神经线程侧 API ===
 
-    /// 读取输入（神经线程调用）
+    /// 读取输入（神经线程调用，take 替代 clone 避免分配）
     pub(crate) fn read_inputs_back(&self) -> Vec<CreatureInput> {
-        if let Ok(back) = self.input_back.lock() {
-            back.clone()
+        if let Ok(mut back) = self.input_back.lock() {
+            std::mem::take(&mut *back)
         } else {
             Vec::new()
         }
@@ -154,8 +154,8 @@ impl NeuralBridgeHandle {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
         {
-            if let Ok(back) = self.input_back.lock() {
-                Some(back.clone())
+            if let Ok(mut back) = self.input_back.lock() {
+                Some(std::mem::take(&mut *back))
             } else {
                 None
             }

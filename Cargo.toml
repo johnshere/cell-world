@@ -1,6 +1,6 @@
 [package]
 name = "cell-world"
-version = "2.0.0"
+version = "2.1.0"
 edition = "2021"
 description = "Neural network emergence ecosystem simulator"
 authors = ["Your Name"]
@@ -15,6 +15,9 @@ rand = "0.8"
 
 # 哈希
 rustc-hash = "2.0"
+
+# 并行计算
+rayon = "1.10"
 
 # 时间
 chrono = "0.4"

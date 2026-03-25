@@ -227,6 +227,9 @@ mod inner {
         nodes_cpu: Vec<GpuNode>,
         connections_cpu: Vec<GpuConnection>,
         meta_cpu: Vec<GpuCreatureMeta>,
+        // 异步 readback 状态
+        pending_readback: Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
+        last_raw_outputs: Vec<f32>,
     }
 
     impl GpuCompute {
@@ -348,6 +351,8 @@ mod inner {
                 nodes_cpu: vec![GpuNode::default(); total_nodes],
                 connections_cpu: vec![GpuConnection::default(); total_conns],
                 meta_cpu: vec![GpuCreatureMeta::default(); MAX_CREATURES],
+                pending_readback: None,
+                last_raw_outputs: vec![0.0f32; total_outputs],
             })
         }
 
@@ -548,8 +553,11 @@ mod inner {
             self.ping = !self.ping;
         }
 
-        /// 读回输出（阻塞）
-        pub fn readback_outputs(&self) -> Vec<f32> {
+        /// 发起异步 readback（非阻塞：copy + map_async，不等待 GPU 完成）
+        pub fn begin_readback(&mut self) {
+            // 先回收上一次的 pending readback（如果有）
+            self.try_collect_readback();
+
             let output_count = MAX_CREATURES * 7;
             let output_size = (output_count * std::mem::size_of::<f32>()) as u64;
 
@@ -566,14 +574,49 @@ mod inner {
             slice.map_async(wgpu::MapMode::Read, move |result| {
                 let _ = tx.send(result);
             });
-            self.device.poll(wgpu::Maintain::Wait);
-            let _ = rx.recv();
+            self.pending_readback = Some(rx);
+        }
 
-            let data = slice.get_mapped_range();
-            let result: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
-            drop(data);
-            self.staging_buf.unmap();
-            result
+        /// 尝试回收异步 readback 结果（非阻塞），成功则更新 last_raw_outputs
+        fn try_collect_readback(&mut self) -> bool {
+            let rx = match self.pending_readback.take() {
+                Some(rx) => rx,
+                None => return false,
+            };
+
+            // 非阻塞 poll：推动 GPU 进度但不等待
+            self.device.poll(wgpu::Maintain::Poll);
+
+            match rx.try_recv() {
+                Ok(Ok(())) => {
+                    // 映射成功，读取数据
+                    let slice = self.staging_buf.slice(..);
+                    let data = slice.get_mapped_range();
+                    self.last_raw_outputs.copy_from_slice(bytemuck::cast_slice(&data));
+                    drop(data);
+                    self.staging_buf.unmap();
+                    true
+                }
+                Ok(Err(_)) => {
+                    // 映射出错，丢弃
+                    false
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    // GPU 还没完成，放回 pending
+                    self.pending_readback = Some(rx);
+                    false
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // 通道断开，丢弃
+                    false
+                }
+            }
+        }
+
+        /// 非阻塞读取输出：尝试回收上一帧结果，返回缓存的输出（可能是上一帧的）
+        pub fn try_readback_outputs(&mut self) -> &[f32] {
+            self.try_collect_readback();
+            &self.last_raw_outputs
         }
     }
 
@@ -648,12 +691,14 @@ mod inner {
         fn tick(&mut self) {
             let t0 = Instant::now();
             self.gpu.dispatch_tick();
+            // 发起异步 readback（不阻塞等待 GPU）
+            self.gpu.begin_readback();
             self.last_tick_ns = t0.elapsed().as_nanos() as u64;
             self.tick_count += 1;
 
-            // 读取当前tick的输出
-            let raw = self.gpu.readback_outputs();
-            let inject = self.tick_count == 1; // 假设inject_inputs后第一个tick是注入的
+            // 非阻塞读取：如果上一帧 readback 已完成则更新，否则用缓存
+            let raw = self.gpu.try_readback_outputs();
+            let inject = self.tick_count == 1;
 
             for (&creature_id, &slot) in self.slots.active_entries() {
                 let base = slot * 7;
