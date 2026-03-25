@@ -553,10 +553,11 @@ mod inner {
             self.ping = !self.ping;
         }
 
-        /// 发起异步 readback（非阻塞：copy + map_async，不等待 GPU 完成）
+        /// 发起异步 readback：copy + map_async
+        /// 同一个 staging buffer 不能有两个 pending map，所以必须先阻塞回收上一次
         pub fn begin_readback(&mut self) {
-            // 先回收上一次的 pending readback（如果有）
-            self.try_collect_readback();
+            // 必须先阻塞回收上一次（staging buffer 只有一个）
+            self.finish_pending_readback();
 
             let output_count = MAX_CREATURES * 7;
             let output_size = (output_count * std::mem::size_of::<f32>()) as u64;
@@ -577,45 +578,61 @@ mod inner {
             self.pending_readback = Some(rx);
         }
 
-        /// 尝试回收异步 readback 结果（非阻塞），成功则更新 last_raw_outputs
-        fn try_collect_readback(&mut self) -> bool {
+        /// 阻塞等待 pending readback 完成，更新 last_raw_outputs
+        fn finish_pending_readback(&mut self) {
             let rx = match self.pending_readback.take() {
                 Some(rx) => rx,
-                None => return false,
+                None => return,
             };
-
-            // 非阻塞 poll：推动 GPU 进度但不等待
-            self.device.poll(wgpu::Maintain::Poll);
-
-            match rx.try_recv() {
-                Ok(Ok(())) => {
-                    // 映射成功，读取数据
-                    let slice = self.staging_buf.slice(..);
-                    let data = slice.get_mapped_range();
-                    self.last_raw_outputs.copy_from_slice(bytemuck::cast_slice(&data));
-                    drop(data);
-                    self.staging_buf.unmap();
-                    true
-                }
-                Ok(Err(_)) => {
-                    // 映射出错，丢弃
-                    false
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    // GPU 还没完成，放回 pending
-                    self.pending_readback = Some(rx);
-                    false
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    // 通道断开，丢弃
-                    false
+            loop {
+                self.device.poll(wgpu::Maintain::Poll);
+                match rx.try_recv() {
+                    Ok(Ok(())) => {
+                        let slice = self.staging_buf.slice(..);
+                        let data = slice.get_mapped_range();
+                        self.last_raw_outputs
+                            .copy_from_slice(bytemuck::cast_slice(&data));
+                        drop(data);
+                        self.staging_buf.unmap();
+                        return;
+                    }
+                    Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        std::hint::spin_loop();
+                    }
                 }
             }
         }
 
-        /// 非阻塞读取输出：尝试回收上一帧结果，返回缓存的输出（可能是上一帧的）
+        /// 阻塞读取最新输出（用于 inject tick，必须拿到准确数据）
+        pub fn finish_and_read(&mut self) -> &[f32] {
+            self.finish_pending_readback();
+            &self.last_raw_outputs
+        }
+
+        /// 非阻塞读取缓存输出（可能是上一 tick 的数据）
         pub fn try_readback_outputs(&mut self) -> &[f32] {
-            self.try_collect_readback();
+            if self.pending_readback.is_some() {
+                // 非阻塞 poll 推动 GPU
+                self.device.poll(wgpu::Maintain::Poll);
+                // 尝试回收
+                if let Some(rx) = self.pending_readback.take() {
+                    match rx.try_recv() {
+                        Ok(Ok(())) => {
+                            let slice = self.staging_buf.slice(..);
+                            let data = slice.get_mapped_range();
+                            self.last_raw_outputs
+                                .copy_from_slice(bytemuck::cast_slice(&data));
+                            drop(data);
+                            self.staging_buf.unmap();
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {
+                            self.pending_readback = Some(rx);
+                        }
+                        _ => {} // 出错或断开，丢弃
+                    }
+                }
+            }
             &self.last_raw_outputs
         }
     }
@@ -691,14 +708,17 @@ mod inner {
         fn tick(&mut self) {
             let t0 = Instant::now();
             self.gpu.dispatch_tick();
-            // 发起异步 readback（不阻塞等待 GPU）
             self.gpu.begin_readback();
-            self.last_tick_ns = t0.elapsed().as_nanos() as u64;
             self.tick_count += 1;
-
-            // 非阻塞读取：如果上一帧 readback 已完成则更新，否则用缓存
-            let raw = self.gpu.try_readback_outputs();
             let inject = self.tick_count == 1;
+
+            // inject tick（决定直读输出）必须同步拿到准确数据；后续 tick 异步
+            let raw = if inject {
+                self.gpu.finish_and_read()
+            } else {
+                self.gpu.try_readback_outputs()
+            };
+            self.last_tick_ns = t0.elapsed().as_nanos() as u64;
 
             for (&creature_id, &slot) in self.slots.active_entries() {
                 let base = slot * 7;
