@@ -975,8 +975,19 @@ impl eframe::App for CellWorldApp {
                 .set_viewport(bounds.min_x, bounds.min_y, bounds.max_x, bounds.max_y);
 
             // 更新世界（如果未暂停）
+            // 高速模式下拆分为多个子步，防止大 dt 导致物理失稳
             if !self.paused {
-                self.world.update(dt * self.speed, &self.config);
+                let total_dt = dt * self.speed;
+                let max_step = 1.0 / 30.0; // 单步最大 33ms
+                if total_dt > max_step {
+                    let steps = ((total_dt / max_step).ceil() as usize).min(10);
+                    let step_dt = total_dt / steps as f64;
+                    for _ in 0..steps {
+                        self.world.update(step_dt, &self.config);
+                    }
+                } else {
+                    self.world.update(total_dt, &self.config);
+                }
             }
         }
         self.frame_perf.world_update_ms = t_world.elapsed().as_secs_f64() * 1000.0;
@@ -1152,6 +1163,9 @@ impl eframe::App for CellWorldApp {
         if panel_action.clear_dominant {
             self.store.clear_dominant();
         }
+
+        // 同步帧率到画布（用于自适应渲染质量）
+        self.canvas.fps = self.fps;
 
         // 主画布
         let t_central_panel = std::time::Instant::now();

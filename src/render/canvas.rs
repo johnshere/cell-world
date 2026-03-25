@@ -20,6 +20,8 @@ pub struct WorldCanvas {
     initialized: bool,
     /// 初始缩放比例
     initial_scale: f32,
+    /// 当前帧率（用于自适应渲染质量）
+    pub fps: f64,
 }
 
 /// 可见世界范围
@@ -38,6 +40,7 @@ impl WorldCanvas {
             scale: 1.0,
             initialized: false,
             initial_scale,
+            fps: 60.0,
         }
     }
 
@@ -110,30 +113,69 @@ impl WorldCanvas {
         let vis_min_y = vis.min_y - margin;
         let vis_max_y = vis.max_y + margin;
 
-        // 绘制能量粒子
-        for particle in &world.energy_particles {
-            if !particle.alive {
-                continue;
-            }
-            // 世界坐标裁剪：跳过不可见的实体
-            if particle.x < vis_min_x || particle.x > vis_max_x
-                || particle.y < vis_min_y || particle.y > vis_max_y
-            {
-                continue;
-            }
-            let pos = self.world_to_screen(Pos2::new(particle.x as f32, particle.y as f32), rect);
-            {
-                let age = particle.age as f32;
-                let explode_duration = 1.5_f32; // 爆炸特效时长
-                if age < explode_duration {
-                    let progress = age / explode_duration;
-                    let radius = (1.5 + 2.5 * progress) * self.scale;
-                    let r = 255u8;
-                    let g = (80.0 + 140.0 * progress) as u8;
-                    let b = (20.0 + 80.0 * progress) as u8;
-                    let alpha = (80.0 + 175.0 * progress) as u8;
-                    let color = Color32::from_rgba_unmultiplied(r, g, b, alpha);
-                    painter.circle_filled(pos, radius, color);
+        // === LOD 和自适应渲染质量 ===
+        let draw_explode = self.scale > 0.4;
+        let draw_trails = self.scale > 0.12 && !world.trail_disabled;
+        let creature_dot_mode = self.scale <= 0.15;
+        // 缩放越小 → 可见实体越多 → 降低渲染上限
+        let zoom_factor: f64 = if self.scale < 0.2 {
+            0.4
+        } else if self.scale < 0.4 {
+            0.7
+        } else {
+            1.0
+        };
+        // 帧率低时进一步降低渲染数量
+        let fps_factor: f64 = if self.fps > 1.0 && self.fps < 30.0 {
+            (self.fps / 30.0).clamp(0.3, 1.0)
+        } else {
+            1.0
+        };
+        let quality = zoom_factor * fps_factor;
+        let max_particles = (4000.0 * quality) as usize;
+        let max_trails = (3000.0 * quality) as usize;
+
+        // 绘制能量粒子（LOD + 数量限制）
+        {
+            let stride = if world.energy_particles.len() > max_particles * 2 {
+                world.energy_particles.len() / max_particles
+            } else {
+                1
+            };
+            for (i, particle) in world.energy_particles.iter().enumerate() {
+                if stride > 1 && i % stride != 0 {
+                    // 选中粒子始终绘制
+                    if *selection != Selection::Energy(particle.id) {
+                        continue;
+                    }
+                }
+                if !particle.alive {
+                    continue;
+                }
+                // 世界坐标裁剪
+                if particle.x < vis_min_x
+                    || particle.x > vis_max_x
+                    || particle.y < vis_min_y
+                    || particle.y > vis_max_y
+                {
+                    continue;
+                }
+                let pos =
+                    self.world_to_screen(Pos2::new(particle.x as f32, particle.y as f32), rect);
+                // 爆炸特效（仅高缩放时绘制，减少 Shape 开销）
+                if draw_explode {
+                    let age = particle.age as f32;
+                    let explode_duration = 1.5_f32;
+                    if age < explode_duration {
+                        let progress = age / explode_duration;
+                        let radius = (1.5 + 2.5 * progress) * self.scale;
+                        let r = 255u8;
+                        let g = (80.0 + 140.0 * progress) as u8;
+                        let b = (20.0 + 80.0 * progress) as u8;
+                        let alpha = (80.0 + 175.0 * progress) as u8;
+                        let color = Color32::from_rgba_unmultiplied(r, g, b, alpha);
+                        painter.circle_filled(pos, radius, color);
+                    }
                 }
                 let alpha = (particle.energy / particle.initial_energy).clamp(0.0, 1.0) as f32;
                 let color =
@@ -148,19 +190,30 @@ impl WorldCanvas {
             }
         }
 
-        // 绘制痕迹点（trail_disabled 时跳过）
-        if !world.trail_disabled {
-            for trail in &world.trail_points {
+        // 绘制痕迹点（LOD：缩放过小时完全跳过 + 数量限制）
+        if draw_trails {
+            let stride = if world.trail_points.len() > max_trails * 2 {
+                world.trail_points.len() / max_trails
+            } else {
+                1
+            };
+            for (i, trail) in world.trail_points.iter().enumerate() {
+                if stride > 1 && i % stride != 0 {
+                    continue;
+                }
                 if !trail.alive {
                     continue;
                 }
                 // 世界坐标裁剪
-                if trail.x < vis_min_x || trail.x > vis_max_x
-                    || trail.y < vis_min_y || trail.y > vis_max_y
+                if trail.x < vis_min_x
+                    || trail.x > vis_max_x
+                    || trail.y < vis_min_y
+                    || trail.y > vis_max_y
                 {
                     continue;
                 }
-                let pos = self.world_to_screen(Pos2::new(trail.x as f32, trail.y as f32), rect);
+                let pos =
+                    self.world_to_screen(Pos2::new(trail.x as f32, trail.y as f32), rect);
                 let age_ratio = (1.0 - trail.age / 38.0).max(0.0) as f32;
                 let alpha = (80.0 * age_ratio) as u8;
                 let color = species_to_color(trail.clan_hash);
@@ -204,24 +257,32 @@ impl WorldCanvas {
             }
         }
 
-        // 绘制生物
-        for (_idx, creature) in world.creatures.iter().enumerate() {
+        // 绘制生物（LOD：极小缩放时简化为单色点）
+        for creature in &world.creatures {
             if !creature.alive {
                 continue;
             }
             // 世界坐标裁剪
-            if creature.x < vis_min_x || creature.x > vis_max_x
-                || creature.y < vis_min_y || creature.y > vis_max_y
+            if creature.x < vis_min_x
+                || creature.x > vis_max_x
+                || creature.y < vis_min_y
+                || creature.y > vis_max_y
             {
                 continue;
             }
-            let pos = self.world_to_screen(Pos2::new(creature.x as f32, creature.y as f32), rect);
-            {
-                // 根据种族哈希确定颜色（按 creature ID 查找，不受索引重排影响）
-                let species_hash = ctx.creature_species.get(&creature.id).copied().unwrap_or(0);
-                let color = species_to_color(species_hash);
+            let pos =
+                self.world_to_screen(Pos2::new(creature.x as f32, creature.y as f32), rect);
+            let species_hash = ctx.creature_species.get(&creature.id).copied().unwrap_or(0);
+            let color = species_to_color(species_hash);
+            let is_selected = *selection == Selection::Creature(creature.id);
 
-                let radius = ((creature.energy as f32 * 1.28).cbrt()).clamp(1.5, 8.0) * self.scale;
+            if creature_dot_mode && !is_selected {
+                // 极低缩放：仅绘制单色点，跳过器官
+                let dot_r = (1.0_f32).max(self.scale);
+                painter.circle_filled(pos, dot_r, color);
+            } else {
+                let radius =
+                    ((creature.energy as f32 * 1.28).cbrt()).clamp(1.5, 8.0) * self.scale;
                 painter.circle_filled(pos, radius, color);
 
                 let heading = creature.heading as f32;
@@ -265,9 +326,11 @@ impl WorldCanvas {
                             painter.circle_filled(eye_pos, eye_r, Color32::WHITE);
                             // 瞳孔方向跟随扫描偏移
                             let pupil_dir = if eye_i == 0 {
-                                heading + 20f32.to_radians() - creature.eye_scan_offset[0] as f32
+                                heading + 20f32.to_radians()
+                                    - creature.eye_scan_offset[0] as f32
                             } else {
-                                heading - 20f32.to_radians() + creature.eye_scan_offset[1] as f32
+                                heading - 20f32.to_radians()
+                                    + creature.eye_scan_offset[1] as f32
                             };
                             let pupil_pos = Pos2::new(
                                 eye_pos.x + pupil_r * 0.5 * pupil_dir.cos(),
@@ -279,7 +342,7 @@ impl WorldCanvas {
                 }
 
                 // 选中：半径大2px的白色圆
-                if *selection == Selection::Creature(creature.id) {
+                if is_selected {
                     painter.circle_stroke(pos, radius + 2.0, Stroke::new(1.0, Color32::WHITE));
                 }
             }
