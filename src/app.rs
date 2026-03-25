@@ -975,8 +975,19 @@ impl eframe::App for CellWorldApp {
                 .set_viewport(bounds.min_x, bounds.min_y, bounds.max_x, bounds.max_y);
 
             // 更新世界（如果未暂停）
+            // 高倍速时拆分子步，防止大 dt 导致扫描跳过目标、冷却判定粗糙
             if !self.paused {
-                self.world.update(dt * self.speed, &self.config);
+                let total_dt = dt * self.speed;
+                let max_step = 0.2; // 单步最大 200ms，≥6x 才触发
+                if total_dt > max_step {
+                    let steps = ((total_dt / max_step).ceil() as usize).min(5);
+                    let step_dt = total_dt / steps as f64;
+                    for _ in 0..steps {
+                        self.world.update(step_dt, &self.config);
+                    }
+                } else {
+                    self.world.update(total_dt, &self.config);
+                }
             }
         }
         self.frame_perf.world_update_ms = t_world.elapsed().as_secs_f64() * 1000.0;
