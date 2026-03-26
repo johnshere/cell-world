@@ -525,7 +525,13 @@ impl World {
 
         // 随机方向 + 距离
         let angle = rng.gen_range(0.0..std::f64::consts::TAU);
-        let dist = rng.gen_range(config.spring_min_distance..config.spring_max_distance);
+        let dist_min = config.spring_min_distance.min(config.spring_max_distance);
+        let dist_max = config.spring_min_distance.max(config.spring_max_distance);
+        let dist = if dist_min >= dist_max {
+            dist_min
+        } else {
+            rng.gen_range(dist_min..dist_max)
+        };
         let new_x = anchor_x + dist * angle.cos();
         let new_y = anchor_y + dist * angle.sin();
 
