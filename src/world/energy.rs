@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
 pub enum ParticleSource {
     Volcano,
-    Meteorite,
+    Spring,
 }
 
 /// 能量粒子（阳光）
@@ -21,7 +21,7 @@ pub struct EnergyParticle {
     pub lifetime: f64,
     pub age: f64,
     pub alive: bool,
-    /// 来源（火山/陨石）
+    /// 来源（火山/温泉）
     pub source: ParticleSource,
 }
 

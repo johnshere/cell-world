@@ -166,8 +166,7 @@ impl WorldCanvas {
                 }
                 // 基础粒子 → 四边形加入批量 Mesh（微粒与圆无视觉差异）
                 let alpha = (particle.energy / particle.initial_energy).clamp(0.0, 1.0) as f32;
-                let color =
-                    Color32::from_rgba_unmultiplied(255, 220, 100, (alpha * 200.0) as u8);
+                let color = Color32::from_rgba_unmultiplied(255, 220, 100, (alpha * 200.0) as u8);
                 let r = 1.064 * self.scale;
                 add_quad(&mut mesh, pos, r, color, white_uv);
 
@@ -186,8 +185,7 @@ impl WorldCanvas {
             let mut mesh = Mesh::default();
             mesh.vertices
                 .reserve(world.trail_points.len().min(6000) * 4);
-            mesh.indices
-                .reserve(world.trail_points.len().min(6000) * 6);
+            mesh.indices.reserve(world.trail_points.len().min(6000) * 6);
 
             for trail in &world.trail_points {
                 if !trail.alive {
@@ -201,8 +199,7 @@ impl WorldCanvas {
                 {
                     continue;
                 }
-                let pos =
-                    self.world_to_screen(Pos2::new(trail.x as f32, trail.y as f32), rect);
+                let pos = self.world_to_screen(Pos2::new(trail.x as f32, trail.y as f32), rect);
                 let age_ratio = (1.0 - trail.age / 38.0).max(0.0) as f32;
                 let alpha = (80.0 * age_ratio) as u8;
                 let base_color = species_to_color(trail.clan_hash);
@@ -253,6 +250,49 @@ impl WorldCanvas {
             }
         }
 
+        // ===== 绘制温泉 =====
+        for spring in &world.hot_springs {
+            if !spring.alive {
+                continue;
+            }
+            // 世界坐标裁剪（温泉范围较大，加大边距）
+            let spring_margin = config.spring_radius / self.scale as f64;
+            if spring.x < vis_min_x - spring_margin
+                || spring.x > vis_max_x + spring_margin
+                || spring.y < vis_min_y - spring_margin
+                || spring.y > vis_max_y + spring_margin
+            {
+                continue;
+            }
+            let pos = self.world_to_screen(Pos2::new(spring.x as f32, spring.y as f32), rect);
+            let radius = config.spring_radius as f32 * self.scale;
+            let factor = spring.output_factor() as f32;
+
+            // 范围圈（青色，透明度随生命周期变化）
+            let alpha = (40.0 * factor) as u8;
+            if radius > 3.0 {
+                painter.circle_stroke(
+                    pos,
+                    radius,
+                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(0, 200, 200, alpha)),
+                );
+            }
+
+            // 中心标记（青色圆点）
+            let center_alpha = (60.0 + 140.0 * factor) as u8;
+            let center_r = (4.0 * self.scale).max(2.0);
+            painter.circle_filled(
+                pos,
+                center_r * 1.5,
+                Color32::from_rgba_unmultiplied(0, 180, 200, (center_alpha as f32 * 0.4) as u8),
+            );
+            painter.circle_filled(
+                pos,
+                center_r,
+                Color32::from_rgba_unmultiplied(0, 220, 240, center_alpha),
+            );
+        }
+
         // ===== 绘制生物 =====
         // 极低缩放时用批量 Mesh 渲染点
         let mut dot_mesh = if creature_dot_mode {
@@ -276,8 +316,7 @@ impl WorldCanvas {
             {
                 continue;
             }
-            let pos =
-                self.world_to_screen(Pos2::new(creature.x as f32, creature.y as f32), rect);
+            let pos = self.world_to_screen(Pos2::new(creature.x as f32, creature.y as f32), rect);
             let species_hash = ctx.creature_species.get(&creature.id).copied().unwrap_or(0);
             let color = species_to_color(species_hash);
             let is_selected = *selection == Selection::Creature(creature.id);
@@ -289,8 +328,7 @@ impl WorldCanvas {
                     add_quad(mesh, pos, dot_r, color, white_uv);
                 }
             } else {
-                let radius =
-                    ((creature.energy as f32 * 1.28).cbrt()).clamp(1.5, 8.0) * self.scale;
+                let radius = ((creature.energy as f32 * 1.28).cbrt()).clamp(1.5, 8.0) * self.scale;
                 painter.circle_filled(pos, radius, color);
 
                 let heading = creature.heading as f32;
@@ -334,11 +372,9 @@ impl WorldCanvas {
                             painter.circle_filled(eye_pos, eye_r, Color32::WHITE);
                             // 瞳孔方向跟随扫描偏移
                             let pupil_dir = if eye_i == 0 {
-                                heading + 20f32.to_radians()
-                                    - creature.eye_scan_offset[0] as f32
+                                heading + 20f32.to_radians() - creature.eye_scan_offset[0] as f32
                             } else {
-                                heading - 20f32.to_radians()
-                                    + creature.eye_scan_offset[1] as f32
+                                heading - 20f32.to_radians() + creature.eye_scan_offset[1] as f32
                             };
                             let pupil_pos = Pos2::new(
                                 eye_pos.x + pupil_r * 0.5 * pupil_dir.cos(),

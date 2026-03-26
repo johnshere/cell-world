@@ -5,7 +5,10 @@ use rustc_hash::FxHashMap;
 
 use crate::config::Config;
 use crate::neural::{Genome, SpikingNetwork};
-use crate::world::{Creature, DeathAgeStats, DominantCandidate, EnergyParticle, SpatialGrid, TrailPoint, World};
+use crate::world::{
+    Creature, DeathAgeStats, DominantCandidate, EnergyParticle, HotSpring, SpatialGrid, TrailPoint,
+    World,
+};
 
 const SNAPSHOT_PATH: &str = "snapshot.json";
 
@@ -20,6 +23,8 @@ pub struct WorldSnapshot {
     pub next_creature_id: u64,
     pub next_energy_id: u64,
     pub volcano_timer: f64,
+    /// 已废弃，保留兼容旧存档
+    #[serde(default)]
     pub meteorite_timer: f64,
     pub action_counts: [usize; 4],
     pub death_age_stats: DeathAgeStats,
@@ -30,6 +35,13 @@ pub struct WorldSnapshot {
     pub dominant_species: Vec<DominantCandidate>,
     /// 存档时的完整配置（恢复时使用，保证环境一致）
     pub config: Config,
+    // === 温泉 ===
+    #[serde(default)]
+    pub hot_springs: Vec<HotSpring>,
+    #[serde(default)]
+    pub spring_spawn_timer: f64,
+    #[serde(default)]
+    pub next_spring_id: u64,
 }
 
 impl WorldSnapshot {
@@ -38,13 +50,28 @@ impl WorldSnapshot {
         Self {
             version: 1,
             world_time: world.time,
-            creatures: world.creatures.iter().filter(|c| c.alive).cloned().collect(),
-            energy_particles: world.energy_particles.iter().filter(|e| e.alive).cloned().collect(),
-            trail_points: world.trail_points.iter().filter(|t| t.alive).cloned().collect(),
+            creatures: world
+                .creatures
+                .iter()
+                .filter(|c| c.alive)
+                .cloned()
+                .collect(),
+            energy_particles: world
+                .energy_particles
+                .iter()
+                .filter(|e| e.alive)
+                .cloned()
+                .collect(),
+            trail_points: world
+                .trail_points
+                .iter()
+                .filter(|t| t.alive)
+                .cloned()
+                .collect(),
             next_creature_id: world.next_creature_id(),
             next_energy_id: world.next_energy_id(),
             volcano_timer: world.volcano_timer(),
-            meteorite_timer: world.meteorite_timer(),
+            meteorite_timer: 0.0,
             action_counts: world.action_counts,
             death_age_stats: world.death_age_stats.clone(),
             death_ages: world.death_ages().to_vec(),
@@ -53,6 +80,9 @@ impl WorldSnapshot {
             clan_genomes: world.clan_genomes().clone(),
             dominant_species: world.dominant_species.clone(),
             config: config.clone(),
+            hot_springs: world.hot_springs.clone(),
+            spring_spawn_timer: world.spring_spawn_timer(),
+            next_spring_id: world.next_spring_id(),
         }
     }
 
@@ -119,7 +149,9 @@ impl WorldSnapshot {
             trail_grid,
             self.world_time,
             self.volcano_timer,
-            self.meteorite_timer,
+            self.hot_springs,
+            self.spring_spawn_timer,
+            self.next_spring_id,
             self.next_creature_id,
             self.next_energy_id,
             self.action_counts,

@@ -4,7 +4,7 @@ use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::time::Instant;
 
-use super::{Creature, EnergyParticle, ParticleSource, SpatialGrid, TrailPoint};
+use super::{Creature, EnergyParticle, HotSpring, ParticleSource, SpatialGrid, TrailPoint};
 use crate::config::Config;
 use crate::neural::bridge::{CreatureEvent, CreatureInput, NeuralBridge};
 use crate::neural::Genome;
@@ -37,7 +37,11 @@ pub struct World {
 
     // 内部状态
     volcano_timer: f64,
-    meteorite_timer: f64,
+
+    // 温泉
+    pub hot_springs: Vec<HotSpring>,
+    spring_spawn_timer: f64,
+    next_spring_id: u64,
 
     // ID 计数器
     next_creature_id: u64,
@@ -48,9 +52,6 @@ pub struct World {
     viewport_min_y: f64,
     viewport_max_x: f64,
     viewport_max_y: f64,
-
-    // 火山范围检查定时器
-    volcano_range_check_timer: f64,
 
     // 性能统计
     pub perf_stats: PerfStats,
@@ -131,7 +132,9 @@ impl World {
             trail_grid: SpatialGrid::new(config.vision_range * 1.5),
             time: 0.0,
             volcano_timer: 0.0,
-            meteorite_timer: 0.0,
+            hot_springs: Vec::new(),
+            spring_spawn_timer: 0.0,
+            next_spring_id: 0,
             next_creature_id: 0,
             next_energy_id: 0,
             // 初始视窗居中于原点
@@ -140,7 +143,6 @@ impl World {
             viewport_max_x: 700.0,
             viewport_max_y: 500.0,
 
-            volcano_range_check_timer: 0.0,
             perf_stats: PerfStats::default(),
             similarity_cache: RefCell::new(FxHashMap::default()),
             cache_cleanup_timer: 0.0,
@@ -245,27 +247,6 @@ impl World {
         // 更新生物
         self.update_creatures(dt, config);
 
-        // 每5秒检查一次火山半径外的生物（动态读取配置）
-        self.volcano_range_check_timer += dt;
-        if self.volcano_range_check_timer >= 5.0 {
-            self.volcano_range_check_timer -= 5.0;
-
-            let volcano_x = config.volcano_x;
-            let volcano_y = config.volcano_y;
-            let limit_r = config.volcano_radius * 1.5;
-            let limit_r2 = limit_r * limit_r;
-
-            for creature in self.creatures.iter_mut() {
-                if creature.alive {
-                    let dx = creature.x - volcano_x;
-                    let dy = creature.y - volcano_y;
-                    if dx * dx + dy * dy > limit_r2 {
-                        creature.alive = false;
-                    }
-                }
-            }
-        }
-
         // 更新能量粒子
         self.update_energy_particles(dt, config);
 
@@ -288,9 +269,14 @@ impl World {
         self.volcano_timer
     }
 
-    /// 陨石计时器当前值
-    pub fn meteorite_timer(&self) -> f64 {
-        self.meteorite_timer
+    /// 温泉生成计时器
+    pub fn spring_spawn_timer(&self) -> f64 {
+        self.spring_spawn_timer
+    }
+
+    /// 下一个温泉ID
+    pub fn next_spring_id(&self) -> u64 {
+        self.next_spring_id
     }
 
     /// 下一个生物ID
@@ -329,7 +315,9 @@ impl World {
         trail_grid: SpatialGrid,
         time: f64,
         volcano_timer: f64,
-        meteorite_timer: f64,
+        hot_springs: Vec<HotSpring>,
+        spring_spawn_timer: f64,
+        next_spring_id: u64,
         next_creature_id: u64,
         next_energy_id: u64,
         action_counts: [usize; 4],
@@ -350,14 +338,15 @@ impl World {
             trail_grid,
             time,
             volcano_timer,
-            meteorite_timer,
+            hot_springs,
+            spring_spawn_timer,
+            next_spring_id,
             next_creature_id,
             next_energy_id,
             viewport_min_x: -700.0,
             viewport_min_y: -500.0,
             viewport_max_x: 700.0,
             viewport_max_y: 500.0,
-            volcano_range_check_timer: 0.0,
             perf_stats: PerfStats::default(),
             similarity_cache: RefCell::new(FxHashMap::default()),
             cache_cleanup_timer: 0.0,
@@ -454,7 +443,7 @@ impl World {
         }
     }
 
-    /// 生成能量粒子（火山喷发 + 随机陨石）
+    /// 生成能量粒子（火山喷发 + 温泉）
     fn spawn_energy(&mut self, dt: f64, config: &Config) {
         self.volcano_timer += dt;
         let current_volcano_interval = config.current_volcano_interval(self.time);
@@ -463,12 +452,9 @@ impl World {
             self.volcano_erupt(config);
         }
 
-        self.meteorite_timer += dt;
-        let current_meteorite_interval = config.current_meteorite_interval(self.time);
-        if self.meteorite_timer >= current_meteorite_interval {
-            self.meteorite_timer = 0.0;
-            self.meteorite_fall(config);
-        }
+        // 温泉生成与更新
+        self.spawn_springs(dt, config);
+        self.update_springs(dt, config);
     }
 
     fn volcano_erupt(&mut self, config: &Config) {
@@ -499,7 +485,10 @@ impl World {
                     let dx = c.x - x;
                     let dy = c.y - y;
                     if dx * dx + dy * dy < kill_r2 {
-                        let damage = c.energy * (1.0 - (-current_energy * config.landing_damage_multiplier / c.energy).exp());
+                        let damage = c.energy
+                            * (1.0
+                                - (-current_energy * config.landing_damage_multiplier / c.energy)
+                                    .exp());
                         c.energy = (c.energy - damage).max(0.0);
                         if c.energy <= 0.0 {
                             c.alive = false;
@@ -510,54 +499,93 @@ impl World {
         }
     }
 
-    fn meteorite_fall(&mut self, config: &Config) {
+    /// 定期尝试生成新温泉（链式扩散）
+    fn spawn_springs(&mut self, dt: f64, config: &Config) {
+        self.spring_spawn_timer += dt;
+        if self.spring_spawn_timer < config.spring_spawn_interval {
+            return;
+        }
+        let active_count = self.hot_springs.iter().filter(|s| s.alive).count();
+        if active_count >= config.spring_max_count {
+            return;
+        }
+        self.spring_spawn_timer = 0.0;
+
         let mut rng = rand::thread_rng();
-        let current_energy = config.current_meteorite_energy(self.time);
-        // 陨石中心在火山半径内随机
-        let angle = rng.gen_range(0.0..std::f64::consts::TAU);
-        let u: f64 = rng.gen_range(0.0..1.0);
-        let r = u.sqrt() * config.volcano_radius;
-        let cx = config.volcano_x + r * angle.cos();
-        let cy = config.volcano_y + r * angle.sin();
-        let angle = rng.gen_range(0.0..std::f64::consts::TAU);
-        let dx = angle.cos();
-        let dy = angle.sin();
-        let half_len = config.meteorite_length / 2.0;
-        let kill_r2 = config.meteorite_kill_radius * config.meteorite_kill_radius;
 
-        for i in 0..config.meteorite_count {
-            let t = if config.meteorite_count > 1 {
-                (i as f64 / (config.meteorite_count - 1) as f64) * 2.0 - 1.0
-            } else {
-                0.0
-            };
-            let perp_offset = rng.gen_range(-5.0..5.0);
-            let x = cx + dx * t * half_len + (-dy) * perp_offset;
-            let y = cy + dy * t * half_len + dx * perp_offset;
+        // 选择锚点
+        let (anchor_x, anchor_y) = if self.hot_springs.is_empty() {
+            // 第一个从火山附近生成
+            (config.volcano_x, config.volcano_y)
+        } else {
+            // 链式扩散：从所有温泉（含已死亡的）中随机选一个
+            let idx = rng.gen_range(0..self.hot_springs.len());
+            (self.hot_springs[idx].x, self.hot_springs[idx].y)
+        };
 
-            let energy_id = self.next_energy_id;
-            self.next_energy_id += 1;
-            self.energy_particles.push(EnergyParticle::new(
-                energy_id,
-                x,
-                y,
-                current_energy,
-                f64::MAX,
-                ParticleSource::Meteorite,
-            ));
-            self.energy_grid_dirty = true;
-            // 落地杀伤：damage = c × (1 - exp(-p × multiplier / c))
-            for c in &mut self.creatures {
-                if c.alive && c.energy > 0.0 {
-                    let cdx = c.x - x;
-                    let cdy = c.y - y;
-                    if cdx * cdx + cdy * cdy < kill_r2 {
-                        let damage = c.energy * (1.0 - (-current_energy * config.landing_damage_multiplier / c.energy).exp());
-                        c.energy = (c.energy - damage).max(0.0);
-                        if c.energy <= 0.0 {
-                            c.alive = false;
-                        }
-                    }
+        // 随机方向 + 距离
+        let angle = rng.gen_range(0.0..std::f64::consts::TAU);
+        let dist = rng.gen_range(config.spring_min_distance..config.spring_max_distance);
+        let new_x = anchor_x + dist * angle.cos();
+        let new_y = anchor_y + dist * angle.sin();
+
+        // 最小间距检查
+        let min_d2 = config.spring_min_distance * config.spring_min_distance;
+        let too_close = self.hot_springs.iter().any(|s| {
+            if !s.alive {
+                return false;
+            }
+            let dx = s.x - new_x;
+            let dy = s.y - new_y;
+            dx * dx + dy * dy < min_d2
+        });
+        if too_close {
+            return;
+        }
+
+        let id = self.next_spring_id;
+        self.next_spring_id += 1;
+        self.hot_springs
+            .push(HotSpring::new(id, new_x, new_y, config.spring_lifetime));
+    }
+
+    /// 更新温泉：年龄递增、喷出粒子
+    fn update_springs(&mut self, dt: f64, config: &Config) {
+        let mut rng = rand::thread_rng();
+
+        for i in 0..self.hot_springs.len() {
+            if !self.hot_springs[i].alive {
+                continue;
+            }
+            self.hot_springs[i].update(dt);
+            if !self.hot_springs[i].alive {
+                continue;
+            }
+
+            self.hot_springs[i].emit_timer += dt;
+            if self.hot_springs[i].emit_timer >= config.spring_emit_interval {
+                self.hot_springs[i].emit_timer -= config.spring_emit_interval;
+                let factor = self.hot_springs[i].output_factor();
+                let emit_count = (config.spring_emit_count as f64 * factor).round() as usize;
+                let sx = self.hot_springs[i].x;
+                let sy = self.hot_springs[i].y;
+
+                for _ in 0..emit_count {
+                    let angle = rng.gen_range(0.0..std::f64::consts::TAU);
+                    let r = rng.gen_range(0.0_f64..1.0).sqrt() * config.spring_radius;
+                    let x = sx + r * angle.cos();
+                    let y = sy + r * angle.sin();
+                    let energy_id = self.next_energy_id;
+                    self.next_energy_id += 1;
+                    self.energy_particles.push(EnergyParticle::new(
+                        energy_id,
+                        x,
+                        y,
+                        config.spring_particle_energy * factor,
+                        f64::MAX,
+                        ParticleSource::Spring,
+                    ));
+                    self.energy_grid_dirty = true;
                 }
             }
         }
@@ -1042,7 +1070,8 @@ impl World {
                 config.combat_power(my_energy, my_speed_norm, my_ally_energy) * bite_force;
 
             // 防御方战力
-            let other_speed_norm = (self.creatures[other_idx].current_speed / config.max_speed).min(1.0);
+            let other_speed_norm =
+                (self.creatures[other_idx].current_speed / config.max_speed).min(1.0);
             let other_ally_energy = self.compute_nearby_ally_energy(other_idx, config);
             let defender_score =
                 config.combat_power(other_energy, other_speed_norm, other_ally_energy);
@@ -1051,7 +1080,9 @@ impl World {
             let transfer = other_energy * damage_ratio * config.bite_transfer_rate;
 
             // 咬合效率 = 1 - 基因相似度：相似度越高获取越少，渐变而非悬崖
-            let similarity = self.creatures[idx].genome.similarity(&self.creatures[other_idx].genome);
+            let similarity = self.creatures[idx]
+                .genome
+                .similarity(&self.creatures[other_idx].genome);
             let efficiency = 1.0 - similarity;
             let actual_transfer = transfer.min(self.creatures[other_idx].energy);
             self.creatures[other_idx].energy -= actual_transfer;
@@ -1075,7 +1106,9 @@ impl World {
                 continue;
             }
             // 按基因相似度加权援助：相似度越高援助越大，渐变过渡
-            let similarity = self.creatures[creature_idx].genome.similarity(&self.creatures[other_idx].genome);
+            let similarity = self.creatures[creature_idx]
+                .genome
+                .similarity(&self.creatures[other_idx].genome);
             total += self.creatures[other_idx].energy * similarity;
         }
         total
@@ -1182,7 +1215,7 @@ impl World {
         for particle in &mut self.energy_particles {
             let decay = match particle.source {
                 ParticleSource::Volcano => config.volcano_decay_rate,
-                ParticleSource::Meteorite => config.meteorite_decay_rate,
+                ParticleSource::Spring => config.spring_decay_rate,
             };
             particle.update(dt, decay);
         }
@@ -1247,6 +1280,9 @@ impl World {
         if self.energy_particles.len() != old_energy_len {
             self.energy_grid_dirty = true;
         }
+        // 清理已死亡温泉（保留最近死亡的用于链式扩散锚点，超过寿命2倍的彻底移除）
+        self.hot_springs
+            .retain(|s| s.alive || s.age < s.lifetime * 2.0);
         if !self.trail_disabled {
             let old_trail_len = self.trail_points.len();
             self.trail_points.retain(|t| t.alive);
@@ -1295,10 +1331,17 @@ impl World {
             .filter(|e| e.alive)
             .map(|e| e.energy)
             .sum();
-        // 当前时刻理论单次投放总能量（正弦调制）
-        let theoretical_energy = config.current_volcano_energy(self.time)
-            * config.volcano_count as f64
-            + config.current_meteorite_energy(self.time) * config.meteorite_count as f64;
+        // 当前时刻理论单次投放总能量（火山 + 温泉）
+        let spring_energy: f64 = self
+            .hot_springs
+            .iter()
+            .filter(|s| s.alive)
+            .map(|s| {
+                config.spring_particle_energy * config.spring_emit_count as f64 * s.output_factor()
+            })
+            .sum();
+        let theoretical_energy =
+            config.current_volcano_energy(self.time) * config.volcano_count as f64 + spring_energy;
         let trail_energy: f64 = self
             .trail_points
             .iter()
@@ -1869,9 +1912,9 @@ fn compute_perception_pure(
                 nearest_is_ally[eye_i] = creature.genome.similarity(&creatures[other_idx].genome);
                 nearest_heading_diff[eye_i] =
                     angle_diff(creatures[other_idx].heading, heading) / std::f64::consts::PI;
-                nearest_speed_diff[eye_i] =
-                    ((creatures[other_idx].current_speed - my_speed) / config.max_speed)
-                        .clamp(-1.0, 1.0);
+                nearest_speed_diff[eye_i] = ((creatures[other_idx].current_speed - my_speed)
+                    / config.max_speed)
+                    .clamp(-1.0, 1.0);
             }
         }
     }

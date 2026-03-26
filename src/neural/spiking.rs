@@ -311,11 +311,8 @@ impl SpikingNetwork {
                 for &(in_node, weight) in recurrent_list {
                     if let Some(&(prev_membrane, prev_fired)) = self.prev_state.get(&in_node) {
                         if prev_fired {
-                            let threshold = self
-                                .nodes
-                                .get(&in_node)
-                                .map(|n| n.threshold)
-                                .unwrap_or(0.0);
+                            let threshold =
+                                self.nodes.get(&in_node).map(|n| n.threshold).unwrap_or(0.0);
                             if threshold == 0.0 {
                                 weighted_sum += prev_membrane * weight;
                             } else {

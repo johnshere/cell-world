@@ -143,8 +143,7 @@ impl TickExecutor for CpuExecutor {
                         if self.tick_count > 0 {
                             for (j, &direct_read) in modes.iter().enumerate().take(7) {
                                 if !direct_read {
-                                    let rate =
-                                        counts[j] as f64 / self.tick_count as f64;
+                                    let rate = counts[j] as f64 / self.tick_count as f64;
                                     final_outputs[j] = rate * 2.0 - 1.0;
                                 }
                             }

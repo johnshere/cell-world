@@ -293,7 +293,11 @@ fn config_drag_f64(
         })
         .inner;
     if !desc.is_empty() {
-        ui.label(egui::RichText::new(desc).color(egui::Color32::from_gray(110)).size(10.0));
+        ui.label(
+            egui::RichText::new(desc)
+                .color(egui::Color32::from_gray(110))
+                .size(10.0),
+        );
     }
     changed
 }
@@ -319,7 +323,11 @@ fn config_drag_usize(
         })
         .inner;
     if !desc.is_empty() {
-        ui.label(egui::RichText::new(desc).color(egui::Color32::from_gray(110)).size(10.0));
+        ui.label(
+            egui::RichText::new(desc)
+                .color(egui::Color32::from_gray(110))
+                .size(10.0),
+        );
     }
     changed
 }
@@ -336,93 +344,170 @@ impl CellWorldApp {
 
             ui.collapsing("进化与竞争", |ui| {
                 changed |= config_drag_f64(
-                    ui, "变异率", "所有NEAT变异共用此概率",
-                    &mut c.mutation_rate, 0.01, 0.01..=0.5,
+                    ui,
+                    "变异率",
+                    "所有NEAT变异共用此概率",
+                    &mut c.mutation_rate,
+                    0.01,
+                    0.01..=0.5,
                 );
                 changed |= config_drag_usize(
-                    ui, "初始连接min", "新生物最少神经连接数",
-                    &mut c.initial_connections_min, 1..=20,
+                    ui,
+                    "初始连接min",
+                    "新生物最少神经连接数",
+                    &mut c.initial_connections_min,
+                    1..=20,
                 );
                 changed |= config_drag_usize(
-                    ui, "初始连接max", "新生物最多神经连接数",
-                    &mut c.initial_connections_max, 2..=30,
+                    ui,
+                    "初始连接max",
+                    "新生物最多神经连接数",
+                    &mut c.initial_connections_max,
+                    2..=30,
                 );
                 changed |= config_drag_f64(
-                    ui, "种族相似阈值", "基因相似度>=此值视为同族",
-                    &mut c.species_similarity_threshold, 0.01, 0.5..=1.0,
+                    ui,
+                    "种族相似阈值",
+                    "基因相似度>=此值视为同族",
+                    &mut c.species_similarity_threshold,
+                    0.01,
+                    0.5..=1.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "繁殖冷却", "两次繁殖间最短间隔(秒)",
-                    &mut c.reproduce_cooldown, 0.5, 1.0..=60.0,
+                    ui,
+                    "繁殖冷却",
+                    "两次繁殖间最短间隔(秒)",
+                    &mut c.reproduce_cooldown,
+                    0.5,
+                    1.0..=60.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "速度战力权重", "移速对战力的加成系数",
-                    &mut c.combat_speed_weight, 0.01, 0.0..=2.0,
+                    ui,
+                    "速度战力权重",
+                    "移速对战力的加成系数",
+                    &mut c.combat_speed_weight,
+                    0.01,
+                    0.0..=2.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "同族援助权重", "附近同族对战力的加成，越大群体越强",
-                    &mut c.combat_ally_weight, 0.1, 0.0..=10.0,
+                    ui,
+                    "同族援助权重",
+                    "附近同族对战力的加成，越大群体越强",
+                    &mut c.combat_ally_weight,
+                    0.1,
+                    0.0..=10.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "咬转移率", "咬合时能量转移比例",
-                    &mut c.bite_transfer_rate, 0.01, 0.01..=1.0,
+                    ui,
+                    "咬转移率",
+                    "咬合时能量转移比例",
+                    &mut c.bite_transfer_rate,
+                    0.01,
+                    0.01..=1.0,
                 );
             });
 
             ui.collapsing("环境压力", |ui| {
                 changed |= config_drag_f64(
-                    ui, "散热系数", "体温逸散=此值*周长*heat_factor*dt",
-                    &mut c.heat_dissipation_coefficient, 0.001, 0.0..=1.0,
+                    ui,
+                    "散热系数",
+                    "体温逸散=此值*周长*heat_factor*dt",
+                    &mut c.heat_dissipation_coefficient,
+                    0.001,
+                    0.0..=1.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "能量分母", "nearby_energy归一化分母，越大需更多聚集才降温",
-                    &mut c.energy_denominator, 50.0, 100.0..=5000.0,
+                    ui,
+                    "能量分母",
+                    "nearby_energy归一化分母，越大需更多聚集才降温",
+                    &mut c.energy_denominator,
+                    50.0,
+                    100.0..=5000.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "散热下限", "聚集区散热最低比例(0~1)",
-                    &mut c.heat_floor, 0.01, 0.0..=1.0,
+                    ui,
+                    "散热下限",
+                    "聚集区散热最低比例(0~1)",
+                    &mut c.heat_floor,
+                    0.01,
+                    0.0..=1.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "代谢指数", "energy^此值，越大大体型越重",
-                    &mut c.metabolism_exponent, 0.1, 1.0..=5.0,
+                    ui,
+                    "代谢指数",
+                    "energy^此值，越大大体型越重",
+                    &mut c.metabolism_exponent,
+                    0.1,
+                    1.0..=5.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "年龄代谢倍率", "age*此值=额外代谢倍率",
-                    &mut c.age_metabolism_factor, 0.001, 0.0..=0.2,
+                    ui,
+                    "年龄代谢倍率",
+                    "age*此值=额外代谢倍率",
+                    &mut c.age_metabolism_factor,
+                    0.001,
+                    0.0..=0.2,
                 );
                 changed |= config_drag_f64(
-                    ui, "移动消耗", "每单位距离消耗*速度",
-                    &mut c.move_cost, 0.0001, 0.0001..=0.01,
+                    ui,
+                    "移动消耗",
+                    "每单位距离消耗*速度",
+                    &mut c.move_cost,
+                    0.0001,
+                    0.0001..=0.01,
                 );
             });
 
             ui.collapsing("感知系统", |ui| {
                 changed |= config_drag_f64(
-                    ui, "视觉半径", "眼睛最大探测距离(px)",
-                    &mut c.vision_range, 1.0, 50.0..=500.0,
+                    ui,
+                    "视觉半径",
+                    "眼睛最大探测距离(px)",
+                    &mut c.vision_range,
+                    1.0,
+                    50.0..=500.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "扫描速度", "眼睛扫描速度(度/秒)",
-                    &mut c.eye_scan_speed, 10.0, 50.0..=1000.0,
+                    ui,
+                    "扫描速度",
+                    "眼睛扫描速度(度/秒)",
+                    &mut c.eye_scan_speed,
+                    10.0,
+                    50.0..=1000.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "接触距离", "嘴巴/接触判定距离(px)",
-                    &mut c.contact_range, 0.5, 5.0..=50.0,
+                    ui,
+                    "接触距离",
+                    "嘴巴/接触判定距离(px)",
+                    &mut c.contact_range,
+                    0.5,
+                    5.0..=50.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "嘴巴冷却", "咬合动作冷却时间(秒)",
-                    &mut c.mouth_cooldown, 0.01, 0.1..=5.0,
+                    ui,
+                    "嘴巴冷却",
+                    "咬合动作冷却时间(秒)",
+                    &mut c.mouth_cooldown,
+                    0.01,
+                    0.1..=5.0,
                 );
             });
 
             ui.collapsing("生物基础", |ui| {
                 changed |= config_drag_f64(
-                    ui, "初始能量", "新生成生物的能量",
-                    &mut c.initial_energy, 1.0, 10.0..=500.0,
+                    ui,
+                    "初始能量",
+                    "新生成生物的能量",
+                    &mut c.initial_energy,
+                    1.0,
+                    10.0..=500.0,
                 );
                 changed |= config_drag_usize(
-                    ui, "最小生物数", "低于此数自动补充",
-                    &mut c.min_creatures, 5..=200,
+                    ui,
+                    "最小生物数",
+                    "低于此数自动补充",
+                    &mut c.min_creatures,
+                    5..=200,
                 );
                 changed |= ui
                     .horizontal(|ui| {
@@ -439,28 +524,48 @@ impl CellWorldApp {
                         .inner
                     })
                     .inner;
-                ui.label(egui::RichText::new("CPU算力转能量，0=禁用").color(egui::Color32::from_gray(110)).size(10.0));
+                ui.label(
+                    egui::RichText::new("CPU算力转能量，0=禁用")
+                        .color(egui::Color32::from_gray(110))
+                        .size(10.0),
+                );
             });
 
             ui.collapsing("痕迹点", |ui| {
                 changed |= config_drag_f64(
-                    ui, "衰减率", "每秒能量衰减比例",
-                    &mut c.trail_decay_rate, 0.01, 0.01..=0.5,
+                    ui,
+                    "衰减率",
+                    "每秒能量衰减比例",
+                    &mut c.trail_decay_rate,
+                    0.01,
+                    0.01..=0.5,
                 );
                 changed |= config_drag_f64(
-                    ui, "抑制半径", "范围内有他人痕迹则不产生(px)",
-                    &mut c.trail_suppress_radius, 1.0, 5.0..=100.0,
+                    ui,
+                    "抑制半径",
+                    "范围内有他人痕迹则不产生(px)",
+                    &mut c.trail_suppress_radius,
+                    1.0,
+                    5.0..=100.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "生成间隔", "每个生物独立计时(秒)",
-                    &mut c.trail_emit_interval, 0.01, 0.05..=2.0,
+                    ui,
+                    "生成间隔",
+                    "每个生物独立计时(秒)",
+                    &mut c.trail_emit_interval,
+                    0.01,
+                    0.05..=2.0,
                 );
             });
 
             ui.collapsing("其他", |ui| {
                 changed |= config_drag_f64(
-                    ui, "优势种最低年龄", "种群最老成员须达此年龄",
-                    &mut c.dominant_min_age, 10.0, 100.0..=2000.0,
+                    ui,
+                    "优势种最低年龄",
+                    "种群最老成员须达此年龄",
+                    &mut c.dominant_min_age,
+                    10.0,
+                    100.0..=2000.0,
                 );
             });
 
@@ -631,236 +736,157 @@ impl CellWorldApp {
 impl CellWorldApp {
     fn render_energy_settings_inline(&mut self, ui: &mut egui::Ui) {
         ui.separator();
-        ui.strong("🌋 能量源周期");
+        ui.strong("🌋 能量源设置");
         {
-            let world_time = self.world.time;
-            let volcano_timer = self.world.volcano_timer();
-            let meteorite_timer = self.world.meteorite_timer();
             let c = &mut self.config;
             let mut changed = false;
 
-            ui.collapsing("基础参数", |ui| {
-                changed |=
-                    config_drag_f64(ui, "火山半径", "喷发散布半径(px)", &mut c.volcano_radius, 1.0, 100.0..=5000.0);
-                changed |= config_drag_usize(ui, "火山粒子数", "每次喷发粒子数", &mut c.volcano_count, 10..=2000);
-                changed |= config_drag_usize(ui, "陨石粒子数", "每颗陨石粒子数", &mut c.meteorite_count, 5..=1000);
-                changed |=
-                    config_drag_f64(ui, "陨石长度", "陨石散布线段长度(px)", &mut c.meteorite_length, 1.0, 50.0..=500.0);
+            ui.collapsing("火山参数", |ui| {
                 changed |= config_drag_f64(
-                    ui, "火山衰减率", "粒子能量每秒衰减比例",
-                    &mut c.volcano_decay_rate, 0.001, 0.001..=0.1,
+                    ui,
+                    "火山半径",
+                    "喷发散布半径(px)",
+                    &mut c.volcano_radius,
+                    1.0,
+                    100.0..=5000.0,
+                );
+                changed |= config_drag_usize(
+                    ui,
+                    "火山粒子数",
+                    "每次喷发粒子数",
+                    &mut c.volcano_count,
+                    10..=2000,
                 );
                 changed |= config_drag_f64(
-                    ui, "陨石衰减率", "粒子能量每秒衰减比例",
-                    &mut c.meteorite_decay_rate, 0.001, 0.001..=0.1,
+                    ui,
+                    "火山间隔",
+                    "喷发间隔(秒)",
+                    &mut c.volcano_interval,
+                    0.1,
+                    5.0..=120.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "火山杀伤半径", "落地时杀死半径内生物(px)",
-                    &mut c.volcano_kill_radius, 0.5, 1.0..=50.0,
+                    ui,
+                    "火山粒子能量",
+                    "每个粒子能量",
+                    &mut c.volcano_particle_energy,
+                    0.1,
+                    5.0..=1000.0,
                 );
                 changed |= config_drag_f64(
-                    ui, "陨石杀伤半径", "落地时杀死半径内生物(px)",
-                    &mut c.meteorite_kill_radius, 0.5, 1.0..=50.0,
+                    ui,
+                    "火山衰减率",
+                    "粒子能量每秒衰减比例",
+                    &mut c.volcano_decay_rate,
+                    0.001,
+                    0.001..=0.1,
                 );
                 changed |= config_drag_f64(
-                    ui, "落地杀伤系数", "落地杀伤乘数(0.1~3.0)",
-                    &mut c.landing_damage_multiplier, 0.1, 0.1..=3.0,
+                    ui,
+                    "火山杀伤半径",
+                    "落地时杀死半径内生物(px)",
+                    &mut c.volcano_kill_radius,
+                    0.5,
+                    1.0..=50.0,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "落地杀伤系数",
+                    "落地杀伤乘数(0.1~3.0)",
+                    &mut c.landing_damage_multiplier,
+                    0.1,
+                    0.1..=3.0,
                 );
             });
 
-            // 逐个渲染（用宏避免多重借用问题）
-            macro_rules! render_sine_group {
-                        ($label:expr, $avg:expr, $avg_range:expr, $avg_speed:expr,
-                         $amp:expr, $cycle:expr, $time:expr, $timer:expr, $color:expr) => {{
-                            ui.separator();
-                            ui.strong($label);
+            // 温泉信息
+            let active_springs = self.world.hot_springs.iter().filter(|s| s.alive).count();
+            ui.separator();
+            ui.strong(format!(
+                "♨ 温泉 ({}/{})",
+                active_springs, c.spring_max_count
+            ));
 
-                            // 拖拽控件
-                            ui.horizontal(|ui| {
-                                ui.label("均值:");
-                                changed |= ui.add(egui::DragValue::new($avg).speed($avg_speed).range($avg_range)).changed();
-                                ui.label("振幅:");
-                                changed |= ui.add(egui::DragValue::new($amp).speed(0.01).range(0.0..=0.9).fixed_decimals(2)).changed();
-                                ui.label("周期(秒):");
-                                changed |= ui.add(egui::DragValue::new($cycle).speed(10.0)).changed();
-                            });
-
-                            // 绘制正弦曲线
-                            let avg_val = *$avg;
-                            let amp_val = *$amp;
-                            let cycle_val = *$cycle;
-
-                            let chart_width_f32 = ui.available_width().min(480.0);
-                            let chart_height_f32 = 80.0_f32;
-                            let (response, painter) = ui.allocate_painter(
-                                egui::vec2(chart_width_f32, chart_height_f32),
-                                egui::Sense::hover(),
-                            );
-                            let rect = response.rect;
-                            let chart_width = chart_width_f32 as f64;
-                            let chart_height = chart_height_f32 as f64;
-
-                            // 背景
-                            painter.rect_filled(rect, 4.0, egui::Color32::from_gray(30));
-
-                            // 计算显示范围：以当前时间为中心，显示2个周期
-                            let display_cycle = if cycle_val > 0.0 { cycle_val } else { 200.0 };
-                            let t_center = $time;
-                            let t_start = t_center - display_cycle;
-                            let t_end = t_center + display_cycle;
-
-                            // Y 轴范围
-                            let y_min = avg_val * (1.0 - amp_val) * 0.8;
-                            let y_max = avg_val * (1.0 + amp_val) * 1.2;
-                            let y_range = (y_max - y_min).max(1.0);
-
-                            // 均值线
-                            let avg_y = rect.bottom() - ((avg_val - y_min) / y_range * chart_height) as f32;
-                            painter.line_segment(
-                                [egui::pos2(rect.left(), avg_y), egui::pos2(rect.right(), avg_y)],
-                                egui::Stroke::new(1.0, egui::Color32::from_gray(80)),
-                            );
-
-                            // 正弦波
-                            if cycle_val > 0.0 && amp_val > 0.0 {
-                                let steps = (chart_width as usize).max(60);
-                                let points: Vec<egui::Pos2> = (0..=steps).map(|i| {
-                                    let frac = i as f64 / steps as f64;
-                                    let t = t_start + frac * (t_end - t_start);
-                                    let val = avg_val * (1.0 + amp_val * (std::f64::consts::TAU * t / cycle_val).sin());
-                                    let x = rect.left() + (frac * chart_width) as f32;
-                                    let y = rect.bottom() - ((val - y_min) / y_range * chart_height) as f32;
-                                    egui::pos2(x, y.clamp(rect.top(), rect.bottom()))
-                                }).collect();
-                                for pair in points.windows(2) {
-                                    painter.line_segment([pair[0], pair[1]], egui::Stroke::new(2.0, $color));
-                                }
-                            } else {
-                                // 没有正弦调制，画平线
-                                painter.line_segment(
-                                    [egui::pos2(rect.left(), avg_y), egui::pos2(rect.right(), avg_y)],
-                                    egui::Stroke::new(2.0, $color),
-                                );
-                            }
-
-                            // 当前时间竖线（"现在"）
-                            let now_x = rect.left() + (0.5 * chart_width) as f32; // t_center 在正中
-                            painter.line_segment(
-                                [egui::pos2(now_x, rect.top()), egui::pos2(now_x, rect.bottom())],
-                                egui::Stroke::new(1.0, egui::Color32::GREEN),
-                            );
-
-                            // 当前值标注
-                            let current_val = if cycle_val > 0.0 && amp_val > 0.0 {
-                                avg_val * (1.0 + amp_val * (std::f64::consts::TAU * $time / cycle_val).sin())
-                            } else {
-                                avg_val
-                            };
-                            let cur_y = rect.bottom() - ((current_val - y_min) / y_range * chart_height) as f32;
-                            painter.circle_filled(egui::pos2(now_x, cur_y.clamp(rect.top(), rect.bottom())), 4.0, egui::Color32::GREEN);
-
-                            // 上一次触发标记（timer 秒前）
-                            let last_trigger_t = $time - $timer;
-                            if last_trigger_t >= t_start {
-                                let last_frac = (last_trigger_t - t_start) / (t_end - t_start);
-                                let last_x = rect.left() + (last_frac * chart_width) as f32;
-                                painter.line_segment(
-                                    [egui::pos2(last_x, rect.top()), egui::pos2(last_x, rect.bottom())],
-                                    egui::Stroke::new(1.5, egui::Color32::from_rgb(100, 255, 100)),
-                                );
-                                // 三角形标记
-                                let tri_y = rect.top() + 2.0;
-                                painter.add(egui::Shape::convex_polygon(
-                                    vec![
-                                        egui::pos2(last_x, tri_y + 8.0),
-                                        egui::pos2(last_x - 4.0, tri_y),
-                                        egui::pos2(last_x + 4.0, tri_y),
-                                    ],
-                                    egui::Color32::from_rgb(100, 255, 100),
-                                    egui::Stroke::NONE,
-                                ));
-                            }
-
-                            // 下一次触发标记
-                            let next_interval = if cycle_val > 0.0 && amp_val > 0.0 {
-                                avg_val * (1.0 + amp_val * (std::f64::consts::TAU * $time / cycle_val).sin())
-                            } else {
-                                avg_val
-                            };
-                            let next_trigger_t = $time + (next_interval - $timer).max(0.0);
-                            if next_trigger_t <= t_end {
-                                let next_frac = (next_trigger_t - t_start) / (t_end - t_start);
-                                let next_x = rect.left() + (next_frac * chart_width) as f32;
-                                painter.line_segment(
-                                    [egui::pos2(next_x, rect.top()), egui::pos2(next_x, rect.bottom())],
-                                    egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 120, 120)),
-                                );
-                                // 三角形标记
-                                let tri_y = rect.top() + 2.0;
-                                painter.add(egui::Shape::convex_polygon(
-                                    vec![
-                                        egui::pos2(next_x, tri_y + 8.0),
-                                        egui::pos2(next_x - 4.0, tri_y),
-                                        egui::pos2(next_x + 4.0, tri_y),
-                                    ],
-                                    egui::Color32::from_rgb(255, 120, 120),
-                                    egui::Stroke::NONE,
-                                ));
-                            }
-
-                            // 图例标注
-                            ui.horizontal(|ui| {
-                                ui.colored_label(egui::Color32::GREEN, format!("现在: {:.1}", current_val));
-                                ui.colored_label(egui::Color32::from_rgb(100, 255, 100), "上次");
-                                ui.colored_label(egui::Color32::from_rgb(255, 120, 120), "下次");
-                            });
-                        }};
-                    }
-
-            render_sine_group!(
-                "火山间隔(秒)",
-                &mut c.volcano_interval,
-                5.0..=120.0,
-                0.1,
-                &mut c.volcano_interval_amplitude,
-                &mut c.volcano_interval_cycle,
-                world_time,
-                volcano_timer,
-                egui::Color32::from_rgb(255, 100, 50)
-            );
-            render_sine_group!(
-                "火山能量",
-                &mut c.volcano_particle_energy,
-                5.0..=1000.0,
-                0.1,
-                &mut c.volcano_energy_amplitude,
-                &mut c.volcano_energy_cycle,
-                world_time,
-                volcano_timer,
-                egui::Color32::from_rgb(255, 180, 50)
-            );
-            render_sine_group!(
-                "陨石间隔(秒)",
-                &mut c.meteorite_interval,
-                2.0..=60.0,
-                0.1,
-                &mut c.meteorite_interval_amplitude,
-                &mut c.meteorite_interval_cycle,
-                world_time,
-                meteorite_timer,
-                egui::Color32::from_rgb(80, 160, 255)
-            );
-            render_sine_group!(
-                "陨石能量",
-                &mut c.meteorite_particle_energy,
-                5.0..=1000.0,
-                0.1,
-                &mut c.meteorite_energy_amplitude,
-                &mut c.meteorite_energy_cycle,
-                world_time,
-                meteorite_timer,
-                egui::Color32::from_rgb(120, 220, 180)
-            );
+            ui.collapsing("温泉参数", |ui| {
+                changed |= config_drag_usize(
+                    ui,
+                    "最大数量",
+                    "同时活跃温泉数上限",
+                    &mut c.spring_max_count,
+                    1..=20,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "生成间隔",
+                    "新温泉出现间隔(秒)",
+                    &mut c.spring_spawn_interval,
+                    1.0,
+                    10.0..=1200.0,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "寿命",
+                    "温泉存在时长(秒)",
+                    &mut c.spring_lifetime,
+                    1.0,
+                    60.0..=3600.0,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "喷出间隔",
+                    "粒子喷出间隔(秒)",
+                    &mut c.spring_emit_interval,
+                    0.1,
+                    0.1..=10.0,
+                );
+                changed |= config_drag_usize(
+                    ui,
+                    "喷出粒子数",
+                    "每次喷出粒子数",
+                    &mut c.spring_emit_count,
+                    1..=50,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "粒子能量",
+                    "温泉粒子能量",
+                    &mut c.spring_particle_energy,
+                    0.1,
+                    1.0..=500.0,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "喷出半径",
+                    "粒子散布范围(px)",
+                    &mut c.spring_radius,
+                    1.0,
+                    10.0..=500.0,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "粒子衰减率",
+                    "温泉粒子每秒衰减比例",
+                    &mut c.spring_decay_rate,
+                    0.001,
+                    0.001..=0.1,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "最小间距",
+                    "温泉间最小距离(px)",
+                    &mut c.spring_min_distance,
+                    1.0,
+                    50.0..=1000.0,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "最大距离",
+                    "链式扩散最大距离(px)",
+                    &mut c.spring_max_distance,
+                    1.0,
+                    100.0..=2000.0,
+                );
+            });
 
             if changed {
                 c.save();
@@ -1038,14 +1064,17 @@ impl eframe::App for CellWorldApp {
                 // 滚动区域：仅包含设置面板
                 if self.panel.settings_open || self.panel.energy_settings_open {
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        let margin = egui::Margin { right: 6.0, ..Default::default() };
+                        let margin = egui::Margin {
+                            right: 6.0,
+                            ..Default::default()
+                        };
                         egui::Frame::none().inner_margin(margin).show(ui, |ui| {
-                        if self.panel.settings_open {
-                            self.render_settings_inline(ui);
-                        }
-                        if self.panel.energy_settings_open {
-                            self.render_energy_settings_inline(ui);
-                        }
+                            if self.panel.settings_open {
+                                self.render_settings_inline(ui);
+                            }
+                            if self.panel.energy_settings_open {
+                                self.render_energy_settings_inline(ui);
+                            }
                         });
                     });
                 }
@@ -1115,7 +1144,8 @@ impl eframe::App for CellWorldApp {
                         eprintln!("保存失败: {}", e);
                     } else {
                         // 保存成功后，自动选中新模板
-                        if let Some(idx) = self.store.names().iter().position(|n| *n == saved_name) {
+                        if let Some(idx) = self.store.names().iter().position(|n| *n == saved_name)
+                        {
                             self.panel.selected_template = idx + 1; // +1 因为第0项是"随机"
                         }
                     }

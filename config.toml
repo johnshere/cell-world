@@ -1,7 +1,7 @@
 # 初始模拟速度
-initial_speed = 8.0
+initial_speed = 6.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 60
+min_creatures = 30
 # 初始能量
 initial_energy = 160.0
 # 初始世界缩放比例
@@ -13,23 +13,13 @@ volcano_x = 0.0
 # 火山坐标 Y
 volcano_y = 0.0
 # 火山喷发间隔（秒）
-volcano_interval = 30.0
+volcano_interval = 10.0
 # 火山喷射半径
-volcano_radius = 2000.0
+volcano_radius = 1800.0
 # 每次喷发粒子数
-volcano_count = 100
+volcano_count = 40
 # 火山粒子能量
 volcano_particle_energy = 100.0
-
-# === 陨石 ===
-# 陨石降落间隔（秒）
-meteorite_interval = 10.0
-# 每颗陨石粒子数
-meteorite_count = 20
-# 陨石散布线段长度
-meteorite_length = 250.0
-# 陨石粒子能量
-meteorite_particle_energy = 300.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -40,25 +30,37 @@ volcano_interval_amplitude = 0.3
 volcano_energy_cycle = 10000.0
 # 火山能量振幅比（0~0.9）
 volcano_energy_amplitude = 0.65
-# 陨石间隔正弦周期（秒）
-meteorite_interval_cycle = 1000.0
-# 陨石间隔振幅比（0~0.9）
-meteorite_interval_amplitude = 0.3
-# 陨石能量正弦周期（秒）
-meteorite_energy_cycle = 450.0
-# 陨石能量振幅比（0~0.9）
-meteorite_energy_amplitude = 0.3
 
 # 火山粒子衰减率（每秒）
 volcano_decay_rate = 0.015
-# 陨石粒子衰减率（每秒）
-meteorite_decay_rate = 0.005
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
 volcano_kill_radius = 35.0
-# 陨石落地杀伤半径
-meteorite_kill_radius = 40.0
+# 落地杀伤系数
+landing_damage_multiplier = 1.0
+
+# === 温泉 ===
+# 温泉最大同时活跃数量
+spring_max_count = 10
+# 温泉产生间隔（秒）
+spring_spawn_interval = 150.0
+# 温泉寿命（秒）
+spring_lifetime = 2000.0
+# 温泉喷出粒子间隔（秒）
+spring_emit_interval = 5.0
+# 温泉每次喷出粒子数
+spring_emit_count = 5
+# 温泉粒子能量
+spring_particle_energy = 50.0
+# 温泉喷出半径（粒子散布范围 px）
+spring_radius = 150.0
+# 温泉粒子衰减率（/秒）
+spring_decay_rate = 0.01
+# 新温泉与已有温泉最小间距（px）
+spring_min_distance = 350.0
+# 新温泉出现的最大距离（px）
+spring_max_distance = 100.0
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃
@@ -72,7 +74,7 @@ bite_transfer_rate = 0.9
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
-energy_denominator = 800.0
+energy_denominator = 1000.0
 # 散热下限（指数衰减底板）
 heat_floor = 0.05
 
@@ -82,10 +84,10 @@ age_metabolism_factor = 0.015
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.5
 # 移动消耗（每单位距离）
-move_cost = 0.001
+move_cost = 0.0015
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.01
+heat_dissipation_coefficient = 0.025
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -108,7 +110,7 @@ species_similarity_threshold = 0.95
 
 # === 战力 ===
 # 战力公式：速度权重（越快越强）
-combat_speed_weight = 0.6
+combat_speed_weight = 1.0
 # 战力公式：同族援助权重（附近同族越多越强）
 combat_ally_weight = 1.0
 
@@ -138,7 +140,16 @@ snn_ticks_per_frame = 10
 neural_backend = "auto"
 # 异步模式 tick 频率 (ticks/s)
 neural_tick_rate = 600.0
-landing_damage_multiplier = 1.0
 base_metabolism = 0.025
 max_speed = 20.0
-min_landing_damage_ratio = 0.2
+meteorite_interval = 0.0
+meteorite_count = 0
+meteorite_length = 0.0
+meteorite_particle_energy = 0.0
+meteorite_decay_rate = 0.0
+meteorite_interval_cycle = 0.0
+meteorite_interval_amplitude = 0.0
+meteorite_energy_cycle = 0.0
+meteorite_energy_amplitude = 0.0
+meteorite_kill_radius = 0.0
+min_landing_damage_ratio = 0.0

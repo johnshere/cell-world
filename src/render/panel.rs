@@ -316,8 +316,13 @@ impl StatsPanel {
         // 基因库折叠区
         ui.separator();
         ui.horizontal(|ui| {
-            let label = if self.templates_open { "📋 基因库 ▾" } else { "📋 基因库 ▸" };
-            if ui.button(label)
+            let label = if self.templates_open {
+                "📋 基因库 ▾"
+            } else {
+                "📋 基因库 ▸"
+            };
+            if ui
+                .button(label)
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
@@ -337,14 +342,21 @@ impl StatsPanel {
 
         if self.templates_open {
             let templates = store.templates();
-            let auto_count = templates.iter().filter(|t| t.auto_recorded == Some(true)).count();
+            let auto_count = templates
+                .iter()
+                .filter(|t| t.auto_recorded == Some(true))
+                .count();
             let manual_count = templates.len() - auto_count;
 
             ui.horizontal(|ui| {
                 ui.label(format!("自动:{} 手动:{}", auto_count, manual_count));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if auto_count > 0 {
-                        if ui.small_button("清空自动").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        if ui
+                            .small_button("清空自动")
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .clicked()
+                        {
                             action.clear_dominant = true;
                         }
                     }
@@ -355,89 +367,85 @@ impl StatsPanel {
                 .id_salt("gene_bank_scroll")
                 .max_height(300.0)
                 .show(ui, |ui| {
-                if templates.is_empty() {
-                    ui.label("暂无保存的基因模板");
-                    return;
-                }
+                    if templates.is_empty() {
+                        ui.label("暂无保存的基因模板");
+                        return;
+                    }
 
-                for template in templates {
-                    let is_auto = template.auto_recorded == Some(true);
-                    let tag = if is_auto { "⚡" } else { "📌" };
+                    for template in templates {
+                        let is_auto = template.auto_recorded == Some(true);
+                        let tag = if is_auto { "⚡" } else { "📌" };
 
-                    egui::Frame::none()
-                        .inner_margin(egui::Margin::symmetric(4.0, 3.0))
-                        .stroke(egui::Stroke::new(0.5, egui::Color32::from_gray(60)))
-                        .rounding(3.0)
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(format!("{} {}", tag, template.name));
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if ui
-                                            .small_button("🗑")
-                                            .on_hover_text("删除")
-                                            .clicked()
-                                        {
-                                            action.delete_template =
-                                                Some(template.name.clone());
-                                        }
-                                        if ui
-                                            .small_button("投放")
-                                            .on_hover_text("投放5个该模板生物")
-                                            .clicked()
-                                        {
-                                            action.spawn =
-                                                Some(Some(template.name.clone()));
-                                        }
-                                    },
+                        egui::Frame::none()
+                            .inner_margin(egui::Margin::symmetric(4.0, 3.0))
+                            .stroke(egui::Stroke::new(0.5, egui::Color32::from_gray(60)))
+                            .rounding(3.0)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("{} {}", tag, template.name));
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui.small_button("🗑").on_hover_text("删除").clicked()
+                                            {
+                                                action.delete_template =
+                                                    Some(template.name.clone());
+                                            }
+                                            if ui
+                                                .small_button("投放")
+                                                .on_hover_text("投放5个该模板生物")
+                                                .clicked()
+                                            {
+                                                action.spawn = Some(Some(template.name.clone()));
+                                            }
+                                        },
+                                    );
+                                });
+
+                                // 信息行
+                                let mut info_parts: Vec<String> = Vec::new();
+                                info_parts.push(format!("能量:{:.0}", template.initial_energy));
+                                if let Some(score) = template.score {
+                                    info_parts.push(format!("评分:{:.1}", score));
+                                }
+                                if let Some(ratio) = template.population_ratio {
+                                    info_parts.push(format!("占比:{:.0}%", ratio * 100.0));
+                                }
+                                if let Some(age) = template.avg_age {
+                                    info_parts.push(format!("均龄:{:.0}s", age));
+                                }
+                                if let Some(gen) = template.max_generation {
+                                    info_parts.push(format!("代:{}", gen));
+                                }
+                                if let Some(avg_e) = template.avg_energy {
+                                    info_parts.push(format!("均能:{:.0}", avg_e));
+                                }
+
+                                ui.label(
+                                    egui::RichText::new(info_parts.join("  "))
+                                        .small()
+                                        .color(egui::Color32::from_gray(160)),
+                                );
+
+                                // 基因结构信息
+                                let conn_count = template.genome.connections.len();
+                                let node_count = template.genome.nodes.len();
+                                let hidden = node_count.saturating_sub(
+                                    crate::neural::Genome::INPUT_SIZE
+                                        + crate::neural::Genome::OUTPUT_SIZE,
+                                );
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "节点:{} (隐:{})  连接:{}",
+                                        node_count, hidden, conn_count
+                                    ))
+                                    .small()
+                                    .color(egui::Color32::from_gray(120)),
                                 );
                             });
-
-                            // 信息行
-                            let mut info_parts: Vec<String> = Vec::new();
-                            info_parts.push(format!("能量:{:.0}", template.initial_energy));
-                            if let Some(score) = template.score {
-                                info_parts.push(format!("评分:{:.1}", score));
-                            }
-                            if let Some(ratio) = template.population_ratio {
-                                info_parts.push(format!("占比:{:.0}%", ratio * 100.0));
-                            }
-                            if let Some(age) = template.avg_age {
-                                info_parts.push(format!("均龄:{:.0}s", age));
-                            }
-                            if let Some(gen) = template.max_generation {
-                                info_parts.push(format!("代:{}", gen));
-                            }
-                            if let Some(avg_e) = template.avg_energy {
-                                info_parts.push(format!("均能:{:.0}", avg_e));
-                            }
-
-                            ui.label(
-                                egui::RichText::new(info_parts.join("  "))
-                                    .small()
-                                    .color(egui::Color32::from_gray(160)),
-                            );
-
-                            // 基因结构信息
-                            let conn_count = template.genome.connections.len();
-                            let node_count = template.genome.nodes.len();
-                            let hidden = node_count.saturating_sub(
-                                crate::neural::Genome::INPUT_SIZE
-                                    + crate::neural::Genome::OUTPUT_SIZE,
-                            );
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "节点:{} (隐:{})  连接:{}",
-                                    node_count, hidden, conn_count
-                                ))
-                                .small()
-                                .color(egui::Color32::from_gray(120)),
-                            );
-                        });
-                    ui.add_space(2.0);
-                }
-            });
+                        ui.add_space(2.0);
+                    }
+                });
 
             // 种族快速保存区
             if !self.cached_stats.top_clans.is_empty() {
@@ -525,13 +533,16 @@ impl StatsPanel {
                     let body_radius = (creature.energy * 1.28_f64).cbrt();
                     ui.horizontal(|ui| {
                         ui.label(format!(
-                            "能量:{:.0}  体型:{:.1}  代:{}", creature.energy, body_radius, creature.generation
+                            "能量:{:.0}  体型:{:.1}  代:{}",
+                            creature.energy, body_radius, creature.generation
                         ));
                     });
                     ui.horizontal(|ui| {
                         ui.label(format!(
                             "年龄:{:.1}s  速度:{:.1}  朝向:{:.0}°",
-                            creature.age, creature.current_speed, creature.heading.to_degrees()
+                            creature.age,
+                            creature.current_speed,
+                            creature.heading.to_degrees()
                         ));
                     });
                     ui.horizontal(|ui| {
@@ -559,7 +570,8 @@ impl StatsPanel {
                     ui.horizontal(|ui| {
                         let mouth_str = if o[2] < -0.1 { "咬" } else { "闭" };
                         ui.label(format!(
-                            "嘴:{:.2}({})  繁殖意愿:{:.2}", o[2], mouth_str, o[3]
+                            "嘴:{:.2}({})  繁殖意愿:{:.2}",
+                            o[2], mouth_str, o[3]
                         ));
                     });
                     ui.horizontal(|ui| {
@@ -568,7 +580,9 @@ impl StatsPanel {
                         let child_ratio = 0.1 + 0.4 / (1.0 + (-o[5]).exp());
                         ui.label(format!(
                             "繁殖阈值:{:.0}  子代比例:{:.0}%  痕迹:{:.2}",
-                            threshold, child_ratio * 100.0, o[6].max(0.0)
+                            threshold,
+                            child_ratio * 100.0,
+                            o[6].max(0.0)
                         ));
                     });
                 }

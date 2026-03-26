@@ -26,17 +26,22 @@ pub struct Config {
     pub volcano_count: usize,
     /// 火山粒子能量
     pub volcano_particle_energy: f64,
-    /// 陨石降落间隔（秒）
+    /// 陨石降落间隔（秒）— 已废弃，保留兼容旧config
+    #[serde(default)]
     pub meteorite_interval: f64,
-    /// 每颗陨石粒子数
+    /// 每颗陨石粒子数 — 已废弃
+    #[serde(default)]
     pub meteorite_count: usize,
-    /// 陨石散布线段长度
+    /// 陨石散布线段长度 — 已废弃
+    #[serde(default)]
     pub meteorite_length: f64,
-    /// 陨石粒子能量
+    /// 陨石粒子能量 — 已废弃
+    #[serde(default)]
     pub meteorite_particle_energy: f64,
     /// 火山粒子衰减率（每秒）
     pub volcano_decay_rate: f64,
-    /// 陨石粒子衰减率（每秒）
+    /// 陨石粒子衰减率 — 已废弃
+    #[serde(default)]
     pub meteorite_decay_rate: f64,
 
     /// 基础代谢率（已废弃，保留兼容旧config）
@@ -107,20 +112,57 @@ pub struct Config {
     pub volcano_energy_cycle: f64,
     /// 火山能量振幅比（0~0.9）
     pub volcano_energy_amplitude: f64,
-    /// 陨石间隔正弦周期（秒）
+    /// 陨石间隔正弦周期 — 已废弃
+    #[serde(default)]
     pub meteorite_interval_cycle: f64,
-    /// 陨石间隔振幅比（0~0.9）
+    /// 陨石间隔振幅比 — 已废弃
+    #[serde(default)]
     pub meteorite_interval_amplitude: f64,
-    /// 陨石能量正弦周期（秒）
+    /// 陨石能量正弦周期 — 已废弃
+    #[serde(default)]
     pub meteorite_energy_cycle: f64,
-    /// 陨石能量振幅比（0~0.9）
+    /// 陨石能量振幅比 — 已废弃
+    #[serde(default)]
     pub meteorite_energy_amplitude: f64,
 
     // === 落地杀伤 ===
     /// 火山落地杀伤半径
     pub volcano_kill_radius: f64,
-    /// 陨石落地杀伤半径
+    /// 陨石落地杀伤半径 — 已废弃
+    #[serde(default)]
     pub meteorite_kill_radius: f64,
+
+    // === 温泉 ===
+    /// 温泉最大同时活跃数量
+    #[serde(default = "default_spring_max_count")]
+    pub spring_max_count: usize,
+    /// 温泉产生间隔（秒）
+    #[serde(default = "default_spring_spawn_interval")]
+    pub spring_spawn_interval: f64,
+    /// 温泉寿命（秒）
+    #[serde(default = "default_spring_lifetime")]
+    pub spring_lifetime: f64,
+    /// 温泉喷出粒子间隔（秒）
+    #[serde(default = "default_spring_emit_interval")]
+    pub spring_emit_interval: f64,
+    /// 温泉每次喷出粒子数
+    #[serde(default = "default_spring_emit_count")]
+    pub spring_emit_count: usize,
+    /// 温泉粒子能量
+    #[serde(default = "default_spring_particle_energy")]
+    pub spring_particle_energy: f64,
+    /// 温泉喷出半径（粒子散布范围）
+    #[serde(default = "default_spring_radius")]
+    pub spring_radius: f64,
+    /// 温泉粒子衰减率（/秒）
+    #[serde(default = "default_spring_decay_rate")]
+    pub spring_decay_rate: f64,
+    /// 新温泉与已有温泉最小间距
+    #[serde(default = "default_spring_min_distance")]
+    pub spring_min_distance: f64,
+    /// 新温泉出现的最大距离（从已有温泉/火山扩散）
+    #[serde(default = "default_spring_max_distance")]
+    pub spring_max_distance: f64,
     /// 落地最低伤害比例（已废弃，保留兼容旧config）
     #[serde(default)]
     pub min_landing_damage_ratio: f64,
@@ -171,6 +213,37 @@ fn default_metabolism_exponent() -> f64 {
 }
 fn default_eye_scan_speed() -> f64 {
     280.0
+}
+
+fn default_spring_max_count() -> usize {
+    5
+}
+fn default_spring_spawn_interval() -> f64 {
+    300.0
+}
+fn default_spring_lifetime() -> f64 {
+    600.0
+}
+fn default_spring_emit_interval() -> f64 {
+    1.0
+}
+fn default_spring_emit_count() -> usize {
+    3
+}
+fn default_spring_particle_energy() -> f64 {
+    30.0
+}
+fn default_spring_radius() -> f64 {
+    50.0
+}
+fn default_spring_decay_rate() -> f64 {
+    0.01
+}
+fn default_spring_min_distance() -> f64 {
+    200.0
+}
+fn default_spring_max_distance() -> f64 {
+    600.0
 }
 
 fn default_snn_ticks_per_frame() -> usize {
@@ -255,33 +328,8 @@ impl Config {
         )
     }
 
-    /// 当前陨石降落间隔（正弦调制后）
-    pub fn current_meteorite_interval(&self, time: f64) -> f64 {
-        self.sinusoidal(
-            self.meteorite_interval,
-            self.meteorite_interval_amplitude,
-            self.meteorite_interval_cycle,
-            time,
-        )
-    }
-
-    /// 当前陨石粒子能量（正弦调制后）
-    pub fn current_meteorite_energy(&self, time: f64) -> f64 {
-        self.sinusoidal(
-            self.meteorite_particle_energy,
-            self.meteorite_energy_amplitude,
-            self.meteorite_energy_cycle,
-            time,
-        )
-    }
-
     /// 战力计算公式（energy + speed + ally）
-    pub fn combat_power(
-        &self,
-        energy: f64,
-        speed_norm: f64,
-        ally_total_energy: f64,
-    ) -> f64 {
+    pub fn combat_power(&self, energy: f64, speed_norm: f64, ally_total_energy: f64) -> f64 {
         let energy_factor = energy / 100.0;
         let speed_factor = 1.0 + self.combat_speed_weight * speed_norm;
         let ally_norm = (ally_total_energy / 300.0).min(1.0);
