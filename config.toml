@@ -1,7 +1,7 @@
 # 初始模拟速度
-initial_speed = 3.0
+initial_speed = 8.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 35
+min_creatures = 60
 # 初始能量
 initial_energy = 160.0
 # 初始世界缩放比例
@@ -13,44 +13,44 @@ volcano_x = 0.0
 # 火山坐标 Y
 volcano_y = 0.0
 # 火山喷发间隔（秒）
-volcano_interval = 20.0
+volcano_interval = 30.0
 # 火山喷射半径
-volcano_radius = 1500.0
+volcano_radius = 2000.0
 # 每次喷发粒子数
-volcano_count = 160
+volcano_count = 100
 # 火山粒子能量
 volcano_particle_energy = 100.0
 
 # === 陨石 ===
 # 陨石降落间隔（秒）
-meteorite_interval = 30.0
+meteorite_interval = 10.0
 # 每颗陨石粒子数
 meteorite_count = 20
 # 陨石散布线段长度
-meteorite_length = 400.0
+meteorite_length = 250.0
 # 陨石粒子能量
-meteorite_particle_energy = 150.0
+meteorite_particle_energy = 300.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
 volcano_interval_cycle = 700.0
 # 火山间隔振幅比（0~0.9）
-volcano_interval_amplitude = 0.5
+volcano_interval_amplitude = 0.3
 # 火山能量正弦周期（秒）
 volcano_energy_cycle = 10000.0
 # 火山能量振幅比（0~0.9）
-volcano_energy_amplitude = 0.5
+volcano_energy_amplitude = 0.65
 # 陨石间隔正弦周期（秒）
-meteorite_interval_cycle = 750.0
+meteorite_interval_cycle = 1000.0
 # 陨石间隔振幅比（0~0.9）
-meteorite_interval_amplitude = 0.6
+meteorite_interval_amplitude = 0.3
 # 陨石能量正弦周期（秒）
-meteorite_energy_cycle = 250.0
+meteorite_energy_cycle = 450.0
 # 陨石能量振幅比（0~0.9）
-meteorite_energy_amplitude = 0.6
+meteorite_energy_amplitude = 0.3
 
 # 火山粒子衰减率（每秒）
-volcano_decay_rate = 0.01
+volcano_decay_rate = 0.015
 # 陨石粒子衰减率（每秒）
 meteorite_decay_rate = 0.005
 
@@ -72,7 +72,7 @@ bite_transfer_rate = 0.9
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
-energy_denominator = 1100.0
+energy_denominator = 800.0
 # 散热下限（指数衰减底板）
 heat_floor = 0.05
 
@@ -82,17 +82,17 @@ age_metabolism_factor = 0.015
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.5
 # 移动消耗（每单位距离）
-move_cost = 0.0005
+move_cost = 0.001
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.035
+heat_dissipation_coefficient = 0.01
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
 
 # === 感知 ===
 # 视觉半径（眼睛能看到的最大距离）
-vision_range = 150.0
+vision_range = 100.0
 # 接触判定距离
 contact_range = 15.0
 
@@ -104,24 +104,24 @@ initial_connections_min = 6
 # 初始连接数最大值
 initial_connections_max = 12
 # 种族相似度阈值（高于此值视为同一种族）
-species_similarity_threshold = 0.9
+species_similarity_threshold = 0.95
 
 # === 战力 ===
 # 战力公式：速度权重（越快越强）
-combat_speed_weight = 0.3
+combat_speed_weight = 0.6
 # 战力公式：同族援助权重（附近同族越多越强）
-combat_ally_weight = 3.0
+combat_ally_weight = 1.0
 
 # 优势种检测：种群最老成员最低年龄
-dominant_min_age = 200.0
+dominant_min_age = 350.0
 
 # === 痕迹点 ===
 # 痕迹点能量衰减率（/秒）
-trail_decay_rate = 0.12
+trail_decay_rate = 0.01
 # 痕迹抑制半径（px，范围内有其他生物痕迹则不产生）
-trail_suppress_radius = 10.0
+trail_suppress_radius = 7.0
 # 痕迹生成间隔（秒，每个生物独立计时）
-trail_emit_interval = 0.25
+trail_emit_interval = 0.35
 
 # === 繁殖 ===
 # 繁殖冷却时间（秒）
