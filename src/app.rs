@@ -723,7 +723,7 @@ impl CellWorldApp {
             );
             ui.colored_label(
                 egui::Color32::from_rgb(100, 200, 255),
-                format!("总能量: {:.0}", stats.total_energy),
+                format!("粒子: {:.0}", stats.total_energy),
             );
             ui.colored_label(
                 egui::Color32::from_rgb(100, 255, 130),

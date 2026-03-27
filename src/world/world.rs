@@ -1361,7 +1361,7 @@ impl World {
             .map(|t| t.energy)
             .sum();
         let trail_count = self.trail_points.iter().filter(|t| t.alive).count();
-        let total_energy = creature_energy + particle_energy + trail_energy;
+        let total_energy = particle_energy + trail_energy;
         let avg_energy = if alive_creatures.is_empty() {
             0.0
         } else {
