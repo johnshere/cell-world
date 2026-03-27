@@ -461,6 +461,8 @@ impl World {
         let mut rng = rand::thread_rng();
         let current_energy = config.current_volcano_energy(self.time);
         let kill_r2 = config.volcano_kill_radius * config.volcano_kill_radius;
+        let alive_count = self.creatures.iter().filter(|c| c.alive).count();
+        let instant_kill = alive_count > 600;
         for _ in 0..config.volcano_count {
             let angle = rng.gen_range(0.0..std::f64::consts::TAU);
             // 中心富集：u^1.5 分布，比 u² 稍平缓，远处粒子更多
@@ -479,19 +481,26 @@ impl World {
                 ParticleSource::Volcano,
             ));
             self.energy_grid_dirty = true;
-            // 落地杀伤：damage = c × (1 - exp(-p × multiplier / c))
+            // 落地杀伤
             for c in &mut self.creatures {
                 if c.alive && c.energy > 0.0 {
                     let dx = c.x - x;
                     let dy = c.y - y;
                     if dx * dx + dy * dy < kill_r2 {
-                        let damage = c.energy
-                            * (1.0
-                                - (-current_energy * config.landing_damage_multiplier / c.energy)
-                                    .exp());
-                        c.energy = (c.energy - damage).max(0.0);
-                        if c.energy <= 0.0 {
+                        if instant_kill {
+                            // 人口过多时直接击杀
+                            c.energy = 0.0;
                             c.alive = false;
+                        } else {
+                            let damage = c.energy
+                                * (1.0
+                                    - (-current_energy * config.landing_damage_multiplier
+                                        / c.energy)
+                                        .exp());
+                            c.energy = (c.energy - damage).max(0.0);
+                            if c.energy <= 0.0 {
+                                c.alive = false;
+                            }
                         }
                     }
                 }
