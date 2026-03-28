@@ -800,6 +800,40 @@ impl CellWorldApp {
                     0.1,
                     0.1..=3.0,
                 );
+                ui.separator();
+                ui.label("正弦周期调制");
+                changed |= config_drag_f64(
+                    ui,
+                    "间隔周期",
+                    "火山间隔正弦周期(秒)，0=关闭",
+                    &mut c.volcano_interval_cycle,
+                    10.0,
+                    0.0..=3600.0,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "间隔振幅",
+                    "间隔振幅比(0~0.9)",
+                    &mut c.volcano_interval_amplitude,
+                    0.01,
+                    0.0..=0.9,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "能量周期",
+                    "火山能量正弦周期(秒)，0=关闭",
+                    &mut c.volcano_energy_cycle,
+                    10.0,
+                    0.0..=3600.0,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "能量振幅",
+                    "能量振幅比(0~0.9)",
+                    &mut c.volcano_energy_amplitude,
+                    0.01,
+                    0.0..=0.9,
+                );
             });
 
             // 温泉信息
