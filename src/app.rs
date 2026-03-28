@@ -49,6 +49,8 @@ pub struct CellWorldApp {
     pending_restore: Option<WorldSnapshot>,
     // 保存确认弹框
     snapshot_confirm_save: bool,
+    // 是否启用画布渲染
+    render_enabled: bool,
 }
 
 impl CellWorldApp {
@@ -110,6 +112,7 @@ impl CellWorldApp {
             frame_perf: FramePerfStats::default(),
             pending_restore,
             snapshot_confirm_save: false,
+            render_enabled: true,
         }
     }
 }
@@ -1038,6 +1041,7 @@ impl eframe::App for CellWorldApp {
         // 侧边栏面板
         let mut panel_action = PanelAction::default();
         let mut selection_action = PanelAction::default();
+        let mut gene_action = PanelAction::default();
 
         let old_speed = self.speed;
         egui::SidePanel::right("panel")
@@ -1047,8 +1051,10 @@ impl eframe::App for CellWorldApp {
                 panel_action = self.panel.render(
                     ui,
                     self.fps,
+                    self.canvas.scale,
                     &mut self.speed,
                     &mut self.paused,
+                    &mut self.render_enabled,
                     &mut self.config,
                     &self.store,
                 );
@@ -1061,14 +1067,17 @@ impl eframe::App for CellWorldApp {
                     .panel
                     .render_selection(ui, &self.selection, &self.world);
 
-                // 滚动区域：仅包含设置面板
-                if self.panel.settings_open || self.panel.energy_settings_open {
+                // 滚动区域：基因库/能量/配置面板（互斥）
+                if self.panel.templates_open || self.panel.settings_open || self.panel.energy_settings_open {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         let margin = egui::Margin {
                             right: 6.0,
                             ..Default::default()
                         };
                         egui::Frame::none().inner_margin(margin).show(ui, |ui| {
+                            if self.panel.templates_open {
+                                gene_action = self.panel.render_gene_library(ui, &self.store);
+                            }
                             if self.panel.settings_open {
                                 self.render_settings_inline(ui);
                             }
@@ -1084,6 +1093,20 @@ impl eframe::App for CellWorldApp {
         if (self.speed - old_speed).abs() > f64::EPSILON {
             self.config.initial_speed = self.speed;
             self.config.save();
+        }
+
+        // 合并基因库操作
+        if gene_action.spawn.is_some() {
+            panel_action.spawn = gene_action.spawn;
+        }
+        if gene_action.delete_template.is_some() {
+            panel_action.delete_template = gene_action.delete_template;
+        }
+        if gene_action.clear_dominant {
+            panel_action.clear_dominant = true;
+        }
+        if gene_action.save_clan.is_some() {
+            panel_action.save_clan = gene_action.save_clan;
         }
 
         // 处理保存快照
@@ -1202,6 +1225,20 @@ impl eframe::App for CellWorldApp {
         let mut render_ctx_time = 0.0;
         let mut render_time = 0.0;
         egui::CentralPanel::default().show(ctx, |ui| {
+            if !self.render_enabled {
+                // 渲染关闭：仅计算视口范围，跳过所有渲染
+                let screen_rect = ui.available_rect_before_wrap();
+                let bounds = self.canvas.get_visible_world_bounds(screen_rect);
+                self.last_visible_bounds = Some(bounds);
+                ui.centered_and_justified(|ui| {
+                    ui.label(
+                        egui::RichText::new("渲染已暂停 - 仅数据模拟")
+                            .size(20.0)
+                            .color(egui::Color32::from_gray(80)),
+                    );
+                });
+                return;
+            }
             // 每1秒（真实时间）更新一次渲染上下文（避免频繁计算O(n²)的种族聚类）
             if self.render_ctx_cache.is_none()
                 || now
