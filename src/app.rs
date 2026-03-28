@@ -206,6 +206,20 @@ impl CellWorldApp {
 
 impl CellWorldApp {
     /// 自动保存优势种
+    /// 进化适应度：跨时间可比的多维综合评分
+    fn evolutionary_fitness(avg_age: f64, avg_energy: f64, max_generation: usize, population_ratio: f64) -> f64 {
+        // 生存力：平均寿命，上限300s
+        let survival = (avg_age.min(300.0) / 300.0).max(0.0);
+        // 资源力：平均能量，上限500
+        let prosperity = (avg_energy.min(500.0) / 500.0).max(0.0);
+        // 进化深度：最大代数，上限100
+        let depth = ((max_generation as f64).min(100.0) / 100.0).max(0.0);
+        // 统治力：种群占比，已归一化
+        let dominance = population_ratio.clamp(0.0, 1.0);
+
+        0.30 * survival + 0.25 * prosperity + 0.25 * depth + 0.20 * dominance
+    }
+
     fn auto_save_dominant(&mut self) {
         let candidate = match self.panel.stats().dominant_candidate.clone() {
             Some(c) => c,
@@ -213,61 +227,119 @@ impl CellWorldApp {
         };
 
         let version = env!("CARGO_PKG_VERSION");
+        let candidate_fitness = Self::evolutionary_fitness(
+            candidate.avg_age,
+            candidate.avg_energy,
+            candidate.max_generation,
+            candidate.population_ratio,
+        );
 
-        // 检查是否与已有自动记录的模板相似
-        let mut existing_match: Option<(String, f64)> = None;
-        for template in self.store.templates() {
-            if template.auto_recorded != Some(true) {
-                continue;
-            }
-            let sim = candidate.genome.similarity(&template.genome);
-            if sim >= 0.9 {
-                existing_match = Some((template.name.clone(), template.score.unwrap_or(0.0)));
-                break;
-            }
+        // 扫描所有自动记录模板，计算适应度和相似度
+        struct AutoEntry {
+            name: String,
+            fitness: f64,
+            similarity: f64,
         }
+        let auto_entries: Vec<AutoEntry> = self
+            .store
+            .templates()
+            .iter()
+            .filter(|t| t.auto_recorded == Some(true))
+            .map(|t| {
+                let fitness = Self::evolutionary_fitness(
+                    t.avg_age.unwrap_or(0.0),
+                    t.avg_energy.unwrap_or(0.0),
+                    t.max_generation.unwrap_or(0),
+                    t.population_ratio.unwrap_or(0.0),
+                );
+                let similarity = candidate.genome.similarity(&t.genome);
+                AutoEntry {
+                    name: t.name.clone(),
+                    fitness,
+                    similarity,
+                }
+            })
+            .collect();
 
-        match existing_match {
-            Some((name, old_score)) => {
-                // 同种且 score 更高时覆盖
-                if candidate.score > old_score {
-                    let template = CreatureTemplate {
-                        name,
-                        genome: candidate.genome,
-                        initial_energy: candidate.avg_energy,
-                        version: Some(version.to_string()),
-                        score: Some(candidate.score),
-                        population_ratio: Some(candidate.population_ratio),
-                        avg_energy: Some(candidate.avg_energy),
-                        avg_age: Some(candidate.avg_age),
-                        max_generation: Some(candidate.max_generation),
-                        recorded_at: Some(self.world.time),
-                        auto_recorded: Some(true),
-                    };
+        // 查找同种（相似度≥0.9）中适应度最高的
+        let same_species = auto_entries
+            .iter()
+            .filter(|e| e.similarity >= 0.9)
+            .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap());
+
+        // 查找所有自动记录中适应度最低的
+        let weakest = auto_entries
+            .iter()
+            .min_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap());
+
+        let auto_count = auto_entries.len();
+        const MAX_AUTO: usize = 10;
+
+        let make_template = |name: String, candidate: &crate::world::DominantCandidate, version: &str, time: f64| {
+            CreatureTemplate {
+                name,
+                genome: candidate.genome.clone(),
+                initial_energy: candidate.avg_energy,
+                version: Some(version.to_string()),
+                score: Some(candidate.score),
+                population_ratio: Some(candidate.population_ratio),
+                avg_energy: Some(candidate.avg_energy),
+                avg_age: Some(candidate.avg_age),
+                max_generation: Some(candidate.max_generation),
+                recorded_at: Some(time),
+                auto_recorded: Some(true),
+            }
+        };
+
+        if let Some(existing) = same_species {
+            // 同种已存在：仅当进化适应度更优时覆盖
+            if candidate_fitness > existing.fitness {
+                eprintln!(
+                    "[优势种] 同种更新 '{}': 适应度 {:.3} → {:.3} (寿命:{:.0}s 能量:{:.0} 代:{} 占比:{:.0}%)",
+                    existing.name, existing.fitness, candidate_fitness,
+                    candidate.avg_age, candidate.avg_energy, candidate.max_generation,
+                    candidate.population_ratio * 100.0
+                );
+                let template = make_template(existing.name.clone(), &candidate, version, self.world.time);
+                if let Err(e) = self.store.save(template) {
+                    eprintln!("自动保存优势种失败: {}", e);
+                }
+            }
+        } else {
+            // 新种：需要与已有模板比较
+            if auto_count < MAX_AUTO {
+                // 尚有空位：适应度达到最低门槛即可保存
+                if candidate_fitness >= 0.10 {
+                    let now = chrono::Local::now();
+                    let name = format!("v{}_{}", version, now.format("%m%d_%H%M"));
+                    eprintln!(
+                        "[优势种] 新种保存 '{}': 适应度 {:.3} (寿命:{:.0}s 能量:{:.0} 代:{} 占比:{:.0}%)",
+                        name, candidate_fitness,
+                        candidate.avg_age, candidate.avg_energy, candidate.max_generation,
+                        candidate.population_ratio * 100.0
+                    );
+                    let template = make_template(name, &candidate, version, self.world.time);
                     if let Err(e) = self.store.save(template) {
                         eprintln!("自动保存优势种失败: {}", e);
                     }
                 }
-            }
-            None => {
-                // 新种，创建新记录
-                let now = chrono::Local::now();
-                let name = format!("v{}_{}", version, now.format("%m%d_%H%M"));
-                let template = CreatureTemplate {
-                    name,
-                    genome: candidate.genome,
-                    initial_energy: candidate.avg_energy,
-                    version: Some(version.to_string()),
-                    score: Some(candidate.score),
-                    population_ratio: Some(candidate.population_ratio),
-                    avg_energy: Some(candidate.avg_energy),
-                    avg_age: Some(candidate.avg_age),
-                    max_generation: Some(candidate.max_generation),
-                    recorded_at: Some(self.world.time),
-                    auto_recorded: Some(true),
-                };
-                if let Err(e) = self.store.save(template) {
-                    eprintln!("自动保存优势种失败: {}", e);
+            } else if let Some(w) = weakest {
+                // 已满：仅当新种适应度显著优于最弱者（>10%）时替换
+                if candidate_fitness > w.fitness * 1.1 {
+                    eprintln!(
+                        "[优势种] 淘汰 '{}' (适应度:{:.3})，新种适应度:{:.3} (寿命:{:.0}s 能量:{:.0} 代:{} 占比:{:.0}%)",
+                        w.name, w.fitness, candidate_fitness,
+                        candidate.avg_age, candidate.avg_energy, candidate.max_generation,
+                        candidate.population_ratio * 100.0
+                    );
+                    let weak_name = w.name.clone();
+                    self.store.delete(&weak_name);
+                    let now = chrono::Local::now();
+                    let name = format!("v{}_{}", version, now.format("%m%d_%H%M"));
+                    let template = make_template(name, &candidate, version, self.world.time);
+                    if let Err(e) = self.store.save(template) {
+                        eprintln!("自动保存优势种失败: {}", e);
+                    }
                 }
             }
         }
