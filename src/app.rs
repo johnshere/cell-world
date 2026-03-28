@@ -794,7 +794,7 @@ impl CellWorldApp {
         ui.horizontal(|ui| {
             ui.colored_label(
                 egui::Color32::from_rgb(255, 180, 80),
-                format!("理论投放: {:.0}", stats.theoretical_energy),
+                format!("投放/m: {:.0}", stats.theoretical_energy),
             );
             ui.colored_label(
                 egui::Color32::from_rgb(100, 200, 255),

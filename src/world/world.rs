@@ -1368,8 +1368,28 @@ impl World {
                 config.spring_particle_energy * config.spring_emit_count as f64 * s.output_factor()
             })
             .sum();
-        let theoretical_energy =
-            config.current_volcano_energy(self.time) * config.volcano_count as f64 + spring_energy;
+        // 理论投放速率（能量/秒）：火山每秒投放 + 温泉每秒投放
+        let volcano_interval = config.current_volcano_interval(self.time);
+        let volcano_rate = if volcano_interval > 0.0 {
+            config.current_volcano_energy(self.time) * config.volcano_count as f64 / volcano_interval
+        } else {
+            0.0
+        };
+        let spring_rate: f64 = if config.spring_emit_interval > 0.0 {
+            self.hot_springs
+                .iter()
+                .filter(|s| s.alive)
+                .map(|s| {
+                    config.spring_particle_energy
+                        * config.spring_emit_count as f64
+                        * s.output_factor()
+                        / config.spring_emit_interval
+                })
+                .sum()
+        } else {
+            0.0
+        };
+        let theoretical_energy = (volcano_rate + spring_rate) * 60.0; // 每分钟投放量
         let trail_energy: f64 = self
             .trail_points
             .iter()
