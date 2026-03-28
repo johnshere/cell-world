@@ -544,10 +544,10 @@ impl World {
         let new_x = anchor_x + dist * angle.cos();
         let new_y = anchor_y + dist * angle.sin();
 
-        // 火山喷发范围排除：温泉不能生成在火山半径内
+        // 温泉必须在火山喷发范围内生成
         let vdx = new_x - config.volcano_x;
         let vdy = new_y - config.volcano_y;
-        if vdx * vdx + vdy * vdy < config.volcano_radius * config.volcano_radius {
+        if vdx * vdx + vdy * vdy > config.volcano_radius * config.volcano_radius {
             return;
         }
 
