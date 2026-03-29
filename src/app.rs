@@ -592,6 +592,13 @@ impl CellWorldApp {
                     &mut c.min_creatures,
                     5..=200,
                 );
+                changed |= config_drag_usize(
+                    ui,
+                    "最大生物数",
+                    "超出禁止繁殖，0=不限",
+                    &mut c.max_creatures,
+                    0..=2000,
+                );
                 changed |= ui
                     .horizontal(|ui| {
                         ui.label("算力系数");
