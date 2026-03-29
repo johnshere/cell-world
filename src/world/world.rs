@@ -1102,16 +1102,16 @@ impl World {
                 config.combat_power(other_energy, other_speed_norm, other_ally_energy);
 
             let damage_ratio = attacker_score / (attacker_score + defender_score + 0.001);
-            let transfer = other_energy * damage_ratio * config.bite_transfer_rate;
+            let damage = other_energy * damage_ratio;
+            let actual_damage = damage.min(self.creatures[other_idx].energy);
 
             // 咬合效率 = 1 - 基因相似度：相似度越高获取越少，渐变而非悬崖
             let similarity = self.creatures[idx]
                 .genome
                 .similarity(&self.creatures[other_idx].genome);
             let efficiency = 1.0 - similarity;
-            let actual_transfer = transfer.min(self.creatures[other_idx].energy);
-            self.creatures[other_idx].energy -= actual_transfer;
-            self.creatures[idx].energy += actual_transfer * efficiency;
+            self.creatures[other_idx].energy -= actual_damage;
+            self.creatures[idx].energy += actual_damage * config.bite_transfer_rate * efficiency;
             self.action_counts[2] += 1;
 
             // 重置嘴巴冷却
