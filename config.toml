@@ -1,7 +1,7 @@
 # 初始模拟速度
-initial_speed = 6.0
+initial_speed = 4.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 30
+min_creatures = 70
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 700
 # 初始能量
@@ -17,52 +17,52 @@ volcano_y = 0.0
 # 火山喷发间隔（秒）
 volcano_interval = 10.0
 # 火山喷射半径
-volcano_radius = 1800.0
+volcano_radius = 2000.0
 # 每次喷发粒子数
-volcano_count = 40
+volcano_count = 90
 # 火山粒子能量
-volcano_particle_energy = 100.0
+volcano_particle_energy = 150.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
-volcano_interval_cycle = 700.0
+volcano_interval_cycle = 90.0
 # 火山间隔振幅比（0~0.9）
-volcano_interval_amplitude = 0.3
+volcano_interval_amplitude = 0.05
 # 火山能量正弦周期（秒）
-volcano_energy_cycle = 10000.0
+volcano_energy_cycle = 900.0
 # 火山能量振幅比（0~0.9）
-volcano_energy_amplitude = 0.65
+volcano_energy_amplitude = 0.05
 
 # 火山粒子衰减率（每秒）
-volcano_decay_rate = 0.015
+volcano_decay_rate = 0.02
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 35.0
+volcano_kill_radius = 30.0
 # 落地杀伤系数
-landing_damage_multiplier = 1.0
+landing_damage_multiplier = 0.7
 
 # === 温泉 ===
 # 温泉最大同时活跃数量
 spring_max_count = 10
 # 温泉产生间隔（秒）
-spring_spawn_interval = 150.0
+spring_spawn_interval = 10.0
 # 温泉寿命（秒）
-spring_lifetime = 2000.0
+spring_lifetime = 900.0
 # 温泉喷出粒子间隔（秒）
 spring_emit_interval = 5.0
 # 温泉每次喷出粒子数
-spring_emit_count = 5
+spring_emit_count = 3
 # 温泉粒子能量
-spring_particle_energy = 50.0
+spring_particle_energy = 150.0
 # 温泉喷出半径（粒子散布范围 px）
-spring_radius = 150.0
+spring_radius = 140.0
 # 温泉粒子衰减率（/秒）
-spring_decay_rate = 0.01
+spring_decay_rate = 0.015
 # 新温泉与已有温泉最小间距（px）
 spring_min_distance = 350.0
 # 新温泉出现的最大距离（px）
-spring_max_distance = 100.0
+spring_max_distance = 450.0
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃
@@ -72,7 +72,7 @@ eye_scan_speed = 400.0
 # 嘴巴冷却时间（秒）
 mouth_cooldown = 0.5
 # 咬合能量转移率
-bite_transfer_rate = 0.9
+bite_transfer_rate = 0.98
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
@@ -82,27 +82,27 @@ heat_floor = 0.05
 
 # === 代谢 ===
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
-age_metabolism_factor = 0.015
+age_metabolism_factor = 0.01
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
-metabolism_exponent = 2.5
+metabolism_exponent = 2.1
 # 移动消耗（每单位距离）
-move_cost = 0.0015
+move_cost = 0.001
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.025
+heat_dissipation_coefficient = 0.01
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
 
 # === 感知 ===
 # 视觉半径（眼睛能看到的最大距离）
-vision_range = 100.0
+vision_range = 120.0
 # 接触判定距离
 contact_range = 15.0
 
 # === 进化 ===
 # 变异率（所有变异逻辑共用）
-mutation_rate = 0.17
+mutation_rate = 0.32
 # 初始连接数最小值
 initial_connections_min = 6
 # 初始连接数最大值
@@ -112,24 +112,24 @@ species_similarity_threshold = 0.95
 
 # === 战力 ===
 # 战力公式：速度权重（越快越强）
-combat_speed_weight = 1.0
+combat_speed_weight = 2.0
 # 战力公式：同族援助权重（附近同族越多越强）
-combat_ally_weight = 1.0
+combat_ally_weight = 0.5
 
 # 优势种检测：种群最老成员最低年龄
-dominant_min_age = 350.0
+dominant_min_age = 200.0
 
 # === 痕迹点 ===
 # 痕迹点能量衰减率（/秒）
 trail_decay_rate = 0.01
 # 痕迹抑制半径（px，范围内有其他生物痕迹则不产生）
-trail_suppress_radius = 7.0
+trail_suppress_radius = 12.0
 # 痕迹生成间隔（秒，每个生物独立计时）
 trail_emit_interval = 0.35
 
 # === 繁殖 ===
 # 繁殖冷却时间（秒）
-reproduce_cooldown = 10.0
+reproduce_cooldown = 20.0
 
 # === 算力能量 ===
 # 算力转能量系数（内部除以1亿，0 = 禁用）
