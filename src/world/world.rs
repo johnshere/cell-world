@@ -463,9 +463,9 @@ impl World {
         let kill_r2 = config.volcano_kill_radius * config.volcano_kill_radius;
         for _ in 0..config.volcano_count {
             let angle = rng.gen_range(0.0..std::f64::consts::TAU);
-            // 中心富集：u^1.5 分布，比 u² 稍平缓，远处粒子更多
+            // 线性分布：面密度从中心到外围自然递减
             let u: f64 = rng.gen_range(0.0..1.0);
-            let r = u.powf(1.5) * config.volcano_radius;
+            let r = u * config.volcano_radius;
             let x = config.volcano_x + r * angle.cos();
             let y = config.volcano_y + r * angle.sin();
             let energy_id = self.next_energy_id;
@@ -586,10 +586,9 @@ impl World {
 
                 for _ in 0..emit_count {
                     let angle = rng.gen_range(0.0..std::f64::consts::TAU);
-                    // 指数衰减分布：核心区密集，远处稀疏，形成浓度梯度（"气味"）
-                    let u: f64 = rng.gen_range(0.001_f64..1.0);
-                    let r = (-config.spring_radius * (1.0 - u).ln())
-                        .min(config.spring_radius * 5.0);
+                    // 线性分布：面密度从中心到外围自然递减
+                    let u: f64 = rng.gen_range(0.0_f64..1.0);
+                    let r = u * config.spring_radius;
                     let x = sx + r * angle.cos();
                     let y = sy + r * angle.sin();
                     // 粒子能量随距离指数衰减：远处粒子能量低但可被感知
