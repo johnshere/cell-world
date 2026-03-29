@@ -4,15 +4,16 @@ use crate::render::{
 };
 use crate::snapshot::WorldSnapshot;
 use crate::store::{CreatureTemplate, Store};
+use crate::world::sim_thread::{spawn_sim_thread, SimCommand, SimHandle, SimSnapshot};
 use crate::world::World;
 use eframe::egui;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::sync::mpsc;
 
 /// 帧级性能统计
 #[derive(Default)]
 pub struct FramePerfStats {
-    pub world_update_ms: f64,
     pub panel_update_ms: f64,
     pub render_ctx_ms: f64,
     pub render_ms: f64,
@@ -22,14 +23,13 @@ pub struct FramePerfStats {
 
 /// 主应用
 pub struct CellWorldApp {
-    world: World,
+    sim: SimHandle,
     config: Config,
     canvas: WorldCanvas,
     panel: StatsPanel,
     store: Store,
     paused: bool,
     speed: f64,
-    last_update: std::time::Instant,
     fps: f64,
     frame_count: u32,
     fps_timer: std::time::Instant,
@@ -51,6 +51,8 @@ pub struct CellWorldApp {
     snapshot_confirm_save: bool,
     // 是否启用画布渲染
     render_enabled: bool,
+    // 快照捕获回调
+    snapshot_capture_rx: Option<mpsc::Receiver<WorldSnapshot>>,
 }
 
 impl CellWorldApp {
@@ -88,18 +90,20 @@ impl CellWorldApp {
         let initial_speed = config.initial_speed;
         let initial_scale = config.initial_scale;
 
+        // 启动模拟线程
+        let sim = spawn_sim_thread(world, config.clone());
+
         // 尝试加载存档
         let pending_restore = WorldSnapshot::load();
 
         Self {
-            world,
+            sim,
             config,
             canvas: WorldCanvas::new(initial_scale),
             panel: StatsPanel::new(),
             store,
             paused: false,
             speed: initial_speed,
-            last_update: now,
             fps: 0.0,
             frame_count: 0,
             fps_timer: now,
@@ -113,14 +117,15 @@ impl CellWorldApp {
             pending_restore,
             snapshot_confirm_save: false,
             render_enabled: true,
+            snapshot_capture_rx: None,
         }
     }
 }
 
 impl CellWorldApp {
     /// 记录统计数据到日志文件
-    fn log_stats(&mut self) {
-        let world_time = self.world.time;
+    fn log_stats(&mut self, snapshot: &SimSnapshot) {
+        let world_time = snapshot.time;
 
         // 每10秒记录一次
         if world_time - self.last_log_time < 10.0 {
@@ -152,8 +157,8 @@ impl CellWorldApp {
                 .open("docs/run.log")
             {
                 let _ = writeln!(file, "# Cell World 性能分析日志\n");
-                let _ = writeln!(file, "| 时间 | FPS | 生物 | 世界ms | 面板ms | 聚类ms | 渲染ms | egui | 帧总ms | 感知ms | 网络ms |");
-                let _ = writeln!(file, "|------|-----|------|--------|--------|--------|--------|------|--------|--------|--------|");
+                let _ = writeln!(file, "| 时间 | FPS | 生物 | 面板ms | 聚类ms | 渲染ms | egui | 帧总ms | 感知ms | 网络ms |");
+                let _ = writeln!(file, "|------|-----|------|--------|--------|--------|------|--------|--------|--------|");
             }
             self.log_initialized = true;
         }
@@ -178,7 +183,7 @@ impl CellWorldApp {
         }
 
         // 追加性能分析日志
-        let perf = &self.world.perf_stats;
+        let perf = &snapshot.perf_stats;
         let fperf = &self.frame_perf;
         if let Ok(mut file) = OpenOptions::new()
             .write(true)
@@ -187,11 +192,10 @@ impl CellWorldApp {
         {
             let _ = writeln!(
                 file,
-                "| {:.0} | {:.0} | {} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} |",
+                "| {:.0} | {:.0} | {} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} |",
                 stats.time,
                 stats.fps,
                 perf.creature_count,
-                fperf.world_update_ms,
                 fperf.panel_update_ms,
                 fperf.render_ctx_ms,
                 fperf.render_ms,
@@ -220,7 +224,7 @@ impl CellWorldApp {
         0.30 * survival + 0.25 * prosperity + 0.25 * depth + 0.20 * dominance
     }
 
-    fn auto_save_dominant(&mut self) {
+    fn auto_save_dominant(&mut self, world_time: f64) {
         let candidate = match self.panel.stats().dominant_candidate.clone() {
             Some(c) => c,
             None => return,
@@ -300,7 +304,7 @@ impl CellWorldApp {
                     candidate.avg_age, candidate.avg_energy, candidate.max_generation,
                     candidate.population_ratio * 100.0
                 );
-                let template = make_template(existing.name.clone(), &candidate, version, self.world.time);
+                let template = make_template(existing.name.clone(), &candidate, version, world_time);
                 if let Err(e) = self.store.save(template) {
                     eprintln!("自动保存优势种失败: {}", e);
                 }
@@ -318,7 +322,7 @@ impl CellWorldApp {
                         candidate.avg_age, candidate.avg_energy, candidate.max_generation,
                         candidate.population_ratio * 100.0
                     );
-                    let template = make_template(name, &candidate, version, self.world.time);
+                    let template = make_template(name, &candidate, version, world_time);
                     if let Err(e) = self.store.save(template) {
                         eprintln!("自动保存优势种失败: {}", e);
                     }
@@ -336,7 +340,7 @@ impl CellWorldApp {
                     self.store.delete(&weak_name);
                     let now = chrono::Local::now();
                     let name = format!("v{}_{}", version, now.format("%m%d_%H%M"));
-                    let template = make_template(name, &candidate, version, self.world.time);
+                    let template = make_template(name, &candidate, version, world_time);
                     if let Err(e) = self.store.save(template) {
                         eprintln!("自动保存优势种失败: {}", e);
                     }
@@ -408,11 +412,15 @@ fn config_drag_usize(
 }
 
 impl CellWorldApp {
-    fn render_settings_inline(&mut self, ui: &mut egui::Ui) {
+    fn render_settings_inline(&mut self, ui: &mut egui::Ui, trail_disabled: &mut bool) {
         ui.separator();
         ui.strong("⚙ 设置");
         {
-            ui.checkbox(&mut self.world.trail_disabled, "禁用痕迹系统");
+            let old_trail_disabled = *trail_disabled;
+            ui.checkbox(trail_disabled, "禁用痕迹系统");
+            if *trail_disabled != old_trail_disabled {
+                self.sim.send(SimCommand::SetTrailDisabled(*trail_disabled));
+            }
 
             let c = &mut self.config;
             let mut changed = false;
@@ -656,6 +664,7 @@ impl CellWorldApp {
 
             if changed {
                 c.save();
+                self.sim.send(SimCommand::SetConfig(c.clone()));
             }
         }
     }
@@ -809,7 +818,7 @@ impl CellWorldApp {
 }
 
 impl CellWorldApp {
-    fn render_energy_settings_inline(&mut self, ui: &mut egui::Ui) {
+    fn render_energy_settings_inline(&mut self, ui: &mut egui::Ui, snapshot: &SimSnapshot) {
         ui.separator();
         ui.strong("🌋 能量源设置");
         {
@@ -909,7 +918,7 @@ impl CellWorldApp {
             });
 
             // 温泉信息
-            let active_springs = self.world.hot_springs.iter().filter(|s| s.alive).count();
+            let active_springs = snapshot.hot_springs.iter().filter(|s| s.alive).count();
             ui.separator();
             ui.strong(format!(
                 "♨ 温泉 ({}/{})",
@@ -999,6 +1008,7 @@ impl CellWorldApp {
 
             if changed {
                 c.save();
+                self.sim.send(SimCommand::SetConfig(c.clone()));
             }
         }
     }
@@ -1027,16 +1037,9 @@ impl eframe::App for CellWorldApp {
                     });
                 });
             if chose_restore {
-                if let Some(snapshot) = self.pending_restore.take() {
-                    let (mut world, config) = snapshot.into_world();
-                    world.dominant_species = self.store.dominant_species().clone();
-                    // 重建 neural bridge
-                    if config.neural_backend != "legacy" {
-                        let bridge = crate::neural::thread::spawn_neural_thread(&config);
-                        world.set_neural_bridge(bridge);
-                    }
-                    self.config = config;
-                    self.world = world;
+                if let Some(ws) = self.pending_restore.take() {
+                    self.config = ws.config.clone();
+                    self.sim.send(SimCommand::RestoreSnapshot(ws));
                     self.render_ctx_cache = None;
                 }
             }
@@ -1046,6 +1049,16 @@ impl eframe::App for CellWorldApp {
             // 有弹框时暂停世界逻辑
             ctx.request_repaint();
             return;
+        }
+
+        // 检查快照捕获完成
+        if let Some(ref rx) = self.snapshot_capture_rx {
+            if let Ok(ws) = rx.try_recv() {
+                if let Err(e) = ws.save() {
+                    eprintln!("保存快照失败: {}", e);
+                }
+                self.snapshot_capture_rx = None;
+            }
         }
 
         // 保存确认弹框
@@ -1074,10 +1087,10 @@ impl eframe::App for CellWorldApp {
                     });
                 });
             if chose_save {
-                let snapshot = WorldSnapshot::capture(&self.world, &self.config);
-                if let Err(e) = snapshot.save() {
-                    eprintln!("保存快照失败: {}", e);
-                }
+                // 通过命令请求模拟线程捕获快照
+                let (tx, rx) = mpsc::channel();
+                self.sim.send(SimCommand::CaptureSnapshot(tx));
+                self.snapshot_capture_rx = Some(rx);
                 self.snapshot_confirm_save = false;
             }
             if chose_cancel {
@@ -1085,12 +1098,9 @@ impl eframe::App for CellWorldApp {
             }
         }
 
-        // 计算 delta time
         let now = std::time::Instant::now();
-        let dt = now.duration_since(self.last_update).as_secs_f64();
-        self.last_update = now;
 
-        // FPS 计算
+        // FPS 计算（真实帧率）
         self.frame_count += 1;
         let fps_elapsed = now.duration_since(self.fps_timer).as_secs_f64();
         if fps_elapsed >= 1.0 {
@@ -1099,50 +1109,33 @@ impl eframe::App for CellWorldApp {
             self.fps_timer = now;
         }
 
-        // FPS低于30时自动暂停痕迹生成（不影响已有痕迹的渲染/衰减/吸收）
-        self.world.trail_spawn_paused = self.fps > 0.0 && self.fps < 30.0;
+        // 真实帧率低于30时暂停痕迹生成
+        let trail_spawn_paused = self.fps > 0.0 && self.fps < 30.0;
+        self.sim.send(SimCommand::SetTrailSpawnPaused(trail_spawn_paused));
 
-        // 使用上一帧的可见范围更新视窗
-        // 第一帧时 last_visible_bounds 为 None，跳过更新，等待渲染获取视窗大小
-        let t_world = std::time::Instant::now();
+        // 发送视窗范围到模拟线程
         if let Some(bounds) = self.last_visible_bounds {
-            self.world
-                .set_viewport(bounds.min_x, bounds.min_y, bounds.max_x, bounds.max_y);
-
-            // 更新世界（如果未暂停）
-            // 高倍速时拆分子步，防止大 dt 导致扫描跳过目标、冷却判定粗糙
-            if !self.paused {
-                let total_dt = dt * self.speed;
-                let max_step = 0.2; // 单步最大 200ms，≥6x 才触发
-                if total_dt > max_step {
-                    let steps = ((total_dt / max_step).ceil() as usize).min(5);
-                    let step_dt = total_dt / steps as f64;
-                    for _ in 0..steps {
-                        self.world.update(step_dt, &self.config);
-                    }
-                } else {
-                    self.world.update(total_dt, &self.config);
-                }
-            }
+            self.sim.send(SimCommand::SetViewport(
+                bounds.min_x,
+                bounds.min_y,
+                bounds.max_x,
+                bounds.max_y,
+            ));
         }
-        self.frame_perf.world_update_ms = t_world.elapsed().as_secs_f64() * 1000.0;
+
+        // 从模拟线程读取最新快照
+        let snap = self.sim.snapshot().clone();
 
         // 更新面板缓存
         let t_panel = std::time::Instant::now();
-        self.panel.update(
-            &self.world,
-            &self.config,
-            self.config.species_similarity_threshold,
-            self.fps,
-            now,
-        );
+        self.panel.update(&snap, self.fps, now);
         self.frame_perf.panel_update_ms = t_panel.elapsed().as_secs_f64() * 1000.0;
 
         // 每10秒记录一次日志
-        self.log_stats();
+        self.log_stats(&snap);
 
         // 自动保存优势种
-        self.auto_save_dominant();
+        self.auto_save_dominant(snap.time);
 
         // 侧边栏面板
         let mut panel_action = PanelAction::default();
@@ -1150,6 +1143,8 @@ impl eframe::App for CellWorldApp {
         let mut gene_action = PanelAction::default();
 
         let old_speed = self.speed;
+        let old_paused = self.paused;
+        let mut trail_disabled = snap.trail_disabled;
         egui::SidePanel::right("panel")
             .min_width(400.0)
             .show(ctx, |ui| {
@@ -1171,7 +1166,7 @@ impl eframe::App for CellWorldApp {
                 // 显示选中信息
                 selection_action = self
                     .panel
-                    .render_selection(ui, &self.selection, &self.world);
+                    .render_selection(ui, &self.selection, &snap);
 
                 // 滚动区域：基因库/能量/配置面板（互斥）
                 if self.panel.templates_open || self.panel.settings_open || self.panel.energy_settings_open {
@@ -1185,20 +1180,30 @@ impl eframe::App for CellWorldApp {
                                 gene_action = self.panel.render_gene_library(ui, &self.store);
                             }
                             if self.panel.settings_open {
-                                self.render_settings_inline(ui);
+                                self.render_settings_inline(ui, &mut trail_disabled);
                             }
                             if self.panel.energy_settings_open {
-                                self.render_energy_settings_inline(ui);
+                                self.render_energy_settings_inline(ui, &snap);
                             }
                         });
                     });
                 }
             });
 
-        // 速度变化时同步到配置文件
+        // 速度变化时同步到配置文件和模拟线程
         if (self.speed - old_speed).abs() > f64::EPSILON {
             self.config.initial_speed = self.speed;
             self.config.save();
+            self.sim.send(SimCommand::SetSpeed(self.speed));
+        }
+
+        // 暂停状态变化时同步到模拟线程
+        if self.paused != old_paused {
+            if self.paused {
+                self.sim.send(SimCommand::Pause);
+            } else {
+                self.sim.send(SimCommand::Resume);
+            }
         }
 
         // 合并基因库操作
@@ -1225,17 +1230,14 @@ impl eframe::App for CellWorldApp {
             for _ in 0..5 {
                 match &template_name {
                     None => {
-                        // 随机生成
-                        self.world.spawn_creature(&self.config);
+                        self.sim.send(SimCommand::SpawnCreature);
                     }
                     Some(name) => {
-                        // 从模板生成
                         if let Some(template) = self.store.get(name) {
-                            self.world.spawn_from_template(
-                                &self.config,
-                                &template.genome,
+                            self.sim.send(SimCommand::SpawnFromTemplate(
+                                template.genome.clone(),
                                 template.initial_energy,
-                            );
+                            ));
                         }
                     }
                 }
@@ -1245,16 +1247,15 @@ impl eframe::App for CellWorldApp {
         // 处理删除选中
         if selection_action.delete_selected {
             if let Selection::Creature(id) = self.selection {
-                self.world.kill_creature(id);
+                self.sim.send(SimCommand::KillCreature(id));
                 self.selection = Selection::None;
             }
         }
 
-        // 处理保存选中
+        // 处理保存选中（从快照中查找生物数据）
         if let Some(name) = selection_action.save_selected {
             if let Selection::Creature(id) = self.selection {
-                if let Some(creature) = self.world.creatures.iter().find(|c| c.id == id && c.alive)
-                {
+                if let Some(creature) = snap.creatures.iter().find(|c| c.id == id && c.alive) {
                     let saved_name = name.clone();
                     let template = CreatureTemplate {
                         name,
@@ -1272,10 +1273,8 @@ impl eframe::App for CellWorldApp {
                     if let Err(e) = self.store.save(template) {
                         eprintln!("保存失败: {}", e);
                     } else {
-                        // 保存成功后，自动选中新模板
-                        if let Some(idx) = self.store.names().iter().position(|n| *n == saved_name)
-                        {
-                            self.panel.selected_template = idx + 1; // +1 因为第0项是"随机"
+                        if let Some(idx) = self.store.names().iter().position(|n| *n == saved_name) {
+                            self.panel.selected_template = idx + 1;
                         }
                     }
                 }
@@ -1288,11 +1287,9 @@ impl eframe::App for CellWorldApp {
             self.panel.reset_template_selection();
         }
 
-        // 保存种族代表基因
+        // 保存种族代表基因（从快照中查找）
         if let Some(clan_hash) = panel_action.save_clan {
-            // 找到该族中能量最高的活生物作为代表
-            if let Some(representative) = self
-                .world
+            if let Some(representative) = snap
                 .creatures
                 .iter()
                 .filter(|c| c.alive && c.clan_hash == clan_hash)
@@ -1338,14 +1335,14 @@ impl eframe::App for CellWorldApp {
                 self.last_visible_bounds = Some(bounds);
                 ui.centered_and_justified(|ui| {
                     ui.label(
-                        egui::RichText::new("渲染已暂停 - 仅数据模拟")
+                        egui::RichText::new("渲染已暂停 - 模拟线程运行中")
                             .size(20.0)
                             .color(egui::Color32::from_gray(80)),
                     );
                 });
                 return;
             }
-            // 每1秒（真实时间）更新一次渲染上下文（避免频繁计算O(n²)的种族聚类）
+            // 从快照中获取渲染上下文
             if self.render_ctx_cache.is_none()
                 || now
                     .duration_since(self.last_render_ctx_update)
@@ -1353,10 +1350,9 @@ impl eframe::App for CellWorldApp {
                     >= 1.0
             {
                 let t_ctx = std::time::Instant::now();
-                let creature_species = self
-                    .world
-                    .get_render_data(self.config.species_similarity_threshold);
-                self.render_ctx_cache = Some(RenderContext { creature_species });
+                self.render_ctx_cache = Some(RenderContext {
+                    creature_species: snap.creature_species.clone(),
+                });
                 self.last_render_ctx_update = now;
                 render_ctx_time = t_ctx.elapsed().as_secs_f64() * 1000.0;
             }
@@ -1364,7 +1360,7 @@ impl eframe::App for CellWorldApp {
             let t_render = std::time::Instant::now();
             let bounds = self.canvas.render(
                 ui,
-                &self.world,
+                &snap,
                 &mut self.selection,
                 render_ctx,
                 &self.config,
@@ -1375,12 +1371,11 @@ impl eframe::App for CellWorldApp {
         let central_panel_time = t_central_panel.elapsed().as_secs_f64() * 1000.0;
         self.frame_perf.render_ctx_ms = render_ctx_time;
         self.frame_perf.render_ms = render_time;
-        // egui 开销 = CentralPanel 总时间 - 我们测量的代码时间
         self.frame_perf.egui_overhead_ms = central_panel_time - render_ctx_time - render_time;
         self.frame_perf.frame_total_ms =
-            self.frame_perf.world_update_ms + self.frame_perf.panel_update_ms + central_panel_time;
+            self.frame_perf.panel_update_ms + central_panel_time;
 
-        // 持续刷新
-        ctx.request_repaint();
+        // 渲染始终以一定帧率重绘（模拟已在独立线程）
+        ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
 }

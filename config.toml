@@ -2,6 +2,8 @@
 initial_speed = 6.0
 # 最小生物数量（低于此值自动补充）
 min_creatures = 30
+# 最大生物数量（超过时禁止繁殖，0=不限制）
+max_creatures = 700
 # 初始能量
 initial_energy = 160.0
 # 初始世界缩放比例

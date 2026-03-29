@@ -5,7 +5,7 @@ use super::canvas::species_to_color;
 use super::Selection;
 use crate::config::Config;
 use crate::store::Store;
-use crate::world::{DeathAgeStats, DominantCandidate, World};
+use crate::world::{DeathAgeStats, DominantCandidate, SimSnapshot};
 
 /// 面板操作结果
 #[derive(Default)]
@@ -100,18 +100,16 @@ impl StatsPanel {
 
     pub fn update(
         &mut self,
-        world: &World,
-        config: &Config,
-        species_threshold: f64,
+        snapshot: &SimSnapshot,
         fps: f64,
         now: Instant,
     ) {
         self.cached_stats.fps = fps;
-        self.cached_stats.volcano_countdown = world.volcano_countdown(config);
+        self.cached_stats.volcano_countdown = snapshot.volcano_countdown;
 
         if now.duration_since(self.last_update).as_secs_f64() >= self.update_interval {
             self.last_update = now;
-            let stats = world.stats(species_threshold, config);
+            let stats = &snapshot.world_stats;
             self.cached_stats = CachedStats {
                 time: stats.time,
                 fps,
@@ -121,7 +119,7 @@ impl StatsPanel {
                 total_energy: stats.total_energy,
                 creature_energy: stats.creature_energy,
                 theoretical_energy: stats.theoretical_energy,
-                volcano_countdown: self.cached_stats.volcano_countdown,
+                volcano_countdown: snapshot.volcano_countdown,
                 max_generation: stats.max_generation,
                 avg_energy: stats.avg_energy,
                 action_counts: stats.action_counts,
@@ -129,7 +127,7 @@ impl StatsPanel {
                 clan_count: stats.clan_count,
                 top_clans: stats.top_clans.clone(),
                 dominant_candidate: stats.dominant_candidate.clone(),
-                avg_compute_ns: world.perf_stats.avg_compute_ns,
+                avg_compute_ns: snapshot.perf_stats.avg_compute_ns,
             };
             // 记录能量历史（总能量 + 生命能量 + 理论投放能量）
             self.energy_history.push((
@@ -486,14 +484,14 @@ impl StatsPanel {
         &mut self,
         ui: &mut Ui,
         selection: &Selection,
-        world: &World,
+        snapshot: &SimSnapshot,
     ) -> PanelAction {
         let mut action = PanelAction::default();
 
         match selection {
             Selection::None => {}
             Selection::Creature(id) => {
-                if let Some(creature) = world.creatures.iter().find(|c| c.id == *id && c.alive) {
+                if let Some(creature) = snapshot.creatures.iter().find(|c| c.id == *id && c.alive) {
                     ui.separator();
                     ui.label("选中生物");
 
@@ -600,7 +598,7 @@ impl StatsPanel {
                 }
             }
             Selection::Energy(id) => {
-                if let Some(particle) = world
+                if let Some(particle) = snapshot
                     .energy_particles
                     .iter()
                     .find(|e| e.id == *id && e.alive)

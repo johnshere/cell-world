@@ -834,7 +834,11 @@ impl World {
                 }
             } else {
                 let perception = self.creatures[i].perception_cache;
-                let snn_ticks = config.snn_ticks_per_frame;
+                // SNN tick 按 dt 缩放，保证每秒 sim-time tick 总数恒定
+                let snn_ticks = (config.neural_tick_rate * dt)
+                    .round()
+                    .max(1.0)
+                    .min(100.0) as usize;
                 let outputs = self.creatures[i].brain.tick_multi(&perception, snn_ticks);
                 for (j, &v) in outputs.iter().enumerate().take(7) {
                     self.creatures[i].last_outputs[j] = v;
@@ -994,8 +998,10 @@ impl World {
         // 嘴：接触食物自动吸收 + 对生物咬
         self.action_mouth(creature_idx, mouth, config);
 
-        // 繁殖（受冷却限制）
-        if reproduce > 0.2 && self.creatures[creature_idx].reproduce_cooldown_timer <= 0.0 {
+        // 繁殖（受冷却限制 + 数量上限）
+        let alive_count = self.creatures.iter().filter(|c| c.alive).count();
+        let pop_ok = config.max_creatures == 0 || alive_count < config.max_creatures;
+        if reproduce > 0.2 && pop_ok && self.creatures[creature_idx].reproduce_cooldown_timer <= 0.0 {
             if self.action_reproduce(creature_idx, reproduce_threshold, reproduce_ratio, config) {
                 self.creatures[creature_idx].reproduce_cooldown_timer = config.reproduce_cooldown;
                 self.action_counts[3] += 1; // 繁殖
@@ -2017,6 +2023,7 @@ pub struct RankedEntry {
     pub count: usize,
 }
 
+#[derive(Clone, Default)]
 pub struct WorldStats {
     pub time: f64,
     pub creature_count: usize,

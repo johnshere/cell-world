@@ -1,0 +1,240 @@
+use std::sync::{mpsc, Arc, RwLock};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use rustc_hash::FxHashMap;
+
+use super::{Creature, DeathAgeStats, DominantCandidate, EnergyParticle, HotSpring, TrailPoint};
+use crate::config::Config;
+use crate::neural::Genome;
+use crate::snapshot::WorldSnapshot;
+use crate::world::world::{PerfStats, WorldStats};
+use crate::world::World;
+
+/// 模拟步长：固定 30Hz
+const SIM_DT: f64 = 1.0 / 30.0;
+
+/// 模拟线程每帧导出给主线程的只读快照
+#[derive(Clone)]
+pub struct SimSnapshot {
+    // 渲染用原始数据
+    pub creatures: Vec<Creature>,
+    pub energy_particles: Vec<EnergyParticle>,
+    pub trail_points: Vec<TrailPoint>,
+    pub hot_springs: Vec<HotSpring>,
+    pub trail_disabled: bool,
+
+    // 预计算统计
+    pub time: f64,
+    pub perf_stats: PerfStats,
+    pub action_counts: [usize; 4],
+    pub death_age_stats: DeathAgeStats,
+    pub dominant_species: Vec<DominantCandidate>,
+    pub world_stats: WorldStats,
+    pub creature_species: FxHashMap<u64, u64>,
+    pub volcano_countdown: f64,
+}
+
+impl Default for SimSnapshot {
+    fn default() -> Self {
+        Self {
+            creatures: Vec::new(),
+            energy_particles: Vec::new(),
+            trail_points: Vec::new(),
+            hot_springs: Vec::new(),
+            trail_disabled: false,
+            time: 0.0,
+            perf_stats: PerfStats::default(),
+            action_counts: [0; 4],
+            death_age_stats: DeathAgeStats::default(),
+            dominant_species: Vec::new(),
+            world_stats: WorldStats::default(),
+            creature_species: FxHashMap::default(),
+            volcano_countdown: 0.0,
+        }
+    }
+}
+
+/// 主线程→模拟线程的指令
+pub enum SimCommand {
+    Pause,
+    Resume,
+    SetSpeed(f64),
+    SetConfig(Config),
+    SetViewport(f64, f64, f64, f64),
+    SpawnCreature,
+    SpawnFromTemplate(Genome, f64),
+    KillCreature(u64),
+    SetTrailDisabled(bool),
+    SetTrailSpawnPaused(bool),
+    /// 快照捕获：模拟线程捕获后通过 oneshot 回传
+    CaptureSnapshot(mpsc::Sender<WorldSnapshot>),
+    /// 快照恢复
+    RestoreSnapshot(WorldSnapshot),
+    Shutdown,
+}
+
+/// app.rs 持有的模拟线程句柄
+pub struct SimHandle {
+    cmd_tx: mpsc::Sender<SimCommand>,
+    snapshot: Arc<RwLock<SimSnapshot>>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl SimHandle {
+    /// 发送指令到模拟线程
+    pub fn send(&self, cmd: SimCommand) {
+        let _ = self.cmd_tx.send(cmd);
+    }
+
+    /// 读取最新快照（只读）
+    pub fn snapshot(&self) -> std::sync::RwLockReadGuard<'_, SimSnapshot> {
+        self.snapshot.read().unwrap()
+    }
+
+}
+
+impl Drop for SimHandle {
+    fn drop(&mut self) {
+        let _ = self.cmd_tx.send(SimCommand::Shutdown);
+        if let Some(handle) = self.thread.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// 启动模拟线程，返回句柄
+pub fn spawn_sim_thread(world: World, config: Config) -> SimHandle {
+    let (cmd_tx, cmd_rx) = mpsc::channel::<SimCommand>();
+    let snapshot = Arc::new(RwLock::new(SimSnapshot::default()));
+    let snapshot_clone = Arc::clone(&snapshot);
+
+    let handle = thread::Builder::new()
+        .name("sim-thread".to_string())
+        .spawn(move || {
+            sim_loop(world, config, cmd_rx, snapshot_clone);
+        })
+        .expect("Failed to spawn sim thread");
+
+    SimHandle {
+        cmd_tx,
+        snapshot,
+        thread: Some(handle),
+    }
+}
+
+fn sim_loop(
+    mut world: World,
+    mut config: Config,
+    cmd_rx: mpsc::Receiver<SimCommand>,
+    snapshot: Arc<RwLock<SimSnapshot>>,
+) {
+    let mut paused = false;
+    let mut speed = config.initial_speed;
+    let mut next_tick = Instant::now();
+    let tick_duration = Duration::from_secs_f64(SIM_DT);
+
+    // 导出初始快照
+    export_snapshot(&world, &config, &snapshot, speed);
+
+    loop {
+        // 处理所有待处理命令
+        loop {
+            match cmd_rx.try_recv() {
+                Ok(cmd) => match cmd {
+                    SimCommand::Pause => paused = true,
+                    SimCommand::Resume => paused = false,
+                    SimCommand::SetSpeed(s) => speed = s,
+                    SimCommand::SetConfig(c) => config = c,
+                    SimCommand::SetViewport(min_x, min_y, max_x, max_y) => {
+                        world.set_viewport(min_x, min_y, max_x, max_y);
+                    }
+                    SimCommand::SpawnCreature => {
+                        world.spawn_creature(&config);
+                    }
+                    SimCommand::SpawnFromTemplate(genome, energy) => {
+                        world.spawn_from_template(&config, &genome, energy);
+                    }
+                    SimCommand::KillCreature(id) => {
+                        world.kill_creature(id);
+                    }
+                    SimCommand::SetTrailDisabled(disabled) => {
+                        world.trail_disabled = disabled;
+                    }
+                    SimCommand::SetTrailSpawnPaused(paused) => {
+                        world.trail_spawn_paused = paused;
+                    }
+                    SimCommand::CaptureSnapshot(reply) => {
+                        let ws = WorldSnapshot::capture(&world, &config);
+                        let _ = reply.send(ws);
+                    }
+                    SimCommand::RestoreSnapshot(ws) => {
+                        let (mut new_world, new_config) = ws.into_world();
+                        // 重建 neural bridge
+                        if new_config.neural_backend != "legacy" {
+                            let bridge =
+                                crate::neural::thread::spawn_neural_thread(&new_config);
+                            new_world.set_neural_bridge(bridge);
+                        }
+                        world = new_world;
+                        config = new_config;
+                    }
+                    SimCommand::Shutdown => return,
+                },
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => return,
+            }
+        }
+
+        // 固定步长模拟
+        if !paused {
+            let sim_step = SIM_DT * speed;
+            world.update(sim_step, &config);
+        }
+
+        // 导出快照
+        export_snapshot(&world, &config, &snapshot, speed);
+
+        // 精确 sleep 到下一 tick
+        next_tick += tick_duration;
+        let now = Instant::now();
+        if next_tick > now {
+            thread::sleep(next_tick - now);
+        } else {
+            // 落后了，重置到当前时间
+            next_tick = now;
+        }
+    }
+}
+
+/// 从 World 导出 SimSnapshot 并写入共享内存
+fn export_snapshot(
+    world: &World,
+    config: &Config,
+    snapshot: &Arc<RwLock<SimSnapshot>>,
+    _speed: f64,
+) {
+    let world_stats = world.stats(config.species_similarity_threshold, config);
+    let creature_species = world.get_render_data(config.species_similarity_threshold);
+    let volcano_countdown = world.volcano_countdown(config);
+
+    let snap = SimSnapshot {
+        creatures: world.creatures.clone(),
+        energy_particles: world.energy_particles.clone(),
+        trail_points: world.trail_points.clone(),
+        hot_springs: world.hot_springs.clone(),
+        trail_disabled: world.trail_disabled,
+        time: world.time,
+        perf_stats: world.perf_stats.clone(),
+        action_counts: world.action_counts,
+        death_age_stats: world.death_age_stats.clone(),
+        dominant_species: world.dominant_species.clone(),
+        world_stats,
+        creature_species,
+        volcano_countdown,
+    };
+
+    if let Ok(mut guard) = snapshot.write() {
+        *guard = snap;
+    }
+}

@@ -5,7 +5,7 @@ use egui::{
 use rustc_hash::FxHashMap;
 
 use super::Selection;
-use crate::world::World;
+use crate::world::SimSnapshot;
 
 /// 渲染上下文（种族颜色）
 pub struct RenderContext {
@@ -66,7 +66,7 @@ impl WorldCanvas {
     pub fn render(
         &mut self,
         ui: &mut Ui,
-        world: &World,
+        snapshot: &SimSnapshot,
         selection: &mut Selection,
         ctx: &RenderContext,
         config: &crate::config::Config,
@@ -95,12 +95,12 @@ impl WorldCanvas {
         // 处理点击选中
         if response.clicked() {
             if let Some(click_pos) = response.interact_pointer_pos() {
-                *selection = self.find_clicked_entity(click_pos, rect, world);
+                *selection = self.find_clicked_entity(click_pos, rect, snapshot);
             }
         }
 
         // 验证选中是否仍有效
-        self.validate_selection(selection, world);
+        self.validate_selection(selection, snapshot);
 
         // 绘制背景
         painter.rect_filled(rect, 0.0, Color32::from_rgb(10, 10, 20));
@@ -123,18 +123,18 @@ impl WorldCanvas {
 
         // === LOD ===
         let draw_explode = self.scale > 0.4;
-        let draw_trails = self.scale > 0.12 && !world.trail_disabled;
+        let draw_trails = self.scale > 0.12 && !snapshot.trail_disabled;
         let creature_dot_mode = self.scale <= 0.15;
 
         // ===== 绘制能量粒子（批量 Mesh，跳过 egui 曲面细分）=====
         {
             let mut mesh = Mesh::default();
             mesh.vertices
-                .reserve(world.energy_particles.len().min(8000) * 4);
+                .reserve(snapshot.energy_particles.len().min(8000) * 4);
             mesh.indices
-                .reserve(world.energy_particles.len().min(8000) * 6);
+                .reserve(snapshot.energy_particles.len().min(8000) * 6);
 
-            for particle in &world.energy_particles {
+            for particle in &snapshot.energy_particles {
                 if !particle.alive {
                     continue;
                 }
@@ -184,10 +184,10 @@ impl WorldCanvas {
         if draw_trails {
             let mut mesh = Mesh::default();
             mesh.vertices
-                .reserve(world.trail_points.len().min(6000) * 4);
-            mesh.indices.reserve(world.trail_points.len().min(6000) * 6);
+                .reserve(snapshot.trail_points.len().min(6000) * 4);
+            mesh.indices.reserve(snapshot.trail_points.len().min(6000) * 6);
 
-            for trail in &world.trail_points {
+            for trail in &snapshot.trail_points {
                 if !trail.alive {
                     continue;
                 }
@@ -251,7 +251,7 @@ impl WorldCanvas {
         }
 
         // ===== 绘制温泉 =====
-        for spring in &world.hot_springs {
+        for spring in &snapshot.hot_springs {
             if !spring.alive {
                 continue;
             }
@@ -297,14 +297,14 @@ impl WorldCanvas {
         // 极低缩放时用批量 Mesh 渲染点
         let mut dot_mesh = if creature_dot_mode {
             let mut m = Mesh::default();
-            m.vertices.reserve(world.creatures.len() * 4);
-            m.indices.reserve(world.creatures.len() * 6);
+            m.vertices.reserve(snapshot.creatures.len() * 4);
+            m.indices.reserve(snapshot.creatures.len() * 6);
             Some(m)
         } else {
             None
         };
 
-        for creature in &world.creatures {
+        for creature in &snapshot.creatures {
             if !creature.alive {
                 continue;
             }
@@ -403,9 +403,9 @@ impl WorldCanvas {
     }
 
     /// 查找点击位置的实体
-    fn find_clicked_entity(&self, click_pos: Pos2, rect: Rect, world: &World) -> Selection {
+    fn find_clicked_entity(&self, click_pos: Pos2, rect: Rect, snapshot: &SimSnapshot) -> Selection {
         // 优先检测生物（因为生物更大更重要）
-        for creature in &world.creatures {
+        for creature in &snapshot.creatures {
             if !creature.alive {
                 continue;
             }
@@ -418,7 +418,7 @@ impl WorldCanvas {
         }
 
         // 检测能量粒子
-        for particle in &world.energy_particles {
+        for particle in &snapshot.energy_particles {
             if !particle.alive {
                 continue;
             }
@@ -434,16 +434,16 @@ impl WorldCanvas {
     }
 
     /// 验证选中是否仍有效
-    fn validate_selection(&self, selection: &mut Selection, world: &World) {
+    fn validate_selection(&self, selection: &mut Selection, snapshot: &SimSnapshot) {
         match *selection {
             Selection::Creature(id) => {
-                let found = world.creatures.iter().any(|c| c.id == id && c.alive);
+                let found = snapshot.creatures.iter().any(|c| c.id == id && c.alive);
                 if !found {
                     *selection = Selection::None;
                 }
             }
             Selection::Energy(id) => {
-                let found = world.energy_particles.iter().any(|e| e.id == id && e.alive);
+                let found = snapshot.energy_particles.iter().any(|e| e.id == id && e.alive);
                 if !found {
                     *selection = Selection::None;
                 }

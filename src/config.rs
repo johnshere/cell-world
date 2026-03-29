@@ -11,6 +11,10 @@ pub struct Config {
     /// 最小生物数量（低于此值自动补充）
     pub min_creatures: usize,
 
+    /// 最大生物数量（超过时禁止繁殖，0=不限制）
+    #[serde(default = "default_max_creatures")]
+    pub max_creatures: usize,
+
     /// 初始能量
     pub initial_energy: f64,
 
@@ -199,6 +203,9 @@ pub struct Config {
     pub neural_tick_rate: f64,
 }
 
+fn default_max_creatures() -> usize {
+    700
+}
 fn default_max_speed() -> f64 {
     20.0
 }
