@@ -733,7 +733,7 @@ impl World {
                 let alive = energy > 0.0 && !energy.is_nan() && !energy.is_infinite();
 
                 // 感知计算（仅存活时）
-                let (perception_cache, eye_scan_offset) = if alive {
+                let (perception_cache, eye_scan_offset, follow_degree) = if alive {
                     compute_perception_pure(
                         i,
                         creature,
@@ -751,7 +751,7 @@ impl World {
                         &mut trail_buf,
                     )
                 } else {
-                    (creature.perception_cache, creature.eye_scan_offset)
+                    (creature.perception_cache, creature.eye_scan_offset, 0.0)
                 };
 
                 PerceptionResult {
@@ -760,6 +760,7 @@ impl World {
                     eye_scan_offset,
                     energy_after_metabolism: energy,
                     alive,
+                    follow_degree,
                 }
             })
             .collect();
@@ -783,6 +784,12 @@ impl World {
             self.creatures[i].perception_cache = result.perception_cache;
             self.creatures[i].eye_scan_offset = result.eye_scan_offset;
             self.creatures[i].age += dt;
+
+            // 指数平滑 follow_level
+            let target = result.follow_degree;
+            let rate = 4.0; // ~0.25s 响应时间
+            let current = self.creatures[i].follow_level;
+            self.creatures[i].follow_level += (target - current) * (rate * dt).min(1.0);
 
             // 冷却递减
             self.creatures[i].eye_cooldown_timer -= dt;
@@ -935,7 +942,9 @@ impl World {
             self.creatures[creature_idx].y += dy;
 
             let distance = (dx * dx + dy * dy).sqrt();
-            move_cost = distance * config.move_cost * actual_speed;
+            let follow_discount =
+                self.creatures[creature_idx].follow_level * config.follow_cost_discount;
+            move_cost = distance * config.move_cost * actual_speed * (1.0 - follow_discount);
             self.creatures[creature_idx].energy -= move_cost;
             self.action_counts[0] += 1; // 移动
         }
@@ -1717,6 +1726,7 @@ struct PerceptionResult {
     eye_scan_offset: [f64; 2],
     energy_after_metabolism: f64,
     alive: bool,
+    follow_degree: f64,
 }
 
 /// 纯函数：计算 vision_range 内的周围能量密度（只读空间索引）
@@ -1798,7 +1808,7 @@ fn compute_perception_pure(
     energy_buf: &mut Vec<usize>,
     creature_buf: &mut Vec<usize>,
     trail_buf: &mut Vec<usize>,
-) -> ([f64; 17], [f64; 2]) {
+) -> ([f64; 17], [f64; 2], f64) {
     let mut perception = creature.perception_cache;
     let mut scan_offsets = creature.eye_scan_offset;
 
@@ -1993,7 +2003,34 @@ fn compute_perception_pure(
     perception[14] = nearest_heading_diff[1];
     perception[15] = nearest_speed_diff[1];
 
-    (perception, scan_offsets)
+    // === 跟随度计算 ===
+    let mut follow_degree = 0.0_f64;
+    for eye_i in 0..2 {
+        if nearest_type[eye_i] != 1.0 {
+            continue;
+        } // 仅生物
+        if nearest_dist[eye_i] >= f64::MAX {
+            continue;
+        }
+
+        // 因子1: 方向对齐度（heading_diff 已归一化到 -1~1）
+        let alignment = 1.0 - nearest_heading_diff[eye_i].abs();
+
+        // 因子2: 最优距离（高斯，与双方半径相关）
+        let target_radius = (nearest_energy[eye_i] * 1.28).cbrt();
+        let optimal_dist = 2.5 * (body_radius + target_radius);
+        let dist_ratio = (nearest_dist[eye_i] - optimal_dist) / optimal_dist;
+        let distance_factor = (-dist_ratio * dist_ratio).exp();
+
+        // 因子3: 位置偏移（scan_norm=-1.0 对应 ±20° 偏移，峰值在此）
+        let pos_offset = scan_norm[eye_i] + 1.0;
+        let position_factor = (-(pos_offset * pos_offset) / 0.32).exp(); // σ²=0.16
+
+        let eye_follow = alignment * distance_factor * position_factor;
+        follow_degree = follow_degree.max(eye_follow);
+    }
+
+    (perception, scan_offsets, follow_degree)
 }
 
 // ========== 数据结构 ==========

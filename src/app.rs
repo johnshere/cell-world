@@ -539,6 +539,14 @@ impl CellWorldApp {
                     0.0001,
                     0.0001..=0.01,
                 );
+                changed |= config_drag_f64(
+                    ui,
+                    "跟随省力",
+                    "前方有同向生物时移动消耗减少比例",
+                    &mut c.follow_cost_discount,
+                    0.01,
+                    0.0..=0.8,
+                );
             });
 
             ui.collapsing("感知系统", |ui| {

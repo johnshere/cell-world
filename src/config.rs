@@ -61,6 +61,9 @@ pub struct Config {
     pub max_speed: f64,
     /// 移动消耗（每单位距离）
     pub move_cost: f64,
+    /// 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
+    #[serde(default = "default_follow_cost_discount")]
+    pub follow_cost_discount: f64,
 
     /// 视觉半径（眼睛能看到的最大距离）
     pub vision_range: f64,
@@ -220,6 +223,9 @@ fn default_metabolism_exponent() -> f64 {
 }
 fn default_eye_scan_speed() -> f64 {
     280.0
+}
+fn default_follow_cost_discount() -> f64 {
+    0.3
 }
 
 fn default_spring_max_count() -> usize {
