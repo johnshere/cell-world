@@ -44,6 +44,7 @@ pub struct Creature {
     pub current_speed: f64,
 
     // 跟随度（指数平滑后的值，0~1）
+    #[cfg_attr(feature = "persistence", serde(default))]
     pub follow_level: f64,
 
     // 感知结果缓存（17维：左眼8 + 右眼8 + 自身1）

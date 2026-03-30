@@ -162,6 +162,7 @@ impl StatsPanel {
         &mut self,
         ui: &mut Ui,
         fps: f64,
+        sim_fps: f64,
         scale: f32,
         speed: &mut f64,
         paused: &mut bool,
@@ -188,7 +189,7 @@ impl StatsPanel {
 
         // FPS、缩放和时间
         ui.horizontal(|ui| {
-            ui.label(format!("FPS: {:.0}", fps));
+            ui.label(format!("FPS: {:.0} | SIM: {:.0}", fps, sim_fps));
             ui.separator();
             ui.label(format!("×{:.2}", scale));
             ui.separator();

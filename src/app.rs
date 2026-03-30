@@ -33,6 +33,8 @@ pub struct CellWorldApp {
     fps: f64,
     frame_count: u32,
     fps_timer: std::time::Instant,
+    sim_fps: f64,
+    last_sim_step_count: u64,
     // 日志记录
     last_log_time: f64,
     log_initialized: bool,
@@ -107,6 +109,8 @@ impl CellWorldApp {
             fps: 0.0,
             frame_count: 0,
             fps_timer: now,
+            sim_fps: 0.0,
+            last_sim_step_count: 0,
             last_log_time: 0.0,
             log_initialized: false,
             selection: Selection::None,
@@ -885,16 +889,16 @@ impl CellWorldApp {
                     "火山杀伤半径",
                     "落地时杀死半径内生物(px)",
                     &mut c.volcano_kill_radius,
-                    0.5,
-                    1.0..=50.0,
+                    1.0,
+                    0.0..=500.0,
                 );
                 changed |= config_drag_f64(
                     ui,
                     "落地杀伤系数",
-                    "落地杀伤乘数(0.1~3.0)",
+                    "落地杀伤乘数",
                     &mut c.landing_damage_multiplier,
                     0.1,
-                    0.1..=3.0,
+                    0.0..=20.0,
                 );
                 ui.separator();
                 ui.label("正弦周期调制");
@@ -1115,11 +1119,15 @@ impl eframe::App for CellWorldApp {
 
         let now = std::time::Instant::now();
 
-        // FPS 计算（真实帧率）
+        // FPS 计算（真实帧率）+ SIM FPS
         self.frame_count += 1;
         let fps_elapsed = now.duration_since(self.fps_timer).as_secs_f64();
         if fps_elapsed >= 1.0 {
             self.fps = self.frame_count as f64 / fps_elapsed;
+            let current_sim_steps = self.sim.snapshot().sim_step_count;
+            self.sim_fps =
+                (current_sim_steps - self.last_sim_step_count) as f64 / fps_elapsed;
+            self.last_sim_step_count = current_sim_steps;
             self.frame_count = 0;
             self.fps_timer = now;
         }
@@ -1167,6 +1175,7 @@ impl eframe::App for CellWorldApp {
                 panel_action = self.panel.render(
                     ui,
                     self.fps,
+                    self.sim_fps,
                     self.canvas.scale,
                     &mut self.speed,
                     &mut self.paused,

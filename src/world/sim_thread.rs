@@ -33,6 +33,8 @@ pub struct SimSnapshot {
     pub world_stats: WorldStats,
     pub creature_species: FxHashMap<u64, u64>,
     pub volcano_countdown: f64,
+    /// 模拟线程累计步数（用于计算 SIM FPS）
+    pub sim_step_count: u64,
 }
 
 impl Default for SimSnapshot {
@@ -51,6 +53,7 @@ impl Default for SimSnapshot {
             world_stats: WorldStats::default(),
             creature_species: FxHashMap::default(),
             volcano_countdown: 0.0,
+            sim_step_count: 0,
         }
     }
 }
@@ -133,9 +136,10 @@ fn sim_loop(
     let mut speed = config.initial_speed;
     let mut next_tick = Instant::now();
     let tick_duration = Duration::from_secs_f64(SIM_DT);
+    let mut sim_step_count: u64 = 0;
 
     // 导出初始快照
-    export_snapshot(&world, &config, &snapshot, speed);
+    export_snapshot(&world, &config, &snapshot, speed, sim_step_count);
 
     loop {
         // 处理所有待处理命令
@@ -190,10 +194,11 @@ fn sim_loop(
         if !paused {
             let sim_step = SIM_DT * speed;
             world.update(sim_step, &config);
+            sim_step_count += 1;
         }
 
         // 导出快照
-        export_snapshot(&world, &config, &snapshot, speed);
+        export_snapshot(&world, &config, &snapshot, speed, sim_step_count);
 
         // 精确 sleep 到下一 tick
         next_tick += tick_duration;
@@ -213,6 +218,7 @@ fn export_snapshot(
     config: &Config,
     snapshot: &Arc<RwLock<SimSnapshot>>,
     _speed: f64,
+    sim_step_count: u64,
 ) {
     let world_stats = world.stats(config.species_similarity_threshold, config);
     let creature_species = world.get_render_data(config.species_similarity_threshold);
@@ -232,6 +238,7 @@ fn export_snapshot(
         world_stats,
         creature_species,
         volcano_countdown,
+        sim_step_count,
     };
 
     if let Ok(mut guard) = snapshot.write() {
