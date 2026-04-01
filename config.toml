@@ -1,7 +1,7 @@
 # 初始模拟速度
-initial_speed = 5.0
+initial_speed = 7.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 77
+min_creatures = 65
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 550
 # 初始能量
@@ -17,11 +17,11 @@ volcano_y = 0.0
 # 火山喷发间隔（秒）
 volcano_interval = 30.0
 # 火山喷射半径
-volcano_radius = 1800.0
+volcano_radius = 2000.0
 # 每次喷发粒子数
-volcano_count = 38
+volcano_count = 25
 # 火山粒子能量
-volcano_particle_energy = 120.0
+volcano_particle_energy = 190.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -38,31 +38,31 @@ volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 37.0
+volcano_kill_radius = 62.0
 # 落地杀伤系数
-landing_damage_multiplier = 4.0
+landing_damage_multiplier = 3.5
 
 # === 温泉 ===
 # 温泉最大同时活跃数量
 spring_max_count = 8
 # 温泉产生间隔（秒）
-spring_spawn_interval = 10.0
+spring_spawn_interval = 25.0
 # 温泉寿命（秒）
-spring_lifetime = 1150.0
+spring_lifetime = 901.0
 # 温泉喷出粒子间隔（秒）
 spring_emit_interval = 6.0
 # 温泉每次喷出粒子数
 spring_emit_count = 1
 # 温泉粒子能量
-spring_particle_energy = 200.0
+spring_particle_energy = 190.0
 # 温泉喷出半径（粒子散布范围 px）
 spring_radius = 140.0
 # 温泉粒子衰减率（/秒）
-spring_decay_rate = 0.001
+spring_decay_rate = 0.002
 # 新温泉与已有温泉最小间距（px）
-spring_min_distance = 385.0
+spring_min_distance = 430.0
 # 新温泉出现的最大距离（px）
-spring_max_distance = 515.0
+spring_max_distance = 550.0
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃
@@ -72,11 +72,11 @@ eye_scan_speed = 400.0
 # 嘴巴冷却时间（秒）
 mouth_cooldown = 0.5
 # 咬合能量转移率
-bite_transfer_rate = 0.8
+bite_transfer_rate = 0.55
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
-energy_denominator = 200.0
+energy_denominator = 250.0
 # 散热下限（指数衰减底板）
 heat_floor = 0.05
 
@@ -116,7 +116,7 @@ species_similarity_threshold = 0.95
 # 战力公式：速度权重（越快越强）
 combat_speed_weight = 2.0
 # 战力公式：同族援助权重（附近同族越多越强）
-combat_ally_weight = 0.2
+combat_ally_weight = 0.3
 
 # 优势种检测：种群最老成员最低年龄
 dominant_min_age = 250.0

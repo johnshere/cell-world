@@ -215,7 +215,12 @@ impl CellWorldApp {
 impl CellWorldApp {
     /// 自动保存优势种
     /// 进化适应度：跨时间可比的多维综合评分
-    fn evolutionary_fitness(avg_age: f64, avg_energy: f64, max_generation: usize, population_ratio: f64) -> f64 {
+    fn evolutionary_fitness(
+        avg_age: f64,
+        avg_energy: f64,
+        max_generation: usize,
+        population_ratio: f64,
+    ) -> f64 {
         // 生存力：平均寿命，上限300s
         let survival = (avg_age.min(300.0) / 300.0).max(0.0);
         // 资源力：平均能量，上限500
@@ -283,7 +288,10 @@ impl CellWorldApp {
         let auto_count = auto_entries.len();
         const MAX_AUTO: usize = 10;
 
-        let make_template = |name: String, candidate: &crate::world::DominantCandidate, version: &str, time: f64| {
+        let make_template = |name: String,
+                             candidate: &crate::world::DominantCandidate,
+                             version: &str,
+                             time: f64| {
             CreatureTemplate {
                 name,
                 genome: candidate.genome.clone(),
@@ -308,7 +316,8 @@ impl CellWorldApp {
                     candidate.avg_age, candidate.avg_energy, candidate.max_generation,
                     candidate.population_ratio * 100.0
                 );
-                let template = make_template(existing.name.clone(), &candidate, version, world_time);
+                let template =
+                    make_template(existing.name.clone(), &candidate, version, world_time);
                 if let Err(e) = self.store.save(template) {
                     eprintln!("自动保存优势种失败: {}", e);
                 }
@@ -950,7 +959,7 @@ impl CellWorldApp {
                     "最大数量",
                     "同时活跃温泉数上限",
                     &mut c.spring_max_count,
-                    1..=20,
+                    0..=20,
                 );
                 changed |= config_drag_f64(
                     ui,
@@ -1125,8 +1134,7 @@ impl eframe::App for CellWorldApp {
         if fps_elapsed >= 1.0 {
             self.fps = self.frame_count as f64 / fps_elapsed;
             let current_sim_steps = self.sim.snapshot().sim_step_count;
-            self.sim_fps =
-                (current_sim_steps - self.last_sim_step_count) as f64 / fps_elapsed;
+            self.sim_fps = (current_sim_steps - self.last_sim_step_count) as f64 / fps_elapsed;
             self.last_sim_step_count = current_sim_steps;
             self.frame_count = 0;
             self.fps_timer = now;
@@ -1134,7 +1142,8 @@ impl eframe::App for CellWorldApp {
 
         // 真实帧率低于30时暂停痕迹生成
         let trail_spawn_paused = self.fps > 0.0 && self.fps < 30.0;
-        self.sim.send(SimCommand::SetTrailSpawnPaused(trail_spawn_paused));
+        self.sim
+            .send(SimCommand::SetTrailSpawnPaused(trail_spawn_paused));
 
         // 发送视窗范围到模拟线程
         if let Some(bounds) = self.last_visible_bounds {
@@ -1188,12 +1197,13 @@ impl eframe::App for CellWorldApp {
                 self.render_energy_trend(ui);
 
                 // 显示选中信息
-                selection_action = self
-                    .panel
-                    .render_selection(ui, &self.selection, &snap);
+                selection_action = self.panel.render_selection(ui, &self.selection, &snap);
 
                 // 滚动区域：基因库/能量/配置面板（互斥）
-                if self.panel.templates_open || self.panel.settings_open || self.panel.energy_settings_open {
+                if self.panel.templates_open
+                    || self.panel.settings_open
+                    || self.panel.energy_settings_open
+                {
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         let margin = egui::Margin {
                             right: 6.0,
@@ -1297,7 +1307,8 @@ impl eframe::App for CellWorldApp {
                     if let Err(e) = self.store.save(template) {
                         eprintln!("保存失败: {}", e);
                     } else {
-                        if let Some(idx) = self.store.names().iter().position(|n| *n == saved_name) {
+                        if let Some(idx) = self.store.names().iter().position(|n| *n == saved_name)
+                        {
                             self.panel.selected_template = idx + 1;
                         }
                     }
@@ -1382,13 +1393,9 @@ impl eframe::App for CellWorldApp {
             }
             let render_ctx = self.render_ctx_cache.as_ref().unwrap();
             let t_render = std::time::Instant::now();
-            let bounds = self.canvas.render(
-                ui,
-                &snap,
-                &mut self.selection,
-                render_ctx,
-                &self.config,
-            );
+            let bounds =
+                self.canvas
+                    .render(ui, &snap, &mut self.selection, render_ctx, &self.config);
             render_time = t_render.elapsed().as_secs_f64() * 1000.0;
             self.last_visible_bounds = Some(bounds);
         });
@@ -1396,8 +1403,7 @@ impl eframe::App for CellWorldApp {
         self.frame_perf.render_ctx_ms = render_ctx_time;
         self.frame_perf.render_ms = render_time;
         self.frame_perf.egui_overhead_ms = central_panel_time - render_ctx_time - render_time;
-        self.frame_perf.frame_total_ms =
-            self.frame_perf.panel_update_ms + central_panel_time;
+        self.frame_perf.frame_total_ms = self.frame_perf.panel_update_ms + central_panel_time;
 
         // 渲染始终以一定帧率重绘（模拟已在独立线程）
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
