@@ -72,6 +72,10 @@ pub struct Config {
 
     /// 变异率（所有变异逻辑共用）
     pub mutation_rate: f64,
+    /// 最大分区数
+    pub max_partitions: u8,
+    /// 最大分层数
+    pub max_layers: u8,
     /// 初始连接数最小值
     pub initial_connections_min: usize,
     /// 初始连接数最大值

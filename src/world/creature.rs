@@ -3,6 +3,7 @@ use rand::Rng;
 #[cfg(feature = "persistence")]
 use serde::{Deserialize, Serialize};
 
+use crate::config::Config;
 use crate::neural::Genome;
 use crate::neural::SpikingNetwork;
 
@@ -125,8 +126,8 @@ impl Creature {
     }
 
     /// 繁殖产生子代（代数+1，parent_id = 自己的 id）
-    pub fn reproduce(&self, id: u64, x: f64, y: f64, energy: f64, mutation_rate: f64) -> Self {
-        let child_genome = self.genome.mutate(mutation_rate);
+    pub fn reproduce(&self, id: u64, x: f64, y: f64, energy: f64, conf: &Config) -> Self {
+        let child_genome = self.genome.mutate(conf);
         Self::new(
             id,
             x,

@@ -1,7 +1,7 @@
 # 初始模拟速度
-initial_speed = 7.0
+initial_speed = 3.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 65
+min_creatures = 200
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 550
 # 初始能量
@@ -19,7 +19,7 @@ volcano_interval = 30.0
 # 火山喷射半径
 volcano_radius = 2000.0
 # 每次喷发粒子数
-volcano_count = 25
+volcano_count = 60
 # 火山粒子能量
 volcano_particle_energy = 190.0
 
@@ -27,9 +27,9 @@ volcano_particle_energy = 190.0
 # 火山间隔正弦周期（秒）
 volcano_interval_cycle = 1200.0
 # 火山间隔振幅比（0~0.9）
-volcano_interval_amplitude = 0.2
+volcano_interval_amplitude = 0.45
 # 火山能量正弦周期（秒）
-volcano_energy_cycle = 1200.0
+volcano_energy_cycle = 1000.0
 # 火山能量振幅比（0~0.9）
 volcano_energy_amplitude = 0.05
 
@@ -38,31 +38,31 @@ volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 62.0
+volcano_kill_radius = 90.0
 # 落地杀伤系数
-landing_damage_multiplier = 3.5
+landing_damage_multiplier = 6.0
 
 # === 温泉 ===
 # 温泉最大同时活跃数量
-spring_max_count = 8
+spring_max_count = 0
 # 温泉产生间隔（秒）
 spring_spawn_interval = 25.0
 # 温泉寿命（秒）
 spring_lifetime = 901.0
 # 温泉喷出粒子间隔（秒）
-spring_emit_interval = 6.0
+spring_emit_interval = 6.5
 # 温泉每次喷出粒子数
 spring_emit_count = 1
 # 温泉粒子能量
 spring_particle_energy = 190.0
 # 温泉喷出半径（粒子散布范围 px）
-spring_radius = 140.0
+spring_radius = 160.0
 # 温泉粒子衰减率（/秒）
 spring_decay_rate = 0.002
 # 新温泉与已有温泉最小间距（px）
-spring_min_distance = 430.0
+spring_min_distance = 450.0
 # 新温泉出现的最大距离（px）
-spring_max_distance = 550.0
+spring_max_distance = 600.0
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃
@@ -72,11 +72,11 @@ eye_scan_speed = 400.0
 # 嘴巴冷却时间（秒）
 mouth_cooldown = 0.5
 # 咬合能量转移率
-bite_transfer_rate = 0.55
+bite_transfer_rate = 0.35
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
-energy_denominator = 250.0
+energy_denominator = 100.0
 # 散热下限（指数衰减底板）
 heat_floor = 0.05
 
@@ -86,9 +86,9 @@ age_metabolism_factor = 0.01
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗（每单位距离）
-move_cost = 0.0007
+move_cost = 0.0005
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
-follow_cost_discount = 0.8
+follow_cost_discount = 0.25
 # === 体温 ===
 # 体温逸散系数
 heat_dissipation_coefficient = 0.005
@@ -105,6 +105,10 @@ contact_range = 15.0
 # === 进化 ===
 # 变异率（所有变异逻辑共用）
 mutation_rate = 0.32
+# 最大分区数
+max_partitions = 256
+# 最大分层数
+max_layers = 256
 # 初始连接数最小值
 initial_connections_min = 6
 # 初始连接数最大值
@@ -116,7 +120,7 @@ species_similarity_threshold = 0.95
 # 战力公式：速度权重（越快越强）
 combat_speed_weight = 2.0
 # 战力公式：同族援助权重（附近同族越多越强）
-combat_ally_weight = 0.3
+combat_ally_weight = 0.2
 
 # 优势种检测：种群最老成员最低年龄
 dominant_min_age = 250.0
