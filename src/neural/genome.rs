@@ -37,6 +37,15 @@ pub struct NodeGene {
     /// 不应期 ticks
     #[cfg_attr(feature = "persistence", serde(default))]
     pub refractory_period: u8,
+
+    /// 所在区 （用于分区拓扑约束，0~255；0=输入区、1=输出区，两者占用神经网络两端）
+    pub partition: u8,
+    /// 所在层 （用于分层拓扑约束，0~255，0=输入层，最大层=输出层）
+    pub layer: u8,
+    /// 期望所在区，默认自己所在区，低概率连接其他区
+    pub preferred_partition: u8,
+    /// 期望所在层，默认自己所在层，低概率连接其他层
+    pub preferred_layer: u8,
 }
 
 /// 连接基因
@@ -91,19 +100,26 @@ impl Genome {
                 decay: 0.0,
                 threshold: 0.0,
                 refractory_period: 0,
+                partition: 0,
+                layer: 0,
+                preferred_partition: 1,
+                preferred_layer: 0,
             });
         }
 
         // 创建输出节点（全部直读模式，冷却由 execute_actions 控制）
         for i in 0..Self::OUTPUT_SIZE {
             let output_id = Self::INPUT_SIZE + i;
-            let (decay, threshold, refractory) = (0.0, 0.0, 0);
             nodes.push(NodeGene {
                 id: output_id,
                 node_type: NodeType::Output,
-                decay,
-                threshold,
-                refractory_period: refractory,
+                decay: 0.0,
+                threshold: 0.0,
+                refractory_period: 0,
+                partition: 1,
+                layer: 0,
+                preferred_partition: 0,
+                preferred_layer: 0,
             });
 
             // 随机连接一些输入到这个输出
@@ -210,41 +226,52 @@ impl Genome {
     fn mutate_add_connection(&mut self) {
         let mut rng = rand::thread_rng();
 
-        // 收集有效的输入节点（输入和隐藏）
-        let in_candidates: Vec<usize> = self
+        // 收集有效的起始节点（输入和隐藏）
+        let source_candidates: Vec<NodeGene> = self
             .nodes
             .iter()
             .filter(|n| n.node_type != NodeType::Output)
-            .map(|n| n.id)
+            .cloned()
             .collect();
 
-        // 收集有效的输出节点（隐藏和输出）
-        let out_candidates: Vec<usize> = self
+        // 收集有效的目标节点（隐藏和输出）
+        let target_candidates: Vec<NodeGene> = self
             .nodes
             .iter()
             .filter(|n| n.node_type != NodeType::Input)
-            .map(|n| n.id)
+            .cloned()
             .collect();
 
-        if in_candidates.is_empty() || out_candidates.is_empty() {
+        if source_candidates.is_empty() || target_candidates.is_empty() {
             return;
         }
 
         // 尝试找到一个不存在的连接
         for _ in 0..10 {
-            let in_node = in_candidates[rng.gen_range(0..in_candidates.len())];
-            let out_node = out_candidates[rng.gen_range(0..out_candidates.len())];
+            let source_node = source_candidates.get(rng.gen_range(0..source_candidates.len())).cloned().unwrap();
+            let target_partition = source_node.preferred_partition;
+            let target_layer = source_node.preferred_layer;
+            let target_candidates: Vec<NodeGene> = target_candidates
+                .iter()
+                .filter(|n| n.partition == target_partition && n.layer == target_layer)
+                .cloned()
+                .collect();
+            let target_node = target_candidates.get(rng.gen_range(0..target_candidates.len())).cloned().unwrap();
+
+            if source_node.id == target_node.id {
+                continue; // 避免自连接
+            }
 
             // 检查连接是否已存在
             let exists = self
                 .connections
                 .iter()
-                .any(|c| c.in_node == in_node && c.out_node == out_node);
+                .any(|c| c.in_node == source_node.id && c.out_node == target_node.id);
 
-            if !exists && in_node != out_node {
+            if !exists {
                 self.connections.push(ConnectionGene {
-                    in_node,
-                    out_node,
+                    in_node: source_node.id,
+                    out_node: target_node.id,
                     weight: rng.gen_range(-1.0..1.0),
                     enabled: true,
                 });
