@@ -404,7 +404,7 @@ mod inner {
                             gpu_node.set_direct_read();
                         }
                     }
-                    NodeType::Hidden => {}
+                    NodeType::Block(_) => {}
                 }
 
                 self.nodes_cpu[node_base + local_idx] = gpu_node;

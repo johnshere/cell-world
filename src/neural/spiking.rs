@@ -87,7 +87,7 @@ impl SpikingNetwork {
                     // threshold == 0 → 直读模式
                     output_modes.push(node.threshold == 0.0);
                 }
-                NodeType::Hidden => {}
+                NodeType::Block(_) => {}
             }
         }
 

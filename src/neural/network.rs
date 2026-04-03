@@ -35,7 +35,7 @@ impl Network {
                     input_ids_set.insert(node.id);
                 }
                 NodeType::Output => output_ids.push(node.id),
-                NodeType::Hidden => {}
+                NodeType::Block(_) => {}
             }
         }
 
