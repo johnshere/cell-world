@@ -1,3 +1,4 @@
+use crate::config::{self, Config};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use std::collections::hash_map::DefaultHasher;
@@ -14,12 +15,26 @@ pub enum NodeType {
     Hidden,
     Output,
 }
+/// 分区分层索引（输入，输出，其他中间层）
+#[derive(Clone, Copy, PartialEq, Debug)]
+#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
+pub enum TierType {
+    Input,
+    Output,
+    Other(u8),
+}
 
 fn default_decay() -> f64 {
     0.0
 }
 fn default_threshold() -> f64 {
     0.0
+}
+fn default_partition() -> TierType {
+    TierType::Input
+}
+fn default_layer() -> TierType {
+    TierType::Input
 }
 
 /// 节点基因
@@ -28,6 +43,18 @@ fn default_threshold() -> f64 {
 pub struct NodeGene {
     pub id: usize,
     pub node_type: NodeType,
+    /// 分区，0-max，0-输入区，1-输出区，其他中间区（用于引导分区结构进化）
+    #[cfg_attr(feature = "persistence", serde(default = "default_partition"))]
+    pub partition: TierType,
+    /// 分层，0-max，输入层0，1-输出层，其他中间层（用于引导分层结构进化）
+    #[cfg_attr(feature = "persistence", serde(default = "default_layer"))]
+    pub layer: TierType,
+    /// 连接偏好分区，默认是本区，变异时有一定概率改变
+    #[cfg_attr(feature = "persistence", serde(default = "default_partition"))]
+    pub preferred_partition: TierType,
+    /// 连接偏好分层，默认是本层，变异时有一定概率改变
+    #[cfg_attr(feature = "persistence", serde(default = "default_layer"))]
+    pub preferred_layer: TierType,
     /// 膜电位衰减 (0.0~0.99)
     #[cfg_attr(feature = "persistence", serde(default = "default_decay"))]
     pub decay: f64,
@@ -97,6 +124,10 @@ impl Genome {
             nodes.push(NodeGene {
                 id: i,
                 node_type: NodeType::Input,
+                partition: TierType::Input,
+                layer: TierType::Input,
+                preferred_partition: TierType::Output, // 初始设定连接输出区
+                preferred_layer: TierType::Output,
                 decay: 0.0,
                 threshold: 0.0,
                 refractory_period: 0,
@@ -113,13 +144,13 @@ impl Genome {
             nodes.push(NodeGene {
                 id: output_id,
                 node_type: NodeType::Output,
+                partition: TierType::Output, // 输出区
+                layer: TierType::Output,
+                preferred_partition: TierType::Input, // 仅占位
+                preferred_layer: TierType::Input,     // 仅占位
                 decay: 0.0,
                 threshold: 0.0,
                 refractory_period: 0,
-                partition: 1,
-                layer: 0,
-                preferred_partition: 0,
-                preferred_layer: 0,
             });
 
             // 随机连接一些输入到这个输出
@@ -166,7 +197,8 @@ impl Genome {
     }
 
     /// 变异（所有变异逻辑使用同一个概率）
-    pub fn mutate(&self, rate: f64) -> Self {
+    pub fn mutate(&self, conf: &Config) -> Self {
+        let rate = conf.mutation_rate;
         let mut rng = rand::thread_rng();
         let mut child = self.clone();
 
@@ -186,7 +218,7 @@ impl Genome {
 
         // 添加连接变异
         if rng.gen::<f64>() < rate {
-            child.mutate_add_connection();
+            child.mutate_add_connection(conf);
         }
 
         // 添加节点变异
@@ -222,56 +254,95 @@ impl Genome {
         child
     }
 
+    /// 分区分层偏好确定连接方位
+    fn random_partition_layer(&mut self, node: &NodeGene, conf: &Config) -> (usize, usize) {
+        let rate = conf.mutation_rate;
+        let mut rng = rand::thread_rng();
+        let mut partition = node.partition;
+        let mut layer = node.layer;
+
+        if node.node_type == NodeType::Output {
+            // 输出分区不做连接
+            return (partition, layer);
+        }
+
+        if rng.gen::<f64>() < rate {
+            // 排除输入输出 以外的分区随机改变连接偏好分区
+            partition = TierType::Other(rng.gen_range(0..conf.max_partitions));
+            if partition != node.partition {
+                layer = rng.gen_range(0..conf.max_layers); // 分区改变时随机分层
+            } else {
+                // 同一分区大概率向下，小概率随机
+                if node.layer == 1 {
+                    // 输出层大概率连接到输入层，少部分连接到其他层
+                    if rng.gen::<f64>() < rate {
+                        layer = rng.gen_range(2..=conf.max_layers);
+                    } else {
+                        layer = 0;
+                    }
+                } else {
+                    if rng.gen::<f64>() < rate {
+                        // 10% 机会随机改变连接偏好分层
+                        layer = rng.gen_range(0..=conf.max_layers);
+                    } else {
+                        layer = rng.gen_range(layer..=conf.max_layers);
+                    }
+                }
+            }
+        } else {
+            partition = node.preferred_partition; // 否则使用节点的连接偏好分区
+        }
+
+        (partition, layer)
+    }
+
     /// 添加连接变异
-    fn mutate_add_connection(&mut self) {
+    fn mutate_add_connection(&mut self, conf: &Config) {
+        let rate = conf.mutation_rate;
         let mut rng = rand::thread_rng();
 
-        // 收集有效的起始节点（输入和隐藏）
-        let source_candidates: Vec<NodeGene> = self
+        // 收集有效的输入节点（输入和隐藏）
+        let from_candidates: Vec<NodeGene> = self
             .nodes
             .iter()
             .filter(|n| n.node_type != NodeType::Output)
             .cloned()
             .collect();
 
-        // 收集有效的目标节点（隐藏和输出）
-        let target_candidates: Vec<NodeGene> = self
+        // 收集有效的输出节点（隐藏和输出）
+        let to_candidates: Vec<NodeGene> = self
             .nodes
             .iter()
             .filter(|n| n.node_type != NodeType::Input)
             .cloned()
             .collect();
 
-        if source_candidates.is_empty() || target_candidates.is_empty() {
+        if from_candidates.is_empty() || to_candidates.is_empty() {
             return;
         }
 
         // 尝试找到一个不存在的连接
         for _ in 0..10 {
-            let source_node = source_candidates.get(rng.gen_range(0..source_candidates.len())).cloned().unwrap();
-            let target_partition = source_node.preferred_partition;
-            let target_layer = source_node.preferred_layer;
-            let target_candidates: Vec<NodeGene> = target_candidates
-                .iter()
-                .filter(|n| n.partition == target_partition && n.layer == target_layer)
-                .cloned()
-                .collect();
-            let target_node = target_candidates.get(rng.gen_range(0..target_candidates.len())).cloned().unwrap();
+            let from_node = from_candidates[rng.gen_range(0..from_candidates.len())];
+            // 分区分层偏好确定连接方位
+            let (to_partition, to_layer) = self.random_partition_layer(&from_node, conf);
 
-            if source_node.id == target_node.id {
-                continue; // 避免自连接
+            let to_node = to_candidates[rng.gen_range(0..to_candidates.len())];
+
+            if from_node.id == to_node.id {
+                continue; // 不允许自连接
             }
 
             // 检查连接是否已存在
             let exists = self
                 .connections
                 .iter()
-                .any(|c| c.in_node == source_node.id && c.out_node == target_node.id);
+                .any(|c| c.in_node == from_node && c.out_node == to_node);
 
             if !exists {
                 self.connections.push(ConnectionGene {
-                    in_node: source_node.id,
-                    out_node: target_node.id,
+                    in_node: from_node,
+                    out_node: to_node,
                     weight: rng.gen_range(-1.0..1.0),
                     enabled: true,
                 });
@@ -309,6 +380,10 @@ impl Genome {
         self.nodes.push(NodeGene {
             id: new_node_id,
             node_type: NodeType::Hidden,
+            partition: 0,
+            layer: 0,
+            preferred_partition: 0,
+            preferred_layer: 0,
             decay: rng.gen_range(0.5..0.95),
             threshold: rng.gen_range(0.3..1.0),
             refractory_period: rng.gen_range(1..=3),

@@ -487,8 +487,7 @@ impl World {
                     if dx * dx + dy * dy < kill_r2 {
                         let damage = c.energy
                             * (1.0
-                                - (-current_energy * config.landing_damage_multiplier
-                                    / c.energy)
+                                - (-current_energy * config.landing_damage_multiplier / c.energy)
                                     .exp());
                         c.energy = (c.energy - damage).max(0.0);
                         if c.energy <= 0.0 {
@@ -833,10 +832,7 @@ impl World {
             } else {
                 let perception = self.creatures[i].perception_cache;
                 // SNN tick 按 dt 缩放，保证每秒 sim-time tick 总数恒定
-                let snn_ticks = (config.neural_tick_rate * dt)
-                    .round()
-                    .max(1.0)
-                    .min(100.0) as usize;
+                let snn_ticks = (config.neural_tick_rate * dt).round().max(1.0).min(100.0) as usize;
                 let outputs = self.creatures[i].brain.tick_multi(&perception, snn_ticks);
                 for (j, &v) in outputs.iter().enumerate().take(7) {
                     self.creatures[i].last_outputs[j] = v;
@@ -1001,7 +997,8 @@ impl World {
         // 繁殖（受冷却限制 + 数量上限）
         let alive_count = self.creatures.iter().filter(|c| c.alive).count();
         let pop_ok = config.max_creatures == 0 || alive_count < config.max_creatures;
-        if reproduce > 0.2 && pop_ok && self.creatures[creature_idx].reproduce_cooldown_timer <= 0.0 {
+        if reproduce > 0.2 && pop_ok && self.creatures[creature_idx].reproduce_cooldown_timer <= 0.0
+        {
             if self.action_reproduce(creature_idx, reproduce_threshold, reproduce_ratio, config) {
                 self.creatures[creature_idx].reproduce_cooldown_timer = config.reproduce_cooldown;
                 self.action_counts[3] += 1; // 繁殖
@@ -1179,7 +1176,7 @@ impl World {
         let mut child = if let Some(mate_genome) = mate_genome {
             let crossover_genome =
                 Genome::crossover(&self.creatures[idx].genome, &mate_genome, true);
-            let child_genome = crossover_genome.mutate(config.mutation_rate);
+            let child_genome = crossover_genome.mutate(config);
             Creature::new(
                 creature_id,
                 self.creatures[idx].x + offset_x,
@@ -1195,7 +1192,7 @@ impl World {
                 self.creatures[idx].x + offset_x,
                 self.creatures[idx].y + offset_y,
                 child_energy,
-                config.mutation_rate,
+                config,
             )
         };
 
@@ -1377,7 +1374,8 @@ impl World {
         // 理论投放速率（能量/秒）：火山每秒投放 + 温泉每秒投放
         let volcano_interval = config.current_volcano_interval(self.time);
         let volcano_rate = if volcano_interval > 0.0 {
-            config.current_volcano_energy(self.time) * config.volcano_count as f64 / volcano_interval
+            config.current_volcano_energy(self.time) * config.volcano_count as f64
+                / volcano_interval
         } else {
             0.0
         };

@@ -76,10 +76,6 @@ pub struct Config {
     pub initial_connections_min: usize,
     /// 初始连接数最大值
     pub initial_connections_max: usize,
-    /// 最大分区数
-    pub max_partitions: usize,
-    /// 最大分层数
-    pub max_layers: usize,
     /// 种族相似度阈值（高于此值视为同一种族）
     pub species_similarity_threshold: f64,
     /// 体温逸散系数
