@@ -25,6 +25,9 @@ pub struct EnergyParticle {
     pub source: ParticleSource,
 }
 
+/// 最小能量
+pub const MIN_ENERGY: f64 = 100.0;
+
 impl EnergyParticle {
     pub fn new(
         id: u64,
@@ -53,7 +56,7 @@ impl EnergyParticle {
         // 能量衰减
         self.energy -= self.energy * decay_rate * dt;
         // 能量过低则死亡
-        if self.energy <= 0.1 {
+        if self.energy <= MIN_ENERGY {
             self.alive = false;
         }
         // 保留 lifetime 硬上限（释放粒子兼容）
