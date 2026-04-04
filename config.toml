@@ -3,7 +3,7 @@ initial_speed = 9.0
 # 最小生物数量（低于此值自动补充）
 min_creatures = 50
 # 最大生物数量（超过时禁止繁殖，0=不限制）
-max_creatures = 500
+max_creatures = 600
 # 初始能量
 initial_energy = 160.0
 # 初始世界缩放比例
@@ -19,9 +19,9 @@ volcano_interval = 30.0
 # 火山喷射半径
 volcano_radius = 2200.0
 # 每次喷发粒子数
-volcano_count = 27
+volcano_count = 25
 # 火山粒子能量
-volcano_particle_energy = 200.0
+volcano_particle_energy = 500.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -38,13 +38,13 @@ volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 70.0
+volcano_kill_radius = 50.0
 # 落地杀伤系数
 landing_damage_multiplier = 2.3
 
 # === 温泉 ===
 # 温泉最大同时活跃数量
-spring_max_count = 10
+spring_max_count = 0
 # 温泉产生间隔（秒）
 spring_spawn_interval = 25.0
 # 温泉寿命（秒）
