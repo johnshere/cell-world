@@ -1,9 +1,9 @@
 # 初始模拟速度
-initial_speed = 9.0
+initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 50
+min_creatures = 60
 # 最大生物数量（超过时禁止繁殖，0=不限制）
-max_creatures = 600
+max_creatures = 550
 # 初始能量
 initial_energy = 160.0
 # 初始世界缩放比例
@@ -19,28 +19,28 @@ volcano_interval = 30.0
 # 火山喷射半径
 volcano_radius = 2200.0
 # 每次喷发粒子数
-volcano_count = 25
+volcano_count = 35
 # 火山粒子能量
-volcano_particle_energy = 500.0
+volcano_particle_energy = 200.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
 volcano_interval_cycle = 1200.0
 # 火山间隔振幅比（0~0.9）
-volcano_interval_amplitude = 0.3
+volcano_interval_amplitude = 0.25
 # 火山能量正弦周期（秒）
 volcano_energy_cycle = 1000.0
 # 火山能量振幅比（0~0.9）
-volcano_energy_amplitude = 0.15
+volcano_energy_amplitude = 0.1
 
 # 火山粒子衰减率（每秒）
 volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 50.0
+volcano_kill_radius = 40.0
 # 落地杀伤系数
-landing_damage_multiplier = 2.3
+landing_damage_multiplier = 3.8
 
 # === 温泉 ===
 # 温泉最大同时活跃数量
@@ -50,7 +50,7 @@ spring_spawn_interval = 25.0
 # 温泉寿命（秒）
 spring_lifetime = 901.0
 # 温泉喷出粒子间隔（秒）
-spring_emit_interval = 5.0
+spring_emit_interval = 8.0
 # 温泉每次喷出粒子数
 spring_emit_count = 1
 # 温泉粒子能量
@@ -76,22 +76,22 @@ bite_transfer_rate = 0.35
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
-energy_denominator = 100.0
+energy_denominator = 150.0
 # 散热下限（指数衰减底板）
 heat_floor = 0.05
 
 # === 代谢 ===
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
-age_metabolism_factor = 0.01
+age_metabolism_factor = 0.02
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗（每单位距离）
-move_cost = 0.001
+move_cost = 0.0005
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.6
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.005
+heat_dissipation_coefficient = 0.001
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -104,7 +104,7 @@ contact_range = 15.0
 
 # === 进化 ===
 # 变异率（所有变异逻辑共用）
-mutation_rate = 0.32
+mutation_rate = 0.15
 # 初始连接数最小值
 initial_connections_min = 6
 # 初始连接数最大值
@@ -123,7 +123,7 @@ dominant_min_age = 250.0
 
 # === 痕迹点 ===
 # 痕迹点能量衰减率（/秒）
-trail_decay_rate = 0.03
+trail_decay_rate = 0.01
 # 痕迹抑制半径（px，范围内有其他生物痕迹则不产生）
 trail_suppress_radius = 12.0
 # 痕迹生成间隔（秒，每个生物独立计时）
@@ -157,3 +157,5 @@ meteorite_energy_cycle = 0.0
 meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
+stop_on_extinction = false
+auto_spawn_interval = 60.0

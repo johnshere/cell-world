@@ -247,6 +247,8 @@ impl CellWorldApp {
             candidate.population_ratio,
         );
 
+        let similarity_threshold = self.config.species_similarity_threshold;
+
         // 扫描所有自动记录模板，计算适应度和相似度
         struct AutoEntry {
             name: String,
@@ -274,10 +276,10 @@ impl CellWorldApp {
             })
             .collect();
 
-        // 查找同种（相似度≥0.9）中适应度最高的
+        // 查找同种（相似度≥阈值）中适应度最高的
         let same_species = auto_entries
             .iter()
-            .filter(|e| e.similarity >= 0.9)
+            .filter(|e| e.similarity >= similarity_threshold)
             .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap());
 
         // 查找所有自动记录中适应度最低的
@@ -308,20 +310,13 @@ impl CellWorldApp {
         };
 
         if let Some(existing) = same_species {
-            // 同种已存在：仅当进化适应度更优时覆盖
-            if candidate_fitness > existing.fitness {
-                eprintln!(
-                    "[优势种] 同种更新 '{}': 适应度 {:.3} → {:.3} (寿命:{:.0}s 能量:{:.0} 代:{} 占比:{:.0}%)",
-                    existing.name, existing.fitness, candidate_fitness,
-                    candidate.avg_age, candidate.avg_energy, candidate.max_generation,
-                    candidate.population_ratio * 100.0
-                );
-                let template =
-                    make_template(existing.name.clone(), &candidate, version, world_time);
-                if let Err(e) = self.store.save(template) {
-                    eprintln!("自动保存优势种失败: {}", e);
-                }
-            }
+            // 同种已存在：相似度≥0.9时不添加，避免重复
+            eprintln!(
+                "[优势种] 跳过同种 '{}': 相似度 {:.2} 已有记录 (寿命:{:.0}s 能量:{:.0} 代:{} 占比:{:.0}%)",
+                existing.name, existing.similarity,
+                candidate.avg_age, candidate.avg_energy, candidate.max_generation,
+                candidate.population_ratio * 100.0
+            );
         } else {
             // 新种：需要与已有模板比较
             if auto_count < MAX_AUTO {
@@ -613,6 +608,22 @@ impl CellWorldApp {
                     &mut c.min_creatures,
                     5..=200,
                 );
+                let old_stop = c.stop_on_extinction;
+                ui.checkbox(&mut c.stop_on_extinction, "低于最小停止演化");
+                if c.stop_on_extinction != old_stop {
+                    changed = true;
+                }
+
+                // 自动投放间隔
+                changed |= config_drag_f64(
+                    ui,
+                    "自动投放间隔(秒)",
+                    "0=禁用，定时投放随机生物",
+                    &mut c.auto_spawn_interval,
+                    1.0,
+                    0.0..=3600.0,
+                );
+
                 changed |= config_drag_usize(
                     ui,
                     "最大生物数",
@@ -719,10 +730,10 @@ impl CellWorldApp {
             let t_max = history.last().unwrap().0;
             let t_range = (t_max - t_min).max(1.0);
 
-            // Y 轴范围：同时考虑总能量、生命能量和粒子理论总能量
+            // 左Y轴：能量范围
             let (e_min, e_max) = history.iter().fold(
                 (f64::MAX, f64::MIN),
-                |(lo, hi), &(_, total, creature, particle_init)| {
+                |(lo, hi), &(_, total, creature, particle_init, _)| {
                     (
                         lo.min(total).min(creature).min(particle_init),
                         hi.max(total).max(creature).max(particle_init),
@@ -733,14 +744,23 @@ impl CellWorldApp {
             let e_max = e_max * 1.1;
             let e_range = (e_max - e_min).max(1.0);
 
+            // 右Y轴：生物数量范围
+            let (c_min, c_max) = history.iter().fold(
+                (usize::MAX, usize::MIN),
+                |(lo, hi), &(_, _, _, _, count)| (lo.min(count), hi.max(count)),
+            );
+            let c_range = (c_max - c_min) as f64;
+            let c_range = c_range.max(1.0);
+
             let color_total = egui::Color32::from_rgb(100, 200, 255);
             let color_life = egui::Color32::from_rgb(100, 255, 130);
             let color_particle_init = egui::Color32::from_rgb(255, 180, 80);
+            let color_count = egui::Color32::from_rgb(255, 100, 200);
 
             // 绘制粒子理论总能量曲线
             let particle_init_pts: Vec<egui::Pos2> = history
                 .iter()
-                .map(|&(t, _, _, pi)| {
+                .map(|&(t, _, _, pi, _)| {
                     let x = rect.left() + ((t - t_min) / t_range * chart_width_f32 as f64) as f32;
                     let y =
                         rect.bottom() - ((pi - e_min) / e_range * chart_height_f32 as f64) as f32;
@@ -760,7 +780,7 @@ impl CellWorldApp {
             // 绘制总能量曲线
             let total_pts: Vec<egui::Pos2> = history
                 .iter()
-                .map(|&(t, e, _, _)| {
+                .map(|&(t, e, _, _, _)| {
                     let x = rect.left() + ((t - t_min) / t_range * chart_width_f32 as f64) as f32;
                     let y =
                         rect.bottom() - ((e - e_min) / e_range * chart_height_f32 as f64) as f32;
@@ -777,7 +797,7 @@ impl CellWorldApp {
             // 绘制生命能量曲线
             let life_pts: Vec<egui::Pos2> = history
                 .iter()
-                .map(|&(t, _, c, _)| {
+                .map(|&(t, _, c, _, _)| {
                     let x = rect.left() + ((t - t_min) / t_range * chart_width_f32 as f64) as f32;
                     let y =
                         rect.bottom() - ((c - e_min) / e_range * chart_height_f32 as f64) as f32;
@@ -791,7 +811,25 @@ impl CellWorldApp {
                 painter.circle_filled(last, 3.0, color_life);
             }
 
-            // Y轴标注
+            // 绘制生物数量曲线（右Y轴）
+            let count_pts: Vec<egui::Pos2> = history
+                .iter()
+                .map(|&(t, _, _, _, count)| {
+                    let x = rect.left() + ((t - t_min) / t_range * chart_width_f32 as f64) as f32;
+                    let y = rect.bottom()
+                        - ((count as f64 - c_min as f64) / c_range * chart_height_f32 as f64)
+                            as f32;
+                    egui::pos2(x, y.clamp(rect.top(), rect.bottom()))
+                })
+                .collect();
+            for pair in count_pts.windows(2) {
+                painter.line_segment([pair[0], pair[1]], egui::Stroke::new(1.5, color_count));
+            }
+            if let Some(&last) = count_pts.last() {
+                painter.circle_filled(last, 3.0, color_count);
+            }
+
+            // 左Y轴标注
             let label_color = egui::Color32::from_gray(160);
             painter.text(
                 egui::pos2(rect.left() + 2.0, rect.top() + 2.0),
@@ -804,6 +842,22 @@ impl CellWorldApp {
                 egui::pos2(rect.left() + 2.0, rect.bottom() - 2.0),
                 egui::Align2::LEFT_BOTTOM,
                 format!("{:.0}", e_min),
+                egui::FontId::proportional(10.0),
+                label_color,
+            );
+
+            // 右Y轴标注
+            painter.text(
+                egui::pos2(rect.right() - 2.0, rect.top() + 2.0),
+                egui::Align2::RIGHT_TOP,
+                format!("{}", c_max),
+                egui::FontId::proportional(10.0),
+                label_color,
+            );
+            painter.text(
+                egui::pos2(rect.right() - 2.0, rect.bottom() - 2.0),
+                egui::Align2::RIGHT_BOTTOM,
+                format!("{}", c_min),
                 egui::FontId::proportional(10.0),
                 label_color,
             );
@@ -840,6 +894,10 @@ impl CellWorldApp {
             ui.colored_label(
                 egui::Color32::from_rgb(100, 255, 130),
                 format!("生命: {:.0}", stats.creature_energy),
+            );
+            ui.colored_label(
+                egui::Color32::from_rgb(255, 100, 200),
+                format!("数量: {}", stats.creature_count),
             );
         });
     }
@@ -1157,6 +1215,12 @@ impl eframe::App for CellWorldApp {
 
         // 从模拟线程读取最新快照
         let snap = self.sim.snapshot().clone();
+
+        // 检测灭绝停止标志，触发时自动暂停
+        if snap.stop_extinction_triggered && !self.paused {
+            self.paused = true;
+            self.sim.send(SimCommand::Pause);
+        }
 
         // 更新面板缓存
         let t_panel = std::time::Instant::now();

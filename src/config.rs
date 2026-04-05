@@ -11,6 +11,14 @@ pub struct Config {
     /// 最小生物数量（低于此值自动补充）
     pub min_creatures: usize,
 
+    /// 低于最小生物数量时是否停止演化（不补充，暂停模拟）
+    #[serde(default)]
+    pub stop_on_extinction: bool,
+
+    /// 自动投放随机生物间隔（秒），0=禁用
+    #[serde(default)]
+    pub auto_spawn_interval: f64,
+
     /// 最大生物数量（超过时禁止繁殖，0=不限制）
     #[serde(default = "default_max_creatures")]
     pub max_creatures: usize,

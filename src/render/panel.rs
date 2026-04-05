@@ -31,8 +31,8 @@ pub struct StatsPanel {
     pub settings_open: bool,
     pub energy_settings_open: bool,
     pub templates_open: bool,
-    /// 能量历史 (world_time, total_energy, creature_energy, particle_initial_energy)
-    pub energy_history: Vec<(f64, f64, f64, f64)>,
+    /// 能量历史 (world_time, total_energy, creature_energy, theoretical_energy, creature_count)
+    pub energy_history: Vec<(f64, f64, f64, f64, usize)>,
 }
 
 /// 排名数据
@@ -98,12 +98,7 @@ impl StatsPanel {
         }
     }
 
-    pub fn update(
-        &mut self,
-        snapshot: &SimSnapshot,
-        fps: f64,
-        now: Instant,
-    ) {
+    pub fn update(&mut self, snapshot: &SimSnapshot, fps: f64, now: Instant) {
         self.cached_stats.fps = fps;
         self.cached_stats.volcano_countdown = snapshot.volcano_countdown;
 
@@ -129,19 +124,20 @@ impl StatsPanel {
                 dominant_candidate: stats.dominant_candidate.clone(),
                 avg_compute_ns: snapshot.perf_stats.avg_compute_ns,
             };
-            // 记录能量历史（总能量 + 生命能量 + 理论投放能量）
+            // 记录能量历史（总能量 + 生命能量 + 理论投放能量 + 生物数量）
             self.energy_history.push((
                 stats.time,
                 stats.total_energy,
                 stats.creature_energy,
                 stats.theoretical_energy,
+                stats.creature_count,
             ));
             // 按时间裁剪：只保留最近30分钟
             let cutoff = stats.time - 1800.0;
             if let Some(pos) = self
                 .energy_history
                 .iter()
-                .position(|&(t, _, _, _)| t >= cutoff)
+                .position(|&(t, _, _, _, _)| t >= cutoff)
             {
                 if pos > 0 {
                     self.energy_history.drain(..pos);
@@ -352,11 +348,7 @@ impl StatsPanel {
     }
 
     /// 渲染基因库内容面板
-    pub fn render_gene_library(
-        &mut self,
-        ui: &mut Ui,
-        store: &Store,
-    ) -> PanelAction {
+    pub fn render_gene_library(&mut self, ui: &mut Ui, store: &Store) -> PanelAction {
         let mut action = PanelAction::default();
 
         let templates = store.templates();
@@ -398,10 +390,8 @@ impl StatsPanel {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    if ui.small_button("🗑").on_hover_text("删除").clicked()
-                                    {
-                                        action.delete_template =
-                                            Some(template.name.clone());
+                                    if ui.small_button("🗑").on_hover_text("删除").clicked() {
+                                        action.delete_template = Some(template.name.clone());
                                     }
                                     if ui
                                         .small_button("投放")
@@ -443,8 +433,7 @@ impl StatsPanel {
                         let conn_count = template.genome.connections.len();
                         let node_count = template.genome.nodes.len();
                         let hidden = node_count.saturating_sub(
-                            crate::neural::Genome::INPUT_SIZE
-                                + crate::neural::Genome::OUTPUT_SIZE,
+                            crate::neural::Genome::INPUT_SIZE + crate::neural::Genome::OUTPUT_SIZE,
                         );
                         ui.label(
                             egui::RichText::new(format!(
@@ -472,7 +461,9 @@ impl StatsPanel {
                         .on_hover_text("保存该族代表基因")
                         .clicked()
                     {
-                        action.save_clan = Some(clan_hash);
+                        let version = env!("CARGO_PKG_VERSION");
+                        let now = chrono::Local::now();
+                        self.save_name = format!("生物_v{}_{}", version, now.format("%m%d_%H%M"));
                     }
                 });
             }

@@ -104,6 +104,11 @@ pub struct World {
 
     /// 优势种库
     pub dominant_species: Vec<DominantCandidate>,
+
+    /// 灭绝停止标志（触发后不再补充生物）
+    pub stop_extinction_triggered: bool,
+    /// 自动投放定时器
+    auto_spawn_timer: f64,
 }
 
 /// 种族缓存（祖先追溯模型）
@@ -165,6 +170,8 @@ impl World {
             clan_genomes: FxHashMap::default(),
             volcano_radius: config.volcano_radius,
             dominant_species: Vec::new(),
+            stop_extinction_triggered: false,
+            auto_spawn_timer: 0.0,
         };
         // 初始连喷三波，提供充足起始能量（直接落地，不杀伤）
         for _ in 0..3 {
@@ -238,6 +245,15 @@ impl World {
 
         // 自动补充生物
         self.replenish_creatures(config);
+
+        // 自动投放随机生物（定时，不从基因库取）
+        if config.auto_spawn_interval > 0.0 && !self.stop_extinction_triggered {
+            self.auto_spawn_timer += dt;
+            if self.auto_spawn_timer >= config.auto_spawn_interval {
+                self.auto_spawn_timer = 0.0;
+                self.spawn_creature(config);
+            }
+        }
 
         // 重建空间索引
         let spatial_start = Instant::now();
@@ -369,26 +385,43 @@ impl World {
             clan_genomes,
             volcano_radius: config.volcano_radius,
             dominant_species,
+            stop_extinction_triggered: false,
+            auto_spawn_timer: 0.0,
         }
     }
 
     // ========== 生成 ==========
 
     fn replenish_creatures(&mut self, config: &Config) {
-        let mut rng = rand::thread_rng();
-        loop {
-            let alive_count = self.creatures.iter().filter(|c| c.alive).count();
-            if alive_count >= config.min_creatures {
-                break;
+        let alive_count = self.creatures.iter().filter(|c| c.alive).count();
+
+        // 如果已触发灭绝停止，不再补充
+        if self.stop_extinction_triggered {
+            return;
+        }
+
+        // 低于最小数量时
+        if alive_count < config.min_creatures {
+            // 如果开启了 stop_on_extinction，触发后不再补充
+            if config.stop_on_extinction {
+                self.stop_extinction_triggered = true;
+                return;
             }
-            if !self.dominant_species.is_empty() && rng.gen_bool(0.5) {
-                // 50% 从优势种库取一个
-                let idx = rng.gen_range(0..self.dominant_species.len());
-                let candidate = self.dominant_species[idx].clone();
-                self.spawn_from_template(config, &candidate.genome, config.initial_energy);
-            } else {
-                // 50% 随机生成
-                self.spawn_creature(config);
+
+            // 否则执行原有补充逻辑
+            let mut rng = rand::thread_rng();
+            loop {
+                let alive_count = self.creatures.iter().filter(|c| c.alive).count();
+                if alive_count >= config.min_creatures {
+                    break;
+                }
+                if !self.dominant_species.is_empty() && rng.gen_bool(0.5) {
+                    let idx = rng.gen_range(0..self.dominant_species.len());
+                    let candidate = self.dominant_species[idx].clone();
+                    self.spawn_from_template(config, &candidate.genome, config.initial_energy);
+                } else {
+                    self.spawn_creature(config);
+                }
             }
         }
     }

@@ -35,6 +35,8 @@ pub struct SimSnapshot {
     pub volcano_countdown: f64,
     /// 模拟线程累计步数（用于计算 SIM FPS）
     pub sim_step_count: u64,
+    /// 灭绝停止标志
+    pub stop_extinction_triggered: bool,
 }
 
 impl Default for SimSnapshot {
@@ -54,6 +56,7 @@ impl Default for SimSnapshot {
             creature_species: FxHashMap::default(),
             volcano_countdown: 0.0,
             sim_step_count: 0,
+            stop_extinction_triggered: false,
         }
     }
 }
@@ -94,7 +97,6 @@ impl SimHandle {
     pub fn snapshot(&self) -> std::sync::RwLockReadGuard<'_, SimSnapshot> {
         self.snapshot.read().unwrap()
     }
-
 }
 
 impl Drop for SimHandle {
@@ -176,8 +178,7 @@ fn sim_loop(
                         let (mut new_world, new_config) = ws.into_world();
                         // 重建 neural bridge
                         if new_config.neural_backend != "legacy" {
-                            let bridge =
-                                crate::neural::thread::spawn_neural_thread(&new_config);
+                            let bridge = crate::neural::thread::spawn_neural_thread(&new_config);
                             new_world.set_neural_bridge(bridge);
                         }
                         world = new_world;
@@ -239,6 +240,7 @@ fn export_snapshot(
         creature_species,
         volcano_countdown,
         sim_step_count,
+        stop_extinction_triggered: world.stop_extinction_triggered,
     };
 
     if let Ok(mut guard) = snapshot.write() {
