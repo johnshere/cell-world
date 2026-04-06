@@ -19,9 +19,9 @@ volcano_interval = 30.0
 # 火山喷射半径
 volcano_radius = 2300.0
 # 每次喷发粒子数
-volcano_count = 55
+volcano_count = 35
 # 火山粒子能量
-volcano_particle_energy = 180.0
+volcano_particle_energy = 185.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -38,13 +38,13 @@ volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 2.0
+volcano_kill_radius = 62.0
 # 落地杀伤系数
-landing_damage_multiplier = 1.5
+landing_damage_multiplier = 1.7
 
 # === 温泉 ===
 # 温泉最大同时活跃数量
-spring_max_count = 0
+spring_max_count = 9
 # 温泉产生间隔（秒）
 spring_spawn_interval = 25.0
 # 温泉寿命（秒）
@@ -60,9 +60,9 @@ spring_radius = 175.0
 # 温泉粒子衰减率（/秒）
 spring_decay_rate = 0.002
 # 新温泉与已有温泉最小间距（px）
-spring_min_distance = 500.0
+spring_min_distance = 530.0
 # 新温泉出现的最大距离（px）
-spring_max_distance = 650.0
+spring_max_distance = 670.0
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃
@@ -72,11 +72,11 @@ eye_scan_speed = 400.0
 # 嘴巴冷却时间（秒）
 mouth_cooldown = 0.5
 # 咬合能量转移率
-bite_transfer_rate = 0.35
+bite_transfer_rate = 0.4
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
-energy_denominator = 400.0
+energy_denominator = 450.0
 # 散热下限（指数衰减底板）
 heat_floor = 0.05
 
@@ -86,7 +86,7 @@ age_metabolism_factor = 0.025
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗（每单位距离）
-move_cost = 0.0004
+move_cost = 0.0005
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.6
 # === 体温 ===
@@ -156,5 +156,5 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = true
-auto_spawn_interval = 25.0
+auto_spawn_interval = 45.0
 mutation_rate = 0.15
