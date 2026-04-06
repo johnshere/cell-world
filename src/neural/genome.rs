@@ -1,6 +1,7 @@
 use rand::seq::SliceRandom;
 use rand::Rng;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use crate::config::Config;
@@ -40,6 +41,59 @@ fn default_threshold() -> f64 {
     0.0
 }
 
+// ============================================================================
+/// 连接概率控制基因（控制新连接的拓扑方向偏好）
+// ============================================================================
+
+/// 单个分区的连接概率（Processing层5方向 + Output层5方向）
+/// 5方向: SameBlockProcessing, SameBlockOutput, CrossForwardSame, CrossForwardOther, CrossFeedback
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
+pub struct BlockConnProbs {
+    /// Processing层5方向概率 [同区Proc, 同区Out, 跨区前馈同侧, 跨区前馈对侧, 跨区反馈]
+    pub proc: [f64; 5],
+    /// Output层5方向概率
+    pub out: [f64; 5],
+}
+
+impl Default for BlockConnProbs {
+    fn default() -> Self {
+        // 对应原有硬编码概率表
+        Self {
+            proc: [0.70, 0.15, 0.08, 0.02, 0.05],
+            out: [0.10, 0.05, 0.55, 0.10, 0.20],
+        }
+    }
+}
+
+/// 连接概率控制基因（1个变异率 + 32个分区概率）
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
+pub struct ConnProbGene {
+    /// 变异概率基因 (0.01 ~ 0.50)
+    pub mutation_rate: f64,
+    /// 32个分区的概率表（key: block编号 -24~-1, 1~24）
+    pub block_probs: HashMap<i8, BlockConnProbs>,
+}
+
+impl Default for ConnProbGene {
+    fn default() -> Self {
+        let mut block_probs = HashMap::new();
+        // 联合区: -24~-1 和 1~24，共48个，但用户说32个
+        // 初始化所有联合区 block（排除block 0）
+        for blk in -24..=24 {
+            if blk == 0 {
+                continue; // 跳过体感区
+            }
+            block_probs.insert(blk, BlockConnProbs::default());
+        }
+        Self {
+            mutation_rate: 0.15,
+            block_probs,
+        }
+    }
+}
+
 /// 节点基因
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
@@ -76,6 +130,8 @@ pub struct ConnectionGene {
 pub struct Genome {
     pub nodes: Vec<NodeGene>,
     pub connections: Vec<ConnectionGene>,
+    /// 连接概率控制基因（控制新连接的拓扑方向偏好）
+    pub conn_prob: ConnProbGene,
     next_node_id: usize,
     /// 预排序的启用连接缓存（用于快速 similarity 比较，避免每次重复排序+分配）
     #[cfg_attr(feature = "persistence", serde(skip))]
@@ -145,9 +201,9 @@ impl Genome {
 
         // 3. 创建感官区 Block 节点：Block(-1)左眼, Block(1)右眼, Block(0)体感
         let sensory_blocks: [(i8, std::ops::Range<usize>); 3] = [
-            (-1, 0..8),   // 左眼 → Input 0~7
-            (1, 8..16),   // 右眼 → Input 8~15
-            (0, 16..17),  // 体感 → Input 16
+            (-1, 0..8),  // 左眼 → Input 0~7
+            (1, 8..16),  // 右眼 → Input 8~15
+            (0, 16..17), // 体感 → Input 16
         ];
         let mut sensory_node_ids: Vec<(i8, usize)> = Vec::new(); // (block, node_id)
         for &(blk, ref input_range) in &sensory_blocks {
@@ -214,6 +270,7 @@ impl Genome {
         let mut genome = Self {
             nodes,
             connections,
+            conn_prob: ConnProbGene::default(),
             next_node_id: next_id,
             sorted_conns_cache: Vec::new(),
         };
@@ -314,8 +371,54 @@ impl Genome {
             }
         }
 
+        // 连接概率基因变异
+        child.mutate_conn_prob();
+
         child.rebuild_sorted_cache();
         child
+    }
+
+    /// 连接概率基因变异（mutation_rate基因 + 32个分区概率基因）
+    fn mutate_conn_prob(&mut self) {
+        let mut rng = rand::thread_rng();
+        let rate = self.conn_prob.mutation_rate;
+
+        // 1. mutation_rate 基因变异（自己能变异自己）
+        if rng.gen::<f64>() < rate {
+            if rng.gen::<f64>() < 0.9 {
+                // 微调
+                self.conn_prob.mutation_rate += rng.gen_range(-0.02..0.02);
+            } else {
+                // 重置
+                self.conn_prob.mutation_rate = rng.gen_range(0.01..0.30);
+            }
+            self.conn_prob.mutation_rate = self.conn_prob.mutation_rate.clamp(0.01, 0.30);
+        }
+
+        // 2. 每个分区概率基因独立变异
+        for (_, probs) in &mut self.conn_prob.block_probs {
+            if rng.gen::<f64>() < rate {
+                Self::mutate_block_probs(probs, &mut rng);
+            }
+        }
+    }
+
+    /// 单个分区概率基因变异（加性扰动 + 归一化）
+    fn mutate_block_probs(probs: &mut BlockConnProbs, rng: &mut impl Rng) {
+        let epsilon = 0.05;
+        for layer_probs in [&mut probs.proc, &mut probs.out] {
+            for p in layer_probs.iter_mut() {
+                *p += rng.gen_range(-epsilon..epsilon);
+                *p = p.clamp(0.01, 1.0); // 避免塌陷到0
+            }
+            // 归一化和为1
+            let sum: f64 = layer_probs.iter().sum();
+            if sum > 0.0 {
+                for p in layer_probs.iter_mut() {
+                    *p /= sum;
+                }
+            }
+        }
     }
 
     /// 获取节点的 block 编号（Input/Output 通过映射获取，Block 直接读取）
@@ -329,56 +432,56 @@ impl Genome {
         }
     }
 
-    /// 按概率表加权采样连接目标类别
-    fn sample_conn_target(layer: LayerType, rng: &mut impl Rng) -> ConnTarget {
+    /// 按概率表加权采样连接目标类别（从基因查表）
+    fn conn_target(
+        block: i8,
+        layer: LayerType,
+        conn_prob: &ConnProbGene,
+        rng: &mut impl Rng,
+    ) -> ConnTarget {
         let r = rng.gen::<f64>();
-        match layer {
-            //                      同区Proc  同区Out  跨区前馈同侧  跨区前馈对侧  跨区反馈
-            // Processing:           70%       15%      8%            2%            5%
-            LayerType::Processing => {
-                if r < 0.70 {
-                    ConnTarget::SameBlockProcessing
-                } else if r < 0.85 {
-                    ConnTarget::SameBlockOutput
-                } else if r < 0.93 {
-                    ConnTarget::CrossForwardSame
-                } else if r < 0.95 {
-                    ConnTarget::CrossForwardOther
-                } else {
-                    ConnTarget::CrossFeedback
-                }
-            }
-            //                      同区Proc  同区Out  跨区前馈同侧  跨区前馈对侧  跨区反馈
-            // Output:               10%       5%       55%           10%           20%
-            LayerType::Output => {
-                if r < 0.10 {
-                    ConnTarget::SameBlockProcessing
-                } else if r < 0.15 {
-                    ConnTarget::SameBlockOutput
-                } else if r < 0.70 {
-                    ConnTarget::CrossForwardSame
-                } else if r < 0.80 {
-                    ConnTarget::CrossForwardOther
-                } else {
-                    ConnTarget::CrossFeedback
-                }
+
+        // 查找该block的概率表；若不存在，使用默认值
+        let probs: BlockConnProbs = conn_prob
+            .block_probs
+            .get(&block)
+            .cloned()
+            .unwrap_or_else(BlockConnProbs::default);
+
+        let layer_probs = match layer {
+            LayerType::Processing => &probs.proc,
+            LayerType::Output => &probs.out,
+        };
+
+        // 加权累积采样
+        let mut cumsum = 0.0;
+        for (i, &p) in layer_probs.iter().enumerate() {
+            cumsum += p;
+            if r < cumsum {
+                return match i {
+                    0 => ConnTarget::SameBlockProcessing,
+                    1 => ConnTarget::SameBlockOutput,
+                    2 => ConnTarget::CrossForwardSame,
+                    3 => ConnTarget::CrossForwardOther,
+                    4 => ConnTarget::CrossFeedback,
+                    _ => ConnTarget::SameBlockProcessing,
+                };
             }
         }
+
+        // 防退化兜底
+        ConnTarget::SameBlockProcessing
     }
 
     /// 判断候选目标节点是否匹配指定的连接目标类别
-    fn matches_conn_target(
-        from_blk: i8,
-        to_node: &NodeGene,
-        target: ConnTarget,
-    ) -> bool {
+    fn matches_conn_target(from_blk: i8, to_node: &NodeGene, target: ConnTarget) -> bool {
         use super::block;
         let to_blk = Self::node_block(to_node);
         let same_block = from_blk == to_blk;
         let same_side = block::is_same_side(from_blk, to_blk);
         let forward = block::is_forward(from_blk, to_blk);
-        let to_is_output_layer = matches!(to_node.node_type, NodeType::Block(_))
-            && to_node.layer == LayerType::Output;
+        let to_is_output_layer =
+            matches!(to_node.node_type, NodeType::Block(_)) && to_node.layer == LayerType::Output;
 
         match target {
             ConnTarget::SameBlockProcessing => same_block && !to_is_output_layer,
@@ -419,8 +522,7 @@ impl Genome {
                 .iter()
                 .enumerate()
                 .filter(|(_, n)| {
-                    matches!(n.node_type, NodeType::Block(b) if b == from_blk)
-                        && n.id != from_id
+                    matches!(n.node_type, NodeType::Block(b) if b == from_blk) && n.id != from_id
                 })
                 .map(|(i, _)| i)
                 .collect();
@@ -462,7 +564,7 @@ impl Genome {
 
         for _ in 0..20 {
             // 采样目标类别
-            let target_type = Self::sample_conn_target(from_layer, &mut rng);
+            let target_type = Self::conn_target(from_blk, from_layer, &self.conn_prob, &mut rng);
 
             // 筛选匹配该类别的候选目标
             let matching: Vec<usize> = all_targets
@@ -702,9 +804,59 @@ impl Genome {
 
         let next_node_id = fitter.next_node_id.max(weaker.next_node_id);
 
+        // conn_prob 交叉：mutation_rate取平均，block_probs逐block独立交叉
+        let child_conn_prob = {
+            let mut block_probs = HashMap::new();
+            // 并集遍历所有block
+            let all_blocks: std::collections::HashSet<i8> = fitter
+                .conn_prob
+                .block_probs
+                .keys()
+                .chain(weaker.conn_prob.block_probs.keys())
+                .cloned()
+                .collect();
+            for blk in all_blocks {
+                let fitter_probs = fitter.conn_prob.block_probs.get(&blk);
+                let weaker_probs = weaker.conn_prob.block_probs.get(&blk);
+                let merged = match (fitter_probs, weaker_probs) {
+                    (Some(fp), Some(wp)) => {
+                        let mut proc = [0.0; 5];
+                        let mut out = [0.0; 5];
+                        for i in 0..5 {
+                            proc[i] = (fp.proc[i] + wp.proc[i]) / 2.0;
+                            out[i] = (fp.out[i] + wp.out[i]) / 2.0;
+                        }
+                        // 归一化
+                        let proc_sum: f64 = proc.iter().sum();
+                        if proc_sum > 0.0 {
+                            for p in &mut proc {
+                                *p /= proc_sum;
+                            }
+                        }
+                        let out_sum: f64 = out.iter().sum();
+                        if out_sum > 0.0 {
+                            for p in &mut out {
+                                *p /= out_sum;
+                            }
+                        }
+                        BlockConnProbs { proc, out }
+                    }
+                    (Some(p), None) | (None, Some(p)) => p.clone(),
+                    (None, None) => BlockConnProbs::default(),
+                };
+                block_probs.insert(blk, merged);
+            }
+            ConnProbGene {
+                mutation_rate: (fitter.conn_prob.mutation_rate + weaker.conn_prob.mutation_rate)
+                    / 2.0,
+                block_probs,
+            }
+        };
+
         let mut genome = Genome {
             nodes: child_nodes,
             connections: child_connections,
+            conn_prob: child_conn_prob,
             next_node_id,
             sorted_conns_cache: Vec::new(),
         };

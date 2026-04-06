@@ -461,9 +461,7 @@ impl StatsPanel {
                         .on_hover_text("保存该族代表基因")
                         .clicked()
                     {
-                        let version = env!("CARGO_PKG_VERSION");
-                        let now = chrono::Local::now();
-                        self.save_name = format!("生物_v{}_{}", version, now.format("%m%d_%H%M"));
+                        action.save_clan = Some(clan_hash);
                     }
                 });
             }
@@ -501,7 +499,9 @@ impl StatsPanel {
                             .clicked()
                         {
                             self.save_dialog_open = true;
-                            self.save_name = format!("生物_{:08X}", creature.genome_hash);
+                            let version = env!("CARGO_PKG_VERSION");
+                            let now = chrono::Local::now();
+                            self.save_name = format!("生物_v{}_{}", version, now.format("%m%d_%H%M"));
                         }
                     });
 

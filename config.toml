@@ -3,7 +3,7 @@ initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
 min_creatures = 60
 # 最大生物数量（超过时禁止繁殖，0=不限制）
-max_creatures = 550
+max_creatures = 500
 # 初始能量
 initial_energy = 160.0
 # 初始世界缩放比例
@@ -19,9 +19,9 @@ volcano_interval = 30.0
 # 火山喷射半径
 volcano_radius = 2200.0
 # 每次喷发粒子数
-volcano_count = 35
+volcano_count = 40
 # 火山粒子能量
-volcano_particle_energy = 200.0
+volcano_particle_energy = 180.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -38,9 +38,9 @@ volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 40.0
+volcano_kill_radius = 35.0
 # 落地杀伤系数
-landing_damage_multiplier = 3.8
+landing_damage_multiplier = 1.0
 
 # === 温泉 ===
 # 温泉最大同时活跃数量
@@ -76,7 +76,7 @@ bite_transfer_rate = 0.35
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
-energy_denominator = 150.0
+energy_denominator = 400.0
 # 散热下限（指数衰减底板）
 heat_floor = 0.05
 
@@ -158,4 +158,4 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = false
-auto_spawn_interval = 60.0
+auto_spawn_interval = 40.0

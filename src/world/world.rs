@@ -251,7 +251,10 @@ impl World {
             self.auto_spawn_timer += dt;
             if self.auto_spawn_timer >= config.auto_spawn_interval {
                 self.auto_spawn_timer = 0.0;
-                self.spawn_creature(config);
+                let alive_count = self.creatures.iter().filter(|c| c.alive).count();
+                if config.max_creatures == 0 || alive_count < config.max_creatures {
+                    self.spawn_creature(config);
+                }
             }
         }
 

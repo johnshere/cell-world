@@ -402,7 +402,7 @@ fn config_drag_usize(
             ui.label(title);
             let r = ui
                 .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add(egui::DragValue::new(value).speed(0.1).range(range))
+                    ui.add(egui::DragValue::new(value).speed(1.0).range(range))
                         .changed()
                 })
                 .inner;
@@ -1394,7 +1394,9 @@ impl eframe::App for CellWorldApp {
                 .filter(|c| c.alive && c.clan_hash == clan_hash)
                 .max_by(|a, b| a.energy.partial_cmp(&b.energy).unwrap())
             {
-                let name = format!("族_{:08X}", clan_hash);
+                let version = env!("CARGO_PKG_VERSION");
+                let now = chrono::Local::now();
+                let name = format!("种族_v{}_{}", version, now.format("%m%d_%H%M"));
                 let template = CreatureTemplate {
                     name: name.clone(),
                     genome: representative.genome.clone(),
