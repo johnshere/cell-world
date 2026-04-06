@@ -42,21 +42,21 @@ fn default_threshold() -> f64 {
 }
 
 // ============================================================================
-/// 连接概率控制基因（控制新连接的拓扑方向偏好）
+/// 连接概率基因（控制新连接的拓扑方向偏好）
 // ============================================================================
 
 /// 单个分区的连接概率（Processing层5方向 + Output层5方向）
 /// 5方向: SameBlockProcessing, SameBlockOutput, CrossForwardSame, CrossForwardOther, CrossFeedback
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
-pub struct BlockConnProbs {
+pub struct ConnProbsGene {
     /// Processing层5方向概率 [同区Proc, 同区Out, 跨区前馈同侧, 跨区前馈对侧, 跨区反馈]
     pub proc: [f64; 5],
     /// Output层5方向概率
     pub out: [f64; 5],
 }
 
-impl Default for BlockConnProbs {
+impl Default for ConnProbsGene {
     fn default() -> Self {
         // 对应原有硬编码概率表
         Self {
@@ -66,30 +66,64 @@ impl Default for BlockConnProbs {
     }
 }
 
-/// 连接概率控制基因（1个变异率 + 32个分区概率）
+// ============================================================================
+/// 学习基因（控制神经网络如何从经验中学习）
+// ============================================================================
+
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
-pub struct ConnProbGene {
-    /// 变异概率基因 (0.01 ~ 0.50)
-    pub mutation_rate: f64,
-    /// 32个分区的概率表（key: block编号 -24~-1, 1~24）
-    pub block_probs: HashMap<i8, BlockConnProbs>,
+pub struct LearningGene {
+    /// 学习开关 [0.0=禁用, 1.0=启用]
+    pub learning_on: f64,
+    /// Hebbian学习率 [0.0~0.5]
+    pub hebbian_rate: f64,
+    /// Hebbian符号 [0.0~1.0]，0.5=平衡，<0.5偏弱化，>0.5偏强化
+    pub hebbian_sign: f64,
+    /// 资格迹衰减率 [0.0~0.99]
+    pub eligibility_decay: f64,
+    /// TD强化学习率 [0.0~0.1]
+    pub reinforcement_rate: f64,
+    /// 代谢惩罚系数 [0.0~1.0]
+    pub metabolic_penalty: f64,
 }
 
-impl Default for ConnProbGene {
+impl Default for LearningGene {
     fn default() -> Self {
-        let mut block_probs = HashMap::new();
-        // 联合区: -24~-1 和 1~24，共48个，但用户说32个
-        // 初始化所有联合区 block（排除block 0）
-        for blk in -24..=24 {
-            if blk == 0 {
-                continue; // 跳过体感区
-            }
-            block_probs.insert(blk, BlockConnProbs::default());
-        }
         Self {
-            mutation_rate: 0.15,
-            block_probs,
+            learning_on: 0.5,
+            hebbian_rate: 0.01,
+            hebbian_sign: 0.7,
+            eligibility_decay: 0.95,
+            reinforcement_rate: 0.001,
+            metabolic_penalty: 0.0,
+        }
+    }
+}
+
+// ============================================================================
+/// 奖励基因（控制奖励信号如何产生和处理）
+// ============================================================================
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
+pub struct RewardGene {
+    /// 奖励信号缩放 [0.0~2.0]
+    pub reward_scale: f64,
+    /// TD折扣因子 [0.0~0.99]
+    pub td_discount: f64,
+    /// 能量敏感度 [0.0~1.0]
+    pub energy_sensitivity: f64,
+    /// 奖励延迟容忍 [0.0~1.0]
+    pub reward_delay_tolerance: f64,
+}
+
+impl Default for RewardGene {
+    fn default() -> Self {
+        Self {
+            reward_scale: 1.0,
+            td_discount: 0.9,
+            energy_sensitivity: 1.0,
+            reward_delay_tolerance: 0.5,
         }
     }
 }
@@ -130,8 +164,17 @@ pub struct ConnectionGene {
 pub struct Genome {
     pub nodes: Vec<NodeGene>,
     pub connections: Vec<ConnectionGene>,
-    /// 连接概率控制基因（控制新连接的拓扑方向偏好）
-    pub conn_prob: ConnProbGene,
+
+    /// 连接概率基因（32分区 × 2层 × 5方向）
+    pub conn_probs: HashMap<i8, ConnProbsGene>,
+    /// 学习基因
+    pub learning: LearningGene,
+    /// 奖励基因
+    pub reward: RewardGene,
+
+    /// 统一变异率基因 [0.01~0.30]
+    pub mutation_rate: f64,
+
     next_node_id: usize,
     /// 预排序的启用连接缓存（用于快速 similarity 比较，避免每次重复排序+分配）
     #[cfg_attr(feature = "persistence", serde(skip))]
@@ -267,10 +310,21 @@ impl Genome {
             }
         }
 
+        let mut block_probs = HashMap::new();
+        for blk in -24..=24 {
+            if blk == 0 {
+                continue;
+            }
+            block_probs.insert(blk, ConnProbsGene::default());
+        }
+
         let mut genome = Self {
             nodes,
             connections,
-            conn_prob: ConnProbGene::default(),
+            conn_probs: block_probs,
+            learning: LearningGene::default(),
+            reward: RewardGene::default(),
+            mutation_rate: 0.15,
             next_node_id: next_id,
             sorted_conns_cache: Vec::new(),
         };
@@ -297,9 +351,9 @@ impl Genome {
             .sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
     }
 
-    /// 变异（所有变异逻辑使用同一个概率）
+    /// 变异（统一使用 mutation_rate 基因）
     pub fn mutate(&self, conf: &Config) -> Self {
-        let rate = conf.mutation_rate;
+        let rate = self.mutation_rate;
         let mut rng = rand::thread_rng();
         let mut child = self.clone();
 
@@ -371,40 +425,95 @@ impl Genome {
             }
         }
 
-        // 连接概率基因变异
-        child.mutate_conn_prob();
+        // block_probs变异
+        child.mutate_block_probs_gene(rate);
+
+        // learning基因变异
+        child.mutate_learning_gene(rate);
+
+        // reward基因变异
+        child.mutate_reward_gene(rate);
+
+        // mutation_rate基因自身变异
+        if rng.gen::<f64>() < rate {
+            if rng.gen::<f64>() < 0.9 {
+                child.mutation_rate += rng.gen_range(-0.02..0.02);
+            } else {
+                child.mutation_rate = rng.gen_range(0.01..0.30);
+            }
+            child.mutation_rate = child.mutation_rate.clamp(0.01, 0.30);
+        }
 
         child.rebuild_sorted_cache();
         child
     }
 
-    /// 连接概率基因变异（mutation_rate基因 + 32个分区概率基因）
-    fn mutate_conn_prob(&mut self) {
+    /// block_probs基因变异（使用统一rate）
+    fn mutate_block_probs_gene(&mut self, rate: f64) {
         let mut rng = rand::thread_rng();
-        let rate = self.conn_prob.mutation_rate;
 
-        // 1. mutation_rate 基因变异（自己能变异自己）
-        if rng.gen::<f64>() < rate {
-            if rng.gen::<f64>() < 0.9 {
-                // 微调
-                self.conn_prob.mutation_rate += rng.gen_range(-0.02..0.02);
-            } else {
-                // 重置
-                self.conn_prob.mutation_rate = rng.gen_range(0.01..0.30);
-            }
-            self.conn_prob.mutation_rate = self.conn_prob.mutation_rate.clamp(0.01, 0.30);
-        }
-
-        // 2. 每个分区概率基因独立变异
-        for (_, probs) in &mut self.conn_prob.block_probs {
+        // 每个分区概率基因独立变异
+        for (_, probs) in &mut self.conn_probs {
             if rng.gen::<f64>() < rate {
-                Self::mutate_block_probs(probs, &mut rng);
+                Self::mutate_single_block_probs(probs, &mut rng);
             }
         }
     }
 
+    /// LearningGene变异
+    fn mutate_learning_gene(&mut self, rate: f64) {
+        let mut rng = rand::thread_rng();
+
+        if rng.gen::<f64>() < rate {
+            self.learning.learning_on =
+                (self.learning.learning_on + rng.gen_range(-0.1..0.1)).clamp(0.0, 1.0);
+        }
+        if rng.gen::<f64>() < rate {
+            self.learning.hebbian_rate =
+                (self.learning.hebbian_rate + rng.gen_range(-0.005..0.005)).clamp(0.0, 0.5);
+        }
+        if rng.gen::<f64>() < rate {
+            self.learning.hebbian_sign =
+                (self.learning.hebbian_sign + rng.gen_range(-0.05..0.05)).clamp(0.0, 1.0);
+        }
+        if rng.gen::<f64>() < rate {
+            self.learning.eligibility_decay =
+                (self.learning.eligibility_decay + rng.gen_range(-0.02..0.02)).clamp(0.0, 0.99);
+        }
+        if rng.gen::<f64>() < rate {
+            self.learning.reinforcement_rate =
+                (self.learning.reinforcement_rate + rng.gen_range(-0.001..0.001)).clamp(0.0, 0.1);
+        }
+        if rng.gen::<f64>() < rate {
+            self.learning.metabolic_penalty =
+                (self.learning.metabolic_penalty + rng.gen_range(-0.05..0.05)).clamp(0.0, 1.0);
+        }
+    }
+
+    /// RewardGene变异
+    fn mutate_reward_gene(&mut self, rate: f64) {
+        let mut rng = rand::thread_rng();
+
+        if rng.gen::<f64>() < rate {
+            self.reward.reward_scale =
+                (self.reward.reward_scale + rng.gen_range(-0.1..0.1)).clamp(0.0, 2.0);
+        }
+        if rng.gen::<f64>() < rate {
+            self.reward.td_discount =
+                (self.reward.td_discount + rng.gen_range(-0.05..0.05)).clamp(0.0, 0.99);
+        }
+        if rng.gen::<f64>() < rate {
+            self.reward.energy_sensitivity =
+                (self.reward.energy_sensitivity + rng.gen_range(-0.05..0.05)).clamp(0.0, 1.0);
+        }
+        if rng.gen::<f64>() < rate {
+            self.reward.reward_delay_tolerance =
+                (self.reward.reward_delay_tolerance + rng.gen_range(-0.05..0.05)).clamp(0.0, 1.0);
+        }
+    }
+
     /// 单个分区概率基因变异（加性扰动 + 归一化）
-    fn mutate_block_probs(probs: &mut BlockConnProbs, rng: &mut impl Rng) {
+    fn mutate_single_block_probs(probs: &mut ConnProbsGene, rng: &mut impl Rng) {
         let epsilon = 0.05;
         for layer_probs in [&mut probs.proc, &mut probs.out] {
             for p in layer_probs.iter_mut() {
@@ -436,17 +545,16 @@ impl Genome {
     fn conn_target(
         block: i8,
         layer: LayerType,
-        conn_prob: &ConnProbGene,
+        block_probs: &HashMap<i8, ConnProbsGene>,
         rng: &mut impl Rng,
     ) -> ConnTarget {
         let r = rng.gen::<f64>();
 
         // 查找该block的概率表；若不存在，使用默认值
-        let probs: BlockConnProbs = conn_prob
-            .block_probs
+        let probs: ConnProbsGene = block_probs
             .get(&block)
             .cloned()
-            .unwrap_or_else(BlockConnProbs::default);
+            .unwrap_or_else(ConnProbsGene::default);
 
         let layer_probs = match layer {
             LayerType::Processing => &probs.proc,
@@ -564,7 +672,7 @@ impl Genome {
 
         for _ in 0..20 {
             // 采样目标类别
-            let target_type = Self::conn_target(from_blk, from_layer, &self.conn_prob, &mut rng);
+            let target_type = Self::conn_target(from_blk, from_layer, &self.conn_probs, &mut rng);
 
             // 筛选匹配该类别的候选目标
             let matching: Vec<usize> = all_targets
@@ -804,20 +912,18 @@ impl Genome {
 
         let next_node_id = fitter.next_node_id.max(weaker.next_node_id);
 
-        // conn_prob 交叉：mutation_rate取平均，block_probs逐block独立交叉
-        let child_conn_prob = {
+        // block_probs 交叉：逐block独立交叉
+        let child_block_probs = {
             let mut block_probs = HashMap::new();
-            // 并集遍历所有block
             let all_blocks: std::collections::HashSet<i8> = fitter
-                .conn_prob
-                .block_probs
+                .conn_probs
                 .keys()
-                .chain(weaker.conn_prob.block_probs.keys())
+                .chain(weaker.conn_probs.keys())
                 .cloned()
                 .collect();
             for blk in all_blocks {
-                let fitter_probs = fitter.conn_prob.block_probs.get(&blk);
-                let weaker_probs = weaker.conn_prob.block_probs.get(&blk);
+                let fitter_probs = fitter.conn_probs.get(&blk);
+                let weaker_probs = weaker.conn_probs.get(&blk);
                 let merged = match (fitter_probs, weaker_probs) {
                     (Some(fp), Some(wp)) => {
                         let mut proc = [0.0; 5];
@@ -839,24 +945,51 @@ impl Genome {
                                 *p /= out_sum;
                             }
                         }
-                        BlockConnProbs { proc, out }
+                        ConnProbsGene { proc, out }
                     }
                     (Some(p), None) | (None, Some(p)) => p.clone(),
-                    (None, None) => BlockConnProbs::default(),
+                    (None, None) => ConnProbsGene::default(),
                 };
                 block_probs.insert(blk, merged);
             }
-            ConnProbGene {
-                mutation_rate: (fitter.conn_prob.mutation_rate + weaker.conn_prob.mutation_rate)
-                    / 2.0,
-                block_probs,
-            }
+            block_probs
+        };
+
+        // learning基因交叉
+        let child_learning = LearningGene {
+            learning_on: (fitter.learning.learning_on + weaker.learning.learning_on) / 2.0,
+            hebbian_rate: (fitter.learning.hebbian_rate + weaker.learning.hebbian_rate) / 2.0,
+            hebbian_sign: (fitter.learning.hebbian_sign + weaker.learning.hebbian_sign) / 2.0,
+            eligibility_decay: (fitter.learning.eligibility_decay
+                + weaker.learning.eligibility_decay)
+                / 2.0,
+            reinforcement_rate: (fitter.learning.reinforcement_rate
+                + weaker.learning.reinforcement_rate)
+                / 2.0,
+            metabolic_penalty: (fitter.learning.metabolic_penalty
+                + weaker.learning.metabolic_penalty)
+                / 2.0,
+        };
+
+        // reward基因交叉
+        let child_reward = RewardGene {
+            reward_scale: (fitter.reward.reward_scale + weaker.reward.reward_scale) / 2.0,
+            td_discount: (fitter.reward.td_discount + weaker.reward.td_discount) / 2.0,
+            energy_sensitivity: (fitter.reward.energy_sensitivity
+                + weaker.reward.energy_sensitivity)
+                / 2.0,
+            reward_delay_tolerance: (fitter.reward.reward_delay_tolerance
+                + weaker.reward.reward_delay_tolerance)
+                / 2.0,
         };
 
         let mut genome = Genome {
             nodes: child_nodes,
             connections: child_connections,
-            conn_prob: child_conn_prob,
+            conn_probs: child_block_probs,
+            learning: child_learning,
+            reward: child_reward,
+            mutation_rate: (fitter.mutation_rate + weaker.mutation_rate) / 2.0,
             next_node_id,
             sorted_conns_cache: Vec::new(),
         };

@@ -1,6 +1,6 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::genome::{Genome, NodeType};
+use super::genome::{Genome, LearningGene, NodeType, RewardGene};
 
 /// SNN 节点状态
 #[derive(Clone)]
@@ -39,6 +39,16 @@ pub struct SpikingNetwork {
     recurrent_inputs: FxHashMap<usize, Vec<(usize, f64)>>,
     /// 回环源节点的上一 tick 状态: node_id -> (membrane, fired)
     prev_state: FxHashMap<usize, (f64, bool)>,
+
+    // === Learning ===
+    /// 资格迹：(in_node, out_node) -> eligibility_trace
+    eligibility_traces: FxHashMap<(usize, usize), f64>,
+    /// 学习基因（从基因组复制，运行时只读）
+    learning_gene: LearningGene,
+    /// 奖励基因（从基因组复制，运行时只读）
+    reward_gene: RewardGene,
+    /// 当前奖励信号（外部传入）
+    reward_signal: f64,
 }
 
 impl Default for SpikingNetwork {
@@ -53,6 +63,10 @@ impl Default for SpikingNetwork {
             forward_inputs: FxHashMap::default(),
             recurrent_inputs: FxHashMap::default(),
             prev_state: FxHashMap::default(),
+            eligibility_traces: FxHashMap::default(),
+            learning_gene: LearningGene::default(),
+            reward_gene: RewardGene::default(),
+            reward_signal: 0.0,
         }
     }
 }
@@ -149,6 +163,10 @@ impl SpikingNetwork {
             forward_inputs,
             recurrent_inputs,
             prev_state,
+            eligibility_traces: FxHashMap::default(),
+            learning_gene: genome.learning.clone(),
+            reward_gene: genome.reward.clone(),
+            reward_signal: 0.0,
         }
     }
 
@@ -216,7 +234,9 @@ impl SpikingNetwork {
             }
         }
 
-        self.tick_inner()
+        let outputs = self.tick_inner();
+        self.update_eligibility_traces();
+        outputs
     }
 
     /// 执行一个 tick（不注入新输入，输入节点保持上次状态）
@@ -224,7 +244,9 @@ impl SpikingNetwork {
     pub fn tick_free(&mut self) -> Vec<f64> {
         self.save_recurrent_state();
         // 不修改输入节点，保持上一次 tick() 注入的 membrane 和 fired 状态
-        self.tick_inner()
+        let outputs = self.tick_inner();
+        self.update_eligibility_traces();
+        outputs
     }
 
     /// 执行多 tick：首次注入输入，后续 tick_free
@@ -374,6 +396,49 @@ impl SpikingNetwork {
             .collect()
     }
 
+    /// 更新资格迹（每tick结束时调用）
+    fn update_eligibility_traces(&mut self) {
+        let decay = 1.0 - self.learning_gene.eligibility_decay;
+
+        // 更新正向连接资格迹
+        for (&out_node, inputs_list) in &self.forward_inputs {
+            for &(in_node, _) in inputs_list {
+                let pre_fired = self.nodes.get(&in_node).map(|n| n.fired).unwrap_or(false);
+                let post_fired = self.nodes.get(&out_node).map(|n| n.fired).unwrap_or(false);
+
+                let key = (in_node, out_node);
+                let trace = self.eligibility_traces.entry(key).or_insert(0.0);
+
+                // 资格迹衰减
+                *trace *= decay;
+
+                // 如果 pre 和 post 同时激活，累积资格迹
+                if pre_fired && post_fired {
+                    *trace += 1.0;
+                }
+            }
+        }
+
+        // 更新回环连接资格迹
+        for (&out_node, recurrent_list) in &self.recurrent_inputs {
+            for &(in_node, _) in recurrent_list {
+                let key = (in_node, out_node);
+                let trace = self.eligibility_traces.entry(key).or_insert(0.0);
+
+                // 资格迹衰减
+                *trace *= decay;
+
+                // 回环：pre用prev_state
+                if let Some(&(prev_membrane, prev_fired)) = self.prev_state.get(&in_node) {
+                    let post_fired = self.nodes.get(&out_node).map(|n| n.fired).unwrap_or(false);
+                    if prev_fired && post_fired {
+                        *trace += 1.0;
+                    }
+                }
+            }
+        }
+    }
+
     /// 重置所有节点状态
     pub fn reset(&mut self) {
         for node in self.nodes.values_mut() {
@@ -384,5 +449,96 @@ impl SpikingNetwork {
         for state in self.prev_state.values_mut() {
             *state = (0.0, false);
         }
+        self.eligibility_traces.clear();
+        self.reward_signal = 0.0;
+    }
+
+    /// 设置奖励信号
+    pub fn set_reward_signal(&mut self, reward: f64) {
+        self.reward_signal = reward;
+    }
+
+    /// 应用奖励信号到权重
+    pub fn apply_reward(&mut self) {
+        if self.learning_gene.learning_on < 0.5 {
+            return; // 学习禁用
+        }
+
+        let reward = self.reward_signal;
+        if reward.abs() < 0.001 {
+            return;
+        }
+
+        let sign = (self.learning_gene.hebbian_sign - 0.5) * 2.0; // -1 ~ 1
+        let rate = self.learning_gene.hebbian_rate;
+
+        // 收集需要更新的连接列表
+        let mut updates: Vec<((usize, usize), f64)> = Vec::new();
+
+        // 收集正向连接更新
+        for (&out_node, inputs_list) in &self.forward_inputs {
+            for &(in_node, _) in inputs_list {
+                let key = (in_node, out_node);
+                if let Some(&trace) = self.eligibility_traces.get(&key) {
+                    if trace.abs() > 0.001 {
+                        let delta = rate * trace * reward * sign;
+                        updates.push((key, delta));
+                    }
+                }
+            }
+        }
+
+        // 收集回环连接更新
+        for (&out_node, recurrent_list) in &self.recurrent_inputs {
+            for &(in_node, _) in recurrent_list {
+                let key = (in_node, out_node);
+                if let Some(&trace) = self.eligibility_traces.get(&key) {
+                    if trace.abs() > 0.001 {
+                        let delta = rate * trace * reward * sign;
+                        updates.push((key, delta));
+                    }
+                }
+            }
+        }
+
+        // 应用更新
+        for ((in_node, out_node), delta) in updates {
+            // 尝试在正向连接中更新
+            if let Some(inputs) = self.forward_inputs.get_mut(&out_node) {
+                for (src, weight) in inputs.iter_mut() {
+                    if *src == in_node {
+                        *weight = (*weight + delta).clamp(-2.0, 2.0);
+                        continue;
+                    }
+                }
+            }
+            // 尝试在回环连接中更新
+            if let Some(inputs) = self.recurrent_inputs.get_mut(&out_node) {
+                for (src, weight) in inputs.iter_mut() {
+                    if *src == in_node {
+                        *weight = (*weight + delta).clamp(-2.0, 2.0);
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // 清空资格迹（应用后）
+        for trace in self.eligibility_traces.values_mut() {
+            *trace *= 0.1; // 基本清零，但留一点尾巴
+        }
+
+        // 清空奖励信号
+        self.reward_signal = 0.0;
+    }
+
+    /// 获取学习基因引用
+    pub fn learning_gene(&self) -> &LearningGene {
+        &self.learning_gene
+    }
+
+    /// 获取奖励基因引用
+    pub fn reward_gene(&self) -> &RewardGene {
+        &self.reward_gene
     }
 }

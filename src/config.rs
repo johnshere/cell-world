@@ -78,8 +78,6 @@ pub struct Config {
     /// 接触判定距离
     pub contact_range: f64,
 
-    /// 变异率（所有变异逻辑共用）
-    pub mutation_rate: f64,
     /// 初始连接数最小值
     pub initial_connections_min: usize,
     /// 初始连接数最大值

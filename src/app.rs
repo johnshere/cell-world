@@ -434,14 +434,6 @@ impl CellWorldApp {
             let mut changed = false;
 
             ui.collapsing("进化与竞争", |ui| {
-                changed |= config_drag_f64(
-                    ui,
-                    "变异率",
-                    "所有NEAT变异共用此概率",
-                    &mut c.mutation_rate,
-                    0.01,
-                    0.01..=0.5,
-                );
                 changed |= config_drag_usize(
                     ui,
                     "初始连接min",

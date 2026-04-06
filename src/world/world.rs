@@ -854,7 +854,17 @@ impl World {
                     .unwrap_or(self.creatures[i].last_outputs);
                 self.creatures[i].last_outputs = outputs;
 
+                let energy_before = self.creatures[i].energy;
                 self.execute_actions(i, &outputs.to_vec(), dt, config);
+
+                // 计算奖励信号并应用到脑
+                let energy_delta = self.creatures[i].energy - energy_before;
+                if energy_delta != 0.0 {
+                    let reward = (energy_delta / config.initial_energy)
+                        .clamp(-1.0, 1.0);
+                    self.creatures[i].brain.set_reward_signal(reward);
+                    self.creatures[i].brain.apply_reward();
+                }
 
                 if need_per_creature_timing {
                     let main_ns = creature_t0.elapsed().as_nanos() as u64;
@@ -874,7 +884,17 @@ impl World {
                     self.creatures[i].last_outputs[j] = v;
                 }
 
+                let energy_before = self.creatures[i].energy;
                 self.execute_actions(i, &outputs, dt, config);
+
+                // 计算奖励信号并应用到脑
+                let energy_delta = self.creatures[i].energy - energy_before;
+                if energy_delta != 0.0 {
+                    let reward = (energy_delta / config.initial_energy)
+                        .clamp(-1.0, 1.0);
+                    self.creatures[i].brain.set_reward_signal(reward);
+                    self.creatures[i].brain.apply_reward();
+                }
 
                 if need_per_creature_timing {
                     let main_ns = creature_t0.elapsed().as_nanos() as u64;

@@ -587,6 +587,19 @@ impl StatsPanel {
                             o[6].max(0.0)
                         ));
                     });
+
+                    // 神经网络结构
+                    ui.separator();
+                    let conn_count = creature.genome.connections.len();
+                    let node_count = creature.genome.nodes.len();
+                    let hidden = node_count.saturating_sub(
+                        crate::neural::Genome::INPUT_SIZE + crate::neural::Genome::OUTPUT_SIZE,
+                    );
+                    let mutation_rate = creature.genome.mutation_rate;
+                    ui.label(format!(
+                        "节点:{} (隐:{})  连接:{}  变异率:{:.2}",
+                        node_count, hidden, conn_count, mutation_rate
+                    ));
                 }
             }
             Selection::Energy(id) => {

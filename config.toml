@@ -1,7 +1,7 @@
 # 初始模拟速度
 initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 60
+min_creatures = 50
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 500
 # 初始能量
@@ -17,17 +17,17 @@ volcano_y = 0.0
 # 火山喷发间隔（秒）
 volcano_interval = 30.0
 # 火山喷射半径
-volcano_radius = 2200.0
+volcano_radius = 2300.0
 # 每次喷发粒子数
-volcano_count = 40
+volcano_count = 55
 # 火山粒子能量
 volcano_particle_energy = 180.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
-volcano_interval_cycle = 1200.0
+volcano_interval_cycle = 1500.0
 # 火山间隔振幅比（0~0.9）
-volcano_interval_amplitude = 0.25
+volcano_interval_amplitude = 0.2
 # 火山能量正弦周期（秒）
 volcano_energy_cycle = 1000.0
 # 火山能量振幅比（0~0.9）
@@ -38,9 +38,9 @@ volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 35.0
+volcano_kill_radius = 2.0
 # 落地杀伤系数
-landing_damage_multiplier = 1.0
+landing_damage_multiplier = 1.5
 
 # === 温泉 ===
 # 温泉最大同时活跃数量
@@ -82,11 +82,11 @@ heat_floor = 0.05
 
 # === 代谢 ===
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
-age_metabolism_factor = 0.02
+age_metabolism_factor = 0.025
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗（每单位距离）
-move_cost = 0.0005
+move_cost = 0.0004
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.6
 # === 体温 ===
@@ -103,8 +103,6 @@ vision_range = 115.0
 contact_range = 15.0
 
 # === 进化 ===
-# 变异率（所有变异逻辑共用）
-mutation_rate = 0.15
 # 初始连接数最小值
 initial_connections_min = 6
 # 初始连接数最大值
@@ -135,7 +133,7 @@ reproduce_cooldown = 20.0
 
 # === 算力能量 ===
 # 算力转能量系数（内部除以1亿，0 = 禁用）
-compute_energy_factor = 10.0
+compute_energy_factor = 10.5
 
 # === SNN ===
 # 每帧 SNN tick 数（同步模式）
@@ -157,5 +155,6 @@ meteorite_energy_cycle = 0.0
 meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
-stop_on_extinction = false
-auto_spawn_interval = 40.0
+stop_on_extinction = true
+auto_spawn_interval = 25.0
+mutation_rate = 0.15
