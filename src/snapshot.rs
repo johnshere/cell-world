@@ -110,11 +110,6 @@ impl WorldSnapshot {
         std::path::Path::new(SNAPSHOT_PATH).exists()
     }
 
-    /// 返回存档中的配置
-    pub fn config(&self) -> &Config {
-        &self.config
-    }
-
     /// 重建完整 World
     pub fn into_world(mut self) -> (World, Config) {
         let config = self.config.clone();

@@ -102,29 +102,6 @@ impl NeuralBridge {
         self.running.store(false, Ordering::Relaxed);
     }
 
-    // === 神经线程侧 API ===
-
-    /// 读取输入（神经线程调用，take 替代 clone 避免分配）
-    pub(crate) fn read_inputs_back(&self) -> Vec<CreatureInput> {
-        if let Ok(mut back) = self.input_back.lock() {
-            std::mem::take(&mut *back)
-        } else {
-            Vec::new()
-        }
-    }
-
-    /// 写入输出（神经线程调用）
-    pub(crate) fn write_outputs_back(&self, outputs: Vec<CreatureOutput>) {
-        if let Ok(mut back) = self.output_back.lock() {
-            *back = outputs;
-        }
-    }
-
-    /// 检查是否仍在运行
-    pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::Relaxed)
-    }
-
     /// 创建线程侧句柄（克隆 Arc 引用）
     pub fn thread_handle(&self) -> NeuralBridgeHandle {
         NeuralBridgeHandle {

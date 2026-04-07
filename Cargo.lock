@@ -585,7 +585,7 @@ dependencies = [
 
 [[package]]
 name = "cell-world"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "bytemuck",
  "chrono",

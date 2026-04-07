@@ -99,9 +99,6 @@ pub struct World {
     /// 种族源头基因组：clan_hash -> 建族者的 genome（用于后代相似度比较）
     clan_genomes: FxHashMap<u64, Genome>,
 
-    /// 火山喷发半径（动态根据可视空间计算）
-    pub volcano_radius: f64,
-
     /// 优势种库
     pub dominant_species: Vec<DominantCandidate>,
 
@@ -114,16 +111,8 @@ pub struct World {
 /// 种族缓存（祖先追溯模型）
 #[derive(Clone)]
 struct ClanCache {
-    /// 活生物在 creatures 数组中的原始索引
-    alive_indices: Vec<usize>,
-    /// 种族数量
-    species_count: usize,
-    /// 前三种族
-    top_species: Vec<RankedEntry>,
     /// 活生物局部索引 -> 族长 creature id
     creature_clan_map: FxHashMap<usize, u64>,
-    /// 族长 id -> 族长 genome_hash（用于颜色）
-    clan_color: FxHashMap<u64, u64>,
 }
 
 impl World {
@@ -168,7 +157,6 @@ impl World {
             neural_output_cache: FxHashMap::default(),
             neural_compute_cache: FxHashMap::default(),
             clan_genomes: FxHashMap::default(),
-            volcano_radius: config.volcano_radius,
             dominant_species: Vec::new(),
             stop_extinction_triggered: false,
             auto_spawn_timer: 0.0,
@@ -346,7 +334,7 @@ impl World {
         trail_disabled: bool,
         clan_genomes: FxHashMap<u64, Genome>,
         dominant_species: Vec<DominantCandidate>,
-        config: &Config,
+        _config: &Config,
     ) -> Self {
         Self {
             creatures,
@@ -386,7 +374,6 @@ impl World {
             neural_output_cache: FxHashMap::default(),
             neural_compute_cache: FxHashMap::default(),
             clan_genomes,
-            volcano_radius: config.volcano_radius,
             dominant_species,
             stop_extinction_triggered: false,
             auto_spawn_timer: 0.0,
@@ -1418,15 +1405,6 @@ impl World {
             .filter(|e| e.alive)
             .map(|e| e.energy)
             .sum();
-        // 当前时刻理论单次投放总能量（火山 + 温泉）
-        let spring_energy: f64 = self
-            .hot_springs
-            .iter()
-            .filter(|s| s.alive)
-            .map(|s| {
-                config.spring_particle_energy * config.spring_emit_count as f64 * s.output_factor()
-            })
-            .sum();
         // 理论投放速率（能量/秒）：火山每秒投放 + 温泉每秒投放
         let volcano_interval = config.current_volcano_interval(self.time);
         let volcano_rate = if volcano_interval > 0.0 {
@@ -1649,11 +1627,7 @@ impl World {
         let n = alive_creatures.len();
         if n == 0 {
             return ClanCache {
-                alive_indices: Vec::new(),
-                species_count: 0,
-                top_species: Vec::new(),
                 creature_clan_map: FxHashMap::default(),
-                clan_color: FxHashMap::default(),
             };
         }
 
@@ -1672,44 +1646,7 @@ impl World {
             creature_clan_map.insert(i, leader_id);
         }
 
-        // 构建族长颜色映射和统计
-        let mut clan_color: FxHashMap<u64, u64> = FxHashMap::default();
-        let mut clan_counts: FxHashMap<u64, usize> = FxHashMap::default();
-
-        for i in 0..n {
-            let leader_id = creature_clan_map[&i];
-            *clan_counts.entry(leader_id).or_insert(0) += 1;
-            clan_color.entry(leader_id).or_insert_with(|| {
-                id_to_local
-                    .get(&leader_id)
-                    .map(|&local| alive_creatures[local].genome_hash)
-                    .unwrap_or(0)
-            });
-        }
-
-        let species_count = clan_counts.len();
-
-        let mut species_vec: Vec<_> = clan_counts
-            .into_iter()
-            .map(|(leader_id, count)| RankedEntry {
-                id: leader_id as usize,
-                count,
-            })
-            .collect();
-        species_vec.sort_by(|a, b| b.count.cmp(&a.count));
-        let top_species: Vec<_> = species_vec.into_iter().take(3).collect();
-
-        let alive_indices: Vec<usize> = (0..self.creatures.len())
-            .filter(|&i| self.creatures[i].alive)
-            .collect();
-
-        ClanCache {
-            alive_indices,
-            species_count,
-            top_species,
-            creature_clan_map,
-            clan_color,
-        }
+        ClanCache { creature_clan_map }
     }
 
     /// 沿 parent_id 向上追溯，找到最老的活祖先，
@@ -2097,12 +2034,6 @@ pub struct DeathAgeStats {
     pub median: f64,
     pub max: f64,
     pub min: f64,
-}
-
-#[derive(Clone, Default)]
-pub struct RankedEntry {
-    pub id: usize,
-    pub count: usize,
 }
 
 #[derive(Clone, Default)]

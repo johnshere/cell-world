@@ -19,7 +19,7 @@ volcano_interval = 30.0
 # 火山喷射半径
 volcano_radius = 2300.0
 # 每次喷发粒子数
-volcano_count = 35
+volcano_count = 70
 # 火山粒子能量
 volcano_particle_energy = 185.0
 
@@ -38,13 +38,13 @@ volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 62.0
+volcano_kill_radius = 15.0
 # 落地杀伤系数
 landing_damage_multiplier = 1.7
 
 # === 温泉 ===
 # 温泉最大同时活跃数量
-spring_max_count = 9
+spring_max_count = 0
 # 温泉产生间隔（秒）
 spring_spawn_interval = 25.0
 # 温泉寿命（秒）
@@ -156,5 +156,4 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = true
-auto_spawn_interval = 45.0
-mutation_rate = 0.15
+auto_spawn_interval = 25.0

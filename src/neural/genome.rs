@@ -54,6 +54,11 @@ pub struct ConnProbsGene {
     pub proc: [f64; 5],
     /// Output层5方向概率
     pub out: [f64; 5],
+    /// 目标 block 偏好倍率（稀疏存储）
+    /// key=目标 block 编号，value=偏好倍率（>1=偏爱，<1=回避，缺省=1.0=中性）
+    /// 在 5 方向筛选出候选后，作为二次加权采样的权重
+    #[cfg_attr(feature = "persistence", serde(default))]
+    pub target_pref: HashMap<i8, f32>,
 }
 
 impl Default for ConnProbsGene {
@@ -62,6 +67,29 @@ impl Default for ConnProbsGene {
         Self {
             proc: [0.70, 0.15, 0.08, 0.02, 0.05],
             out: [0.10, 0.05, 0.55, 0.10, 0.20],
+            target_pref: HashMap::new(),
+        }
+    }
+}
+
+// ============================================================================
+/// 变异基因（控制各类变异的概率）
+// ============================================================================
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
+pub struct MutationGene {
+    /// 基础变异率：权重、启用/禁用、添加连接、SNN参数、layer切换
+    pub base: f64,
+    /// 分区变异率：block移动、区块概率基因变异
+    pub block: f64,
+}
+
+impl Default for MutationGene {
+    fn default() -> Self {
+        Self {
+            base: 0.15,
+            block: 0.15,
         }
     }
 }
@@ -133,6 +161,7 @@ impl Default for RewardGene {
 #[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
 pub struct NodeGene {
     pub id: usize,
+    /// 分区类型（Input/Output/Block(-31~31)）
     pub node_type: NodeType,
     /// 区内层类型（仅 Block 节点有意义）
     #[cfg_attr(feature = "persistence", serde(default = "default_layer"))]
@@ -172,8 +201,8 @@ pub struct Genome {
     /// 奖励基因
     pub reward: RewardGene,
 
-    /// 统一变异率基因 [0.01~0.30]
-    pub mutation_rate: f64,
+    /// 变异率基因
+    pub mutation_rate: MutationGene,
 
     next_node_id: usize,
     /// 预排序的启用连接缓存（用于快速 similarity 比较，避免每次重复排序+分配）
@@ -324,7 +353,7 @@ impl Genome {
             conn_probs: block_probs,
             learning: LearningGene::default(),
             reward: RewardGene::default(),
-            mutation_rate: 0.15,
+            mutation_rate: MutationGene::default(),
             next_node_id: next_id,
             sorted_conns_cache: Vec::new(),
         };
@@ -351,15 +380,16 @@ impl Genome {
             .sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
     }
 
-    /// 变异（统一使用 mutation_rate 基因）
+    /// 变异（分离 base 和 block 变异率）
     pub fn mutate(&self, conf: &Config) -> Self {
-        let rate = self.mutation_rate;
+        let base_rate = self.mutation_rate.base;
+        let block_rate = self.mutation_rate.block;
         let mut rng = rand::thread_rng();
         let mut child = self.clone();
 
         // 权重变异
         for conn in &mut child.connections {
-            if rng.gen::<f64>() < rate {
+            if rng.gen::<f64>() < base_rate {
                 if rng.gen::<f64>() < 0.9 {
                     // 微调
                     conn.weight += rng.gen_range(-0.5..0.5);
@@ -372,52 +402,40 @@ impl Genome {
         }
 
         // 添加连接变异
-        if rng.gen::<f64>() < rate {
+        if rng.gen::<f64>() < base_rate {
             child.mutate_add_connection(conf);
         }
 
-        // 添加节点变异
-        if rng.gen::<f64>() < rate {
-            child.mutate_add_node(rate);
+        // 添加节点变异（使用 base_rate）
+        if rng.gen::<f64>() < base_rate {
+            child.mutate_add_node(base_rate);
         }
 
         // 禁用/启用连接变异
-        if rng.gen::<f64>() < rate {
+        if rng.gen::<f64>() < base_rate {
             if let Some(conn) = child.connections.choose_mut(&mut rng) {
                 conn.enabled = !conn.enabled;
             }
         }
 
-        // SNN 参数变异 + Block/Layer 变异
+        // SNN 参数变异 + Layer 变异（使用 base_rate）
         for node in &mut child.nodes {
-            // Input/Output 固定节点不变异
             if !matches!(node.node_type, NodeType::Block(_)) {
                 continue;
             }
             // SNN 参数
-            if rng.gen::<f64>() < rate {
+            if rng.gen::<f64>() < base_rate {
                 node.decay = (node.decay + rng.gen_range(-0.1..0.1)).clamp(0.0, 0.99);
             }
-            if rng.gen::<f64>() < rate {
+            if rng.gen::<f64>() < base_rate {
                 node.threshold = (node.threshold + rng.gen_range(-0.15..0.15)).clamp(0.0, 2.0);
             }
-            if rng.gen::<f64>() < rate * 0.5 {
+            if rng.gen::<f64>() < base_rate * 0.5 {
                 let delta: i8 = if rng.gen_bool(0.5) { 1 } else { -1 };
                 node.refractory_period = (node.refractory_period as i8 + delta).clamp(0, 5) as u8;
             }
-            // Block 变异：小概率换区（仅联合区节点可变）
-            if let NodeType::Block(ref mut blk) = node.node_type {
-                if super::block::is_association(*blk) && rng.gen::<f64>() < rate {
-                    let delta: i8 = rng.gen_range(-2..=2);
-                    let new_blk = (*blk + delta).clamp(-24, 24);
-                    // 确保不落入感官区
-                    if super::block::is_association(new_blk) {
-                        *blk = new_blk;
-                    }
-                }
-            }
-            // Layer 变异：小概率切换 Processing ↔ Output
-            if rng.gen::<f64>() < rate {
+            // Layer 变异：使用 base_rate
+            if rng.gen::<f64>() < base_rate {
                 node.layer = match node.layer {
                     LayerType::Processing => LayerType::Output,
                     LayerType::Output => LayerType::Processing,
@@ -425,27 +443,58 @@ impl Genome {
             }
         }
 
-        // block_probs变异
-        child.mutate_block_probs_gene(rate);
-
-        // learning基因变异
-        child.mutate_learning_gene(rate);
-
-        // reward基因变异
-        child.mutate_reward_gene(rate);
-
-        // mutation_rate基因自身变异
-        if rng.gen::<f64>() < rate {
-            if rng.gen::<f64>() < 0.9 {
-                child.mutation_rate += rng.gen_range(-0.02..0.02);
-            } else {
-                child.mutation_rate = rng.gen_range(0.01..0.30);
+        // Block 变异（仅联合区节点可变，使用 block_rate）
+        for node in &mut child.nodes {
+            if let NodeType::Block(ref mut blk) = node.node_type {
+                if super::block::is_association(*blk) && rng.gen::<f64>() < block_rate {
+                    let delta: i8 = rng.gen_range(-2..=2);
+                    let new_blk = (*blk + delta).clamp(-24, 24);
+                    if super::block::is_association(new_blk) {
+                        *blk = new_blk;
+                    }
+                }
             }
-            child.mutation_rate = child.mutation_rate.clamp(0.01, 0.30);
         }
+
+        // block_probs变异（使用 block_rate）
+        child.mutate_block_probs_gene(block_rate);
+
+        // learning基因变异（使用 base_rate）
+        child.mutate_learning_gene(base_rate);
+
+        // reward基因变异（使用 base_rate）
+        child.mutate_reward_gene(base_rate);
+
+        // mutation_rate基因自身变异：base 和 block 独立变异
+        child.mutate_mutation_rate_gene();
 
         child.rebuild_sorted_cache();
         child
+    }
+
+    /// mutation_rate基因自身变异（base 和 block 独立变异）
+    fn mutate_mutation_rate_gene(&mut self) {
+        let mut rng = rand::thread_rng();
+
+        // base 变异
+        if rng.gen::<f64>() < self.mutation_rate.base {
+            if rng.gen::<f64>() < 0.9 {
+                self.mutation_rate.base += rng.gen_range(-0.02..0.02);
+            } else {
+                self.mutation_rate.base = rng.gen_range(0.01..0.30);
+            }
+            self.mutation_rate.base = self.mutation_rate.base.clamp(0.01, 0.30);
+        }
+
+        // block 变异
+        if rng.gen::<f64>() < self.mutation_rate.block {
+            if rng.gen::<f64>() < 0.9 {
+                self.mutation_rate.block += rng.gen_range(-0.02..0.02);
+            } else {
+                self.mutation_rate.block = rng.gen_range(0.01..0.30);
+            }
+            self.mutation_rate.block = self.mutation_rate.block.clamp(0.01, 0.30);
+        }
     }
 
     /// block_probs基因变异（使用统一rate）
@@ -456,6 +505,62 @@ impl Genome {
         for (_, probs) in &mut self.conn_probs {
             if rng.gen::<f64>() < rate {
                 Self::mutate_single_block_probs(probs, &mut rng);
+            }
+            // target_pref 三种操作：扰动 / 添加 / 删除
+            Self::mutate_target_pref(probs, rate, &mut rng);
+        }
+    }
+
+    /// target_pref 变异：扰动现有条目 + 添加新条目 + 删除冷条目
+    fn mutate_target_pref(probs: &mut ConnProbsGene, rate: f64, rng: &mut impl Rng) {
+        const MAX_ENTRIES: usize = 16;
+
+        // 操作1：扰动现有条目（对数空间，每条目独立判定）
+        for w in probs.target_pref.values_mut() {
+            if rng.gen::<f64>() < rate {
+                let delta: f32 = rng.gen_range(-0.2..0.2);
+                *w *= delta.exp();
+                *w = w.clamp(0.1, 10.0);
+            }
+        }
+
+        // 操作2：添加新条目（中频）
+        if probs.target_pref.len() < MAX_ENTRIES && rng.gen::<f64>() < rate * 0.5 {
+            // 在 -31..=31（排除 0）中随机选一个未出现的目标 block
+            for _ in 0..8 {
+                let candidate: i8 = rng.gen_range(-31..=31);
+                if candidate == 0 || probs.target_pref.contains_key(&candidate) {
+                    continue;
+                }
+                let initial: f32 = 1.0 + rng.gen_range(-0.3..0.3);
+                probs.target_pref.insert(candidate, initial);
+                break;
+            }
+        }
+
+        // 操作3：删除最接近 1.0 的冷条目（控制熵）
+        if !probs.target_pref.is_empty() && rng.gen::<f64>() < rate * 0.2 {
+            if let Some((&k, _)) = probs.target_pref.iter().min_by(|a, b| {
+                (a.1 - 1.0)
+                    .abs()
+                    .partial_cmp(&(b.1 - 1.0).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }) {
+                probs.target_pref.remove(&k);
+            }
+        }
+
+        // 上限保护：超过 MAX_ENTRIES 时强制删除最冷条目
+        while probs.target_pref.len() > MAX_ENTRIES {
+            if let Some((&k, _)) = probs.target_pref.iter().min_by(|a, b| {
+                (a.1 - 1.0)
+                    .abs()
+                    .partial_cmp(&(b.1 - 1.0).abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }) {
+                probs.target_pref.remove(&k);
+            } else {
+                break;
             }
         }
     }
@@ -601,7 +706,7 @@ impl Genome {
     }
 
     /// 添加连接变异（分区分层感知，加权概率采样）
-    fn mutate_add_connection(&mut self, conf: &Config) {
+    fn mutate_add_connection(&mut self, _conf: &Config) {
         use super::block;
         let mut rng = rand::thread_rng();
 
@@ -692,7 +797,34 @@ impl Genome {
                 continue; // 该类别无候选，重新采样
             }
 
-            let to_idx = matching[rng.gen_range(0..matching.len())];
+            // 按源 block 的 target_pref 做加权采样：缺省 1.0=中性
+            let from_pref = self.conn_probs.get(&from_blk);
+            let to_idx = {
+                let weights: Vec<f32> = matching
+                    .iter()
+                    .map(|&i| {
+                        let to_blk = Self::node_block(&self.nodes[i]);
+                        from_pref
+                            .and_then(|p| p.target_pref.get(&to_blk).copied())
+                            .unwrap_or(1.0)
+                    })
+                    .collect();
+                let total: f32 = weights.iter().sum();
+                if total <= 0.0 {
+                    matching[rng.gen_range(0..matching.len())]
+                } else {
+                    let mut r = rng.gen::<f32>() * total;
+                    let mut chosen = matching[matching.len() - 1];
+                    for (k, &i) in matching.iter().enumerate() {
+                        r -= weights[k];
+                        if r <= 0.0 {
+                            chosen = i;
+                            break;
+                        }
+                    }
+                    chosen
+                }
+            };
             let to_id = self.nodes[to_idx].id;
 
             let exists = self
@@ -790,21 +922,6 @@ impl Genome {
             conn.out_node.hash(&mut hasher);
             ((conn.weight * 1000.0) as i64).hash(&mut hasher);
         }
-        hasher.finish()
-    }
-
-    /// 计算结构哈希（只看连接拓扑，忽略权重）
-    /// 用于种群聚类的快速分桶预过滤
-    pub fn structural_hash(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        let mut keys: Vec<(usize, usize)> = self
-            .connections
-            .iter()
-            .filter(|c| c.enabled)
-            .map(|c| (c.in_node, c.out_node))
-            .collect();
-        keys.sort();
-        keys.hash(&mut hasher);
         hasher.finish()
     }
 
@@ -945,7 +1062,15 @@ impl Genome {
                                 *p /= out_sum;
                             }
                         }
-                        ConnProbsGene { proc, out }
+                        // target_pref 合并：并集，重叠键取几何平均
+                        let mut target_pref: HashMap<i8, f32> = fp.target_pref.clone();
+                        for (&k, &wv) in &wp.target_pref {
+                            target_pref
+                                .entry(k)
+                                .and_modify(|fv| *fv = (*fv * wv).sqrt())
+                                .or_insert(wv);
+                        }
+                        ConnProbsGene { proc, out, target_pref }
                     }
                     (Some(p), None) | (None, Some(p)) => p.clone(),
                     (None, None) => ConnProbsGene::default(),
@@ -989,7 +1114,10 @@ impl Genome {
             conn_probs: child_block_probs,
             learning: child_learning,
             reward: child_reward,
-            mutation_rate: (fitter.mutation_rate + weaker.mutation_rate) / 2.0,
+            mutation_rate: MutationGene {
+                base: (fitter.mutation_rate.base + weaker.mutation_rate.base) / 2.0,
+                block: (fitter.mutation_rate.block + weaker.mutation_rate.block) / 2.0,
+            },
             next_node_id,
             sorted_conns_cache: Vec::new(),
         };

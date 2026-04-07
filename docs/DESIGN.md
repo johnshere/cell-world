@@ -54,56 +54,69 @@
 
 ## 四、神经网络设计
 
-### 感知系统（双眼 + 温度通道，带冷却）
+### 感知系统（扫描眼）
 
 ```
-       左眼(140°)    右眼(140°)
-      heading-50°    heading+50°
-         \              /
-          \            /
-           ○ (生物)
+       左眼FOV(140°)    右眼FOV(140°)
+       heading+20°      heading-20°
+            \              /
+             \            /
+              ○ (生物)
 ```
 
-- **双眼**：±50° 方向，各 70° 半角（单眼140°视野，左右重叠40°），最近距离模型，冷却 0.075s
-  - 探测距离 = vision_range（固定）
-  - 从眼睛位置（体表）计算距离，而非身体中心
-  - 每只眼新增**热感温度通道**：视锥方向中点的火山热 + 视锥内生物集体热
-- **自身状态**：2通道，始终更新（不受冷却影响）
+- **双眼窄波束扫描**：每只眼在 140° FOV 内逐帧扫描一条窄波束
+  - 扫描速度 `eye_scan_speed = 280°/s`
+  - 左眼起点 `heading + 20°`，逆时针扫；右眼起点 `heading - 20°`，顺时针扫
+  - 探测距离 = `vision_range`，从生物身体中心起算
+- **波束目标类型**（最近一个）：
+  - 能量粒子 → `type = 0.33`
+  - 痕迹点（非自身）→ `type = 0.67`
+  - 其他生物 → `type = 1.0`
+- **全 FOV 能量密度**：对每只眼整个 140° 内所有粒子+痕迹+生物按 `Σ energy / dist²` 累加（与散热公式中 `nearby_energy` 含义一致）
+- **基因相似度**：仅当波束最近目标是生物时才计算 similarity，其他类型时复用为"是否同族"标志（痕迹0/1，能量粒子=0）
+- **朝向差 / 速度差**：仅当最近目标是生物时有值，否则为 0
+- **自身状态**：1 通道，每帧都更新
 
-### 输入（10维）
+### 输入（17 维）
 
 ```
-左眼 (4通道) [0..3]:
-  [0] 食物接近度（最近，1-dist/range）
-  [1] 同族接近度（最近）
-  [2] 异族接近度（最近）
-  [3] 热感温度（视锥方向火山热 + 视锥内生物集体热）
+左眼 [0..7]:
+  [0] 扫描角度归一化  (-1 ~ 1)
+  [1] 目标接近度       body_radius / (body_radius + dist)
+  [2] 目标能量         (energy / 200).min(1)
+  [3] 实体类型         {0, 0.33, 0.67, 1.0}
+  [4] 同族度/相似度    生物→similarity；痕迹→is_ally(0/1)；粒子→0
+  [5] FOV 能量密度     (Σ energy/dist² / energy_denominator).min(1)
+  [6] 目标朝向差       仅生物：angle_diff / π；否则 0
+  [7] 目标速度差       仅生物：(Δspeed / max_speed).clamp(-1,1)；否则 0
 
-右眼 (4通道) [4..7]:
-  [4] 食物接近度
-  [5] 同族接近度
-  [6] 异族接近度
-  [7] 热感温度
+右眼 [8..15]:
+  [8..15] 同左眼，结构对称
 
-自身状态 (2通道) [8..9]:
-  [8] 自身能量 (energy/200, clamp 0~1)
-  [9] 当前环境温度 (env_temp = 火山热 + 集体热, clamp 0~1)
+自身状态 [16]:
+  [16] 自身能量        (energy / 2000).min(1)
 ```
 
-### 输出（6维，固定）
+> 常量来源：`Genome::INPUT_SIZE = 17`，写入逻辑见 `src/world/world.rs::compute_perception_pure`。
 
-| 编号 | 功能 | 输出范围 | 说明 |
-|------|------|---------|------|
-| 0 | 转向角 | tanh(-1~1) | × 2π = 每秒转向弧度 |
-| 1 | 速度 | tanh(-1~1) | abs × 25 = 每秒移动距离 |
-| 2 | 嘴 | tanh(-1~1) | <-0.1 咬（捕食）；>+0.1 喂（哺育） |
-| 3 | 繁殖意愿 | tanh(-1~1) | >0.2 时触发繁殖 |
-| 4 | 繁殖阈值 | tanh→sigmoid | 映射到 20~200 能量阈值 |
-| 5 | 子代能量比例 | tanh→sigmoid | 映射到 0.1~0.5 |
+### 输出（7 维，固定，全部直读 tanh）
+
+| 编号 | 功能         | 输出范围   | 说明 |
+|------|--------------|-----------|------|
+| 0    | 转向角       | tanh -1~1 | × 2π = 每秒转向弧度（最大每秒一圈） |
+| 1    | 速度         | tanh -1~1 | abs × `max_speed` = 每秒移动距离 |
+| 2    | 嘴           | tanh -1~1 | < -0.1 咬（攻击），冷却 1s；接触食物自动吸收（不受冷却限制） |
+| 3    | 繁殖意愿     | tanh -1~1 | > 0.2 时触发繁殖，冷却 10s |
+| 4    | 繁殖阈值     | tanh→sig  | 映射到 20~200 能量阈值 |
+| 5    | 子代能量比例 | tanh→sig  | 映射到 0.1~0.5 |
+| 6    | 痕迹强度     | tanh -1~1 | 取正半轴 → 0~0.3，作为自身能量比例额外投放痕迹 |
+
+> 常量来源：`Genome::OUTPUT_SIZE = 7`，执行逻辑见 `src/world/world.rs::execute_actions`。
+> 喂食机制已移除，能量分享通过痕迹点实现。
 
 ### 激活函数
 
-- 隐藏层 + 输出层：tanh（范围 -1 ~ +1）
+- SNN 节点：膜电位 + 阈值发放（直读模式取膜电位 tanh）
 
 ---
 
@@ -126,14 +139,39 @@ struct Genome {
 }
 ```
 
-### 变异类型
+### 变异率基因 MutationGene
+
+变异率不再是全局 config，而是基因组内自演化的双速率：
+
+```rust
+struct MutationGene {
+    base: f64,   // 默认 0.15，clamp 0.01~0.30
+    block: f64,  // 默认 0.15，clamp 0.01~0.30
+}
+```
+
+- **base**：控制权重 / 连接增删 / SNN 参数 / Layer 切换 / learning / reward / mutation_rate 自身变异
+- **block**：控制联合区 block 编号迁移、conn_probs 区块概率基因变异
+- 两者各自独立演化（自变异时彼此独立）
+
+### 变异类型（base 速率）
 
 | 变异 | 触发概率 | 说明 |
 |------|----------|------|
-| 权重变异 | 15% 每条连接 | 90% 微调 ±0.5，10% 重置 [-1,1] |
-| 新增连接 | 15% | 随机连接两个节点 |
-| 新增节点 | 15% | 拆分现有连接，插入隐藏节点 |
-| 开关连接 | 15% | 启用/禁用随机连接 |
+| 权重变异 | base，每条连接 | 90% 微调 ±0.5，10% 重置 [-1,1] |
+| 新增连接 | base | 随机连接两个节点（受 conn_probs 加权） |
+| 新增节点 | base | 拆分现有连接，插入隐藏节点 |
+| 开关连接 | base | 启用/禁用随机连接 |
+| SNN 参数 | base | decay / threshold / refractory_period 抖动 |
+| Layer 切换 | base | Block 节点 Processing ↔ Output |
+| Learning/Reward | base | 学习/奖励基因抖动 |
+
+### 变异类型（block 速率）
+
+| 变异 | 触发概率 | 说明 |
+|------|----------|------|
+| Block 迁移 | block | 联合区节点 block 编号 ±2 移动（限制在 8~24） |
+| ConnProbs   | block | 区块连接概率基因抖动 |
 
 ---
 
@@ -162,40 +200,38 @@ struct TrailPoint {
 
 ---
 
-## 七、环境温度（火山热 + 集体热）
+## 七、体温逸散（指数衰减 + floor）
 
-### 火山热公式
+旧的"火山热 + 集体热 + env_temp"模型已替换为更简洁的**反距离能量密度**模型，核心是 `nearby_energy`。
 
-```
-linear = (1 - dist_to_volcano / volcano_heat_range).clamp(0, 1)
-volcano_temp = linear³  // 三次方衰减，火山口附近极热、远处急剧下降
-```
-
-### 集体热公式
+### 周围能量
 
 ```
-group_energy = Σ(nearby_creatures.energy)  // group_heat_radius 范围内
-group_temp = group_energy / group_heat_denominator
-env_temp = min(volcano_temp + group_temp, 1.0)
+nearby_energy = Σ energy(particle, in vision_range)
+              + Σ energy(creature,  in vision_range)
 ```
 
-### 体温逸散
+### 散热公式
 
 ```
-body_radius = (energy × 1.28)^(1/3)
+body_radius   = (energy × 1.28)^(1/3)
 circumference = body_radius × 2π
-heat_cost = heat_dissipation_coefficient × circumference / (env_temp + 0.01) × dt
+
+heat_factor = heat_floor
+            + (1 - heat_floor) × exp(-nearby_energy / energy_denominator)
+
+heat_cost = heat_dissipation_coefficient × circumference × heat_factor × dt
 ```
 
-- env_temp 越低散热越快
-- 集群可减缓散热（集体热提升 env_temp）
+- `heat_factor` ∈ `[heat_floor, 1.0]`
+- 荒野（`nearby_energy = 0`）：`heat_factor = 1.0`，散热最大
+- 能量丰富区：`heat_factor → heat_floor`，散热最小但有上界
 - 小体型生物周长/能量比更大，散热更快
+- **集群涌现核心**：聚集 → `nearby_energy ↑` → `heat_factor ↓` → 存活率提升
 
-### 眼睛热感通道
+### 全 FOV 能量密度（眼睛通道 5/13）
 
-每只眼的热感温度 = 视锥方向中点的火山热 + 视锥内生物能量/group_heat_denominator
-
-这让生物可以感知不同方向的温度差异，进化出向暖区或集群方向移动的能力。
+每只眼整个 140° FOV 内 `Σ energy / dist²`，与散热公式中 `nearby_energy` 同源，只是带反距离²加权。这让生物可以感知不同方向的能量浓度，进化出向暖区/集群移动的能力。
 
 ### 落地杀伤
 
@@ -207,25 +243,21 @@ heat_cost = heat_dissipation_coefficient × circumference / (env_temp + 0.01) ×
 
 ### 吸收
 
-- 接触能量粒子：自动吸收，获得剩余能量（不受嘴巴冷却限制）
-- 接触痕迹点：自动吸收
+- 接触能量粒子：自动吸收，获得剩余能量（**不受嘴巴冷却限制**）
+- 接触痕迹点（非自身）：自动吸收
 
-### 咬（捕食，受冷却限制）
+### 咬（攻击，受冷却限制）
 
 ```
 条件：嘴输出 < -0.1，且接触到其他生物
-咬合力 = |mouth_output|
-攻方战力 = combat_power(energy, env_temp, speed, ally_energy) × 咬合力
-伤害 = 战力比 × bite_transfer_rate (0.4)
-无额外咬消耗
+咬合力     = |mouth_output|
+攻方战力   = combat_power(energy, speed, 同族援助) × 咬合力
+守方战力   = combat_power(...)
+伤害       = 战力比 × bite_transfer_rate
+无额外咬消耗，冷却 1s
 ```
 
-### 喂（哺育，受冷却限制）
-
-```
-条件：嘴输出 > +0.1，且接触到其他生物
-效果：转移能量，效率 85%
-```
+> 喂食（哺育）机制已**移除**。能量分享通过痕迹点系统实现：生物投放痕迹（输出 6 控制强度），其他生物可吃到。
 
 ### 繁殖
 
@@ -265,91 +297,88 @@ heat_cost = heat_dissipation_coefficient × circumference / (env_temp + 0.01) ×
 ## 十、配置参数
 
 参数定义于 `config.toml`，运行时通过 UI 面板可动态调整并自动保存。
+完整字段列表见仓库根目录 `config.toml`，下表为关键分组示例（数值仅供参考）。
 
 ```toml
-# 速度与初始化
-initial_speed = 3.0
-min_creatures = 60
+# 初始化
+initial_speed = 10.0
+min_creatures = 50
+max_creatures = 500
 initial_energy = 160.0
-initial_scale = 0.6
 
 # 火山
-volcano_x = 0.0
-volcano_y = 0.0
-volcano_interval = 60.0
-volcano_radius = 900.0
-volcano_count = 130
-volcano_particle_energy = 80.0
-volcano_decay_rate = 0.035
+volcano_interval = 30.0
+volcano_radius = 2300.0
+volcano_count = 35
+volcano_particle_energy = 185.0
+volcano_decay_rate = 0.001
+volcano_kill_radius = 62.0
+landing_damage_multiplier = 1.7
 
-# 陨石
-meteorite_interval = 40.0
-meteorite_count = 20
-meteorite_length = 350.0
-meteorite_particle_energy = 120.0
-meteorite_decay_rate = 0.01
+# 火山正弦周期调制
+volcano_interval_cycle = 1500.0
+volcano_interval_amplitude = 0.2
+volcano_energy_cycle = 1000.0
+volcano_energy_amplitude = 0.1
 
-# 正弦周期调制
-volcano_interval_cycle = 700.0
-volcano_interval_amplitude = 0.7
-volcano_energy_cycle = 300.0
-volcano_energy_amplitude = 0.5
-meteorite_interval_cycle = 400.0
-meteorite_interval_amplitude = 0.9
-meteorite_energy_cycle = 250.0
-meteorite_energy_amplitude = 0.9
+# 温泉（动态出现/消失的次级能量源）
+spring_max_count = 9
+spring_spawn_interval = 25.0
+spring_lifetime = 901.0
+spring_emit_interval = 8.0
+spring_emit_count = 1
+spring_particle_energy = 200.0
+spring_radius = 175.0
+spring_decay_rate = 0.002
+spring_min_distance = 530.0
+spring_max_distance = 670.0
 
-# 落地杀伤
-volcano_kill_radius = 20.0
-meteorite_kill_radius = 40.0
-
-# 冷却
-eye_cooldown = 0.075
-mouth_cooldown = 1.0
+# 感知 / 嘴 / 战斗
+eye_scan_speed = 400.0       # 度/秒，扫描眼角速度
+mouth_cooldown = 0.5
 bite_transfer_rate = 0.4
+vision_range = 115.0
+contact_range = 15.0
+combat_speed_weight = 2.0
+combat_ally_weight = 0.2
 
-# 环境温度
-volcano_heat_range = 1300.0
-cold_loss_factor = 1.0
-thermal_mass_factor = 12.0
-
-# 集体热效应
-group_heat_radius = 150.0
-group_heat_denominator = 5000.0
+# 散热（指数衰减 + floor 模型）
+energy_denominator = 450.0
+heat_floor = 0.05
+heat_dissipation_coefficient = 0.001
 
 # 代谢
-base_metabolism = 0.035
-age_metabolism_factor = 0.03
-move_cost = 0.0003
-heat_dissipation_coefficient = 0.006
-feed_efficiency = 0.85
-
-# 感知
-vision_range = 150.0
-contact_range = 15.0
+base_metabolism = 0.025
+age_metabolism_factor = 0.025
+metabolism_exponent = 2.0
+move_cost = 0.0005
+follow_cost_discount = 0.6
+max_speed = 20.0
 
 # 进化
-mutation_rate = 0.15
+# 注：变异率已迁移至基因组内 MutationGene { base, block }，由生物自身演化
 initial_connections_min = 6
 initial_connections_max = 12
-species_similarity_threshold = 0.9
-
-# 战力
-combat_temp_weight = 0.5
-combat_speed_weight = 0.3
-combat_ally_weight = 0.8
-combat_ally_range = 50.0
-
-# 优势种
-dominant_min_age = 350.0
+species_similarity_threshold = 0.95
+dominant_min_age = 250.0
 
 # 痕迹点
-trail_decay_rate = 0.12
-trail_suppress_radius = 10.0
-trail_emit_interval = 0.25
+trail_decay_rate = 0.01
+trail_suppress_radius = 12.0
+trail_emit_interval = 0.4
 
 # 繁殖
-reproduce_cooldown = 10.0
+reproduce_cooldown = 20.0
+
+# SNN 神经后端
+neural_backend = "auto"        # auto | cpu | gpu | legacy
+snn_ticks_per_frame = 10
+neural_tick_rate = 600.0
+compute_energy_factor = 10.5   # 算力转能量（除以 1e8，0 = 禁用）
+
+# 灭绝
+stop_on_extinction = true
+auto_spawn_interval = 45.0
 ```
 
 ---
@@ -361,18 +390,25 @@ reproduce_cooldown = 10.0
 
 ### v1.0 - 简化版 ✅
 - [x] 删除器官基因系统（鼻子/眼睛/嘴巴开关和功率基因）
-- [x] 简化感知为纯双眼系统（10维输入）
-- [x] 新增集体热效应（group_heat_radius + group_heat_denominator）
-- [x] 眼睛热感温度通道（感知不同方向的温度，支持趋暖行为）
-- [x] 简化体温逸散（coefficient × circumference / env_temp × dt）
-- [x] 删除咬消耗，提高咬转移率至 0.4
+- [x] 简化感知为纯双眼系统
 - [x] 痕迹点系统保留
 - [x] 正弦周期调制保留
 - [x] 神经控制繁殖保留
 - [x] 落地杀伤保留
 
+### v2.x - SNN + 分区 + 双速率变异 ✅
+- [x] 神经后端从前馈 NEAT 切到 **SNN（脉冲神经网络）**，节点带膜电位/阈值/不应期
+- [x] 引入 Block 分区编号（感官区/联合区/运动区）+ Layer（Processing/Output）+ ConnProbsGene 区块连接概率基因
+- [x] **17 维感知**：双眼扫描波束（左右各 8 通道）+ 自身能量（1 通道）
+- [x] **7 维输出**：增加痕迹强度输出（输出 6）；喂食机制移除
+- [x] **散热模型重写**：旧 env_temp/group_heat 替换为 `heat_floor + (1-heat_floor)·exp(-nearby_energy/energy_denominator)`
+- [x] **变异率拆分**：`MutationGene { base, block }`，由生物自演化
+- [x] **温泉系统**：动态生成/消亡的次级能量源
+- [x] **算力换能量**：神经计算时长可转化为生物能量（compute_energy_factor）
+- [x] 多神经后端：CPU SNN / GPU SNN / 可选异步线程
+
 ### 未来方向
-- [ ] 并行计算（rayon）
-- [ ] 参数调优与进化实验
 - [ ] 长时间运行稳定性验证
 - [ ] 可视化增强（进化树、基因拓扑）
+- [ ] 优势种命名加入存活时长信息
+- [ ] 痕迹点颜色随生物颜色同步

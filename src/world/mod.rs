@@ -8,8 +8,8 @@ mod world;
 
 pub use creature::Creature;
 pub use energy::{EnergyParticle, ParticleSource};
-pub use sim_thread::{SimCommand, SimHandle, SimSnapshot};
+pub use sim_thread::SimSnapshot;
 pub use spatial::SpatialGrid;
 pub use spring::HotSpring;
 pub use trail::TrailPoint;
-pub use world::{DeathAgeStats, DominantCandidate, World, WorldStats};
+pub use world::{DeathAgeStats, DominantCandidate, World};

@@ -3,7 +3,6 @@ use rustc_hash::FxHashMap;
 /// LIFO 空闲列表 Slot 分配器
 /// 管理 creature_id ↔ GPU slot 映射
 pub struct SlotAllocator {
-    max_slots: usize,
     /// creature_id → slot_index
     id_to_slot: FxHashMap<u64, usize>,
     /// slot_index → creature_id
@@ -16,7 +15,6 @@ impl SlotAllocator {
     pub fn new(max_slots: usize) -> Self {
         let free_list: Vec<usize> = (0..max_slots).rev().collect();
         Self {
-            max_slots,
             id_to_slot: FxHashMap::default(),
             slot_to_id: FxHashMap::default(),
             free_list,
@@ -52,15 +50,5 @@ impl SlotAllocator {
     /// 获取所有活跃的 (creature_id, slot_index) 对
     pub fn active_entries(&self) -> impl Iterator<Item = (&u64, &usize)> {
         self.id_to_slot.iter()
-    }
-
-    /// 当前使用数
-    pub fn used_count(&self) -> usize {
-        self.id_to_slot.len()
-    }
-
-    /// 最大 slot 数
-    pub fn max_slots(&self) -> usize {
-        self.max_slots
     }
 }

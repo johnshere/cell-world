@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use rustc_hash::FxHashMap;
 
-use super::{Creature, DeathAgeStats, DominantCandidate, EnergyParticle, HotSpring, TrailPoint};
+use super::{Creature, EnergyParticle, HotSpring, TrailPoint};
 use crate::config::Config;
 use crate::neural::Genome;
 use crate::snapshot::WorldSnapshot;
@@ -27,9 +27,6 @@ pub struct SimSnapshot {
     // 预计算统计
     pub time: f64,
     pub perf_stats: PerfStats,
-    pub action_counts: [usize; 4],
-    pub death_age_stats: DeathAgeStats,
-    pub dominant_species: Vec<DominantCandidate>,
     pub world_stats: WorldStats,
     pub creature_species: FxHashMap<u64, u64>,
     pub volcano_countdown: f64,
@@ -49,9 +46,6 @@ impl Default for SimSnapshot {
             trail_disabled: false,
             time: 0.0,
             perf_stats: PerfStats::default(),
-            action_counts: [0; 4],
-            death_age_stats: DeathAgeStats::default(),
-            dominant_species: Vec::new(),
             world_stats: WorldStats::default(),
             creature_species: FxHashMap::default(),
             volcano_countdown: 0.0,
@@ -233,9 +227,6 @@ fn export_snapshot(
         trail_disabled: world.trail_disabled,
         time: world.time,
         perf_stats: world.perf_stats.clone(),
-        action_counts: world.action_counts,
-        death_age_stats: world.death_age_stats.clone(),
-        dominant_species: world.dominant_species.clone(),
         world_stats,
         creature_species,
         volcano_countdown,

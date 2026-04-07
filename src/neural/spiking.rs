@@ -1,6 +1,6 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::genome::{Genome, LearningGene, NodeType, RewardGene};
+use super::genome::{Genome, LearningGene, NodeType};
 
 /// SNN 节点状态
 #[derive(Clone)]
@@ -45,8 +45,6 @@ pub struct SpikingNetwork {
     eligibility_traces: FxHashMap<(usize, usize), f64>,
     /// 学习基因（从基因组复制，运行时只读）
     learning_gene: LearningGene,
-    /// 奖励基因（从基因组复制，运行时只读）
-    reward_gene: RewardGene,
     /// 当前奖励信号（外部传入）
     reward_signal: f64,
 }
@@ -65,7 +63,6 @@ impl Default for SpikingNetwork {
             prev_state: FxHashMap::default(),
             eligibility_traces: FxHashMap::default(),
             learning_gene: LearningGene::default(),
-            reward_gene: RewardGene::default(),
             reward_signal: 0.0,
         }
     }
@@ -165,7 +162,6 @@ impl SpikingNetwork {
             prev_state,
             eligibility_traces: FxHashMap::default(),
             learning_gene: genome.learning.clone(),
-            reward_gene: genome.reward.clone(),
             reward_signal: 0.0,
         }
     }
@@ -429,7 +425,7 @@ impl SpikingNetwork {
                 *trace *= decay;
 
                 // 回环：pre用prev_state
-                if let Some(&(prev_membrane, prev_fired)) = self.prev_state.get(&in_node) {
+                if let Some(&(_prev_membrane, prev_fired)) = self.prev_state.get(&in_node) {
                     let post_fired = self.nodes.get(&out_node).map(|n| n.fired).unwrap_or(false);
                     if prev_fired && post_fired {
                         *trace += 1.0;
@@ -437,20 +433,6 @@ impl SpikingNetwork {
                 }
             }
         }
-    }
-
-    /// 重置所有节点状态
-    pub fn reset(&mut self) {
-        for node in self.nodes.values_mut() {
-            node.membrane = 0.0;
-            node.fired = false;
-            node.refractory_count = 0;
-        }
-        for state in self.prev_state.values_mut() {
-            *state = (0.0, false);
-        }
-        self.eligibility_traces.clear();
-        self.reward_signal = 0.0;
     }
 
     /// 设置奖励信号
@@ -532,13 +514,4 @@ impl SpikingNetwork {
         self.reward_signal = 0.0;
     }
 
-    /// 获取学习基因引用
-    pub fn learning_gene(&self) -> &LearningGene {
-        &self.learning_gene
-    }
-
-    /// 获取奖励基因引用
-    pub fn reward_gene(&self) -> &RewardGene {
-        &self.reward_gene
-    }
 }

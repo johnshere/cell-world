@@ -760,7 +760,7 @@ mod inner {
             let active_count = self.slots.active_entries().count().max(1) as u64;
             let per_creature_ns = self.last_tick_ns / active_count;
             let mut results = Vec::new();
-            for (&creature_id, &slot) in self.slots.active_entries() {
+            for (&creature_id, _) in self.slots.active_entries() {
                 // 直读输出取首次 tick 的值，脉冲输出取发放率
                 let first = self
                     .first_outputs

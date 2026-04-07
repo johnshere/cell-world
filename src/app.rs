@@ -209,6 +209,99 @@ impl CellWorldApp {
                 perf.snn_ms
             );
         }
+
+        // 追加 target_pref 演化日志
+        log_target_pref_stats(world_time, snapshot);
+    }
+}
+
+/// 统计种群中 target_pref 基因的演化情况，写入独立日志
+fn log_target_pref_stats(world_time: f64, snapshot: &SimSnapshot) {
+    if snapshot.creatures.is_empty() {
+        return;
+    }
+
+    // 累计：每个 (源block, 目标block) 对的偏好值聚合
+    use std::collections::HashMap;
+    let mut pair_sum: HashMap<(i8, i8), (f64, usize)> = HashMap::new();
+    let mut total_entries: usize = 0;
+    let mut max_entries: usize = 0;
+    let mut max_pref: f32 = 1.0;
+    let mut min_pref: f32 = 1.0;
+
+    for c in &snapshot.creatures {
+        for (&from_blk, probs) in &c.genome.conn_probs {
+            let n = probs.target_pref.len();
+            total_entries += n;
+            if n > max_entries {
+                max_entries = n;
+            }
+            for (&to_blk, &w) in &probs.target_pref {
+                if w > max_pref {
+                    max_pref = w;
+                }
+                if w < min_pref {
+                    min_pref = w;
+                }
+                let entry = pair_sum.entry((from_blk, to_blk)).or_insert((0.0, 0));
+                entry.0 += w as f64;
+                entry.1 += 1;
+            }
+        }
+    }
+
+    let creature_count = snapshot.creatures.len();
+    let avg_entries_per_creature = total_entries as f64 / creature_count as f64;
+
+    // 找出最强的 5 个偏好对（按平均值偏离 1.0 的程度排序）
+    let mut top: Vec<((i8, i8), f64, usize)> = pair_sum
+        .iter()
+        .map(|(&k, &(s, n))| (k, s / n as f64, n))
+        .collect();
+    top.sort_by(|a, b| {
+        (b.1 - 1.0)
+            .abs()
+            .partial_cmp(&(a.1 - 1.0).abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    top.truncate(5);
+
+    let log_path = "docs/target_pref.log";
+    // 首次写入头
+    let need_header = !std::path::Path::new(log_path).exists();
+    if let Ok(mut file) = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open(log_path)
+    {
+        if need_header {
+            let _ = writeln!(file, "# Target Pref 演化日志\n");
+            let _ = writeln!(
+                file,
+                "| 时间 | 生物 | 平均条目 | 最大条目 | min~max | top偏好(源→目标=均值×种群数) |"
+            );
+            let _ = writeln!(
+                file,
+                "|------|------|----------|----------|---------|------------------------------|"
+            );
+        }
+        let top_str: String = top
+            .iter()
+            .map(|((f, t), avg, n)| format!("({}→{}={:.2}×{})", f, t, avg, n))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let _ = writeln!(
+            file,
+            "| {:.0} | {} | {:.2} | {} | {:.2}~{:.2} | {} |",
+            world_time,
+            creature_count,
+            avg_entries_per_creature,
+            max_entries,
+            min_pref,
+            max_pref,
+            top_str
+        );
     }
 }
 

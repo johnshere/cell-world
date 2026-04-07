@@ -35,13 +35,6 @@ pub struct StatsPanel {
     pub energy_history: Vec<(f64, f64, f64, f64, usize)>,
 }
 
-/// 排名数据
-#[derive(Clone, Default)]
-pub struct RankedEntry {
-    pub id: usize,
-    pub count: usize,
-}
-
 #[derive(Default, Clone)]
 pub struct CachedStats {
     pub time: f64,
@@ -595,11 +588,54 @@ impl StatsPanel {
                     let hidden = node_count.saturating_sub(
                         crate::neural::Genome::INPUT_SIZE + crate::neural::Genome::OUTPUT_SIZE,
                     );
-                    let mutation_rate = creature.genome.mutation_rate;
+                    let mr = &creature.genome.mutation_rate;
                     ui.label(format!(
-                        "节点:{} (隐:{})  连接:{}  变异率:{:.2}",
-                        node_count, hidden, conn_count, mutation_rate
+                        "节点:{} (隐:{})  连接:{}  变异率(b:{:.2} blk:{:.2})",
+                        node_count, hidden, conn_count, mr.base, mr.block
                     ));
+
+                    // 目标偏好基因（target_pref）
+                    ui.separator();
+                    let mut total_pref_entries: usize = 0;
+                    let mut pref_rows: Vec<(i8, Vec<(i8, f32)>)> = Vec::new();
+                    let mut keys: Vec<i8> = creature.genome.conn_probs.keys().copied().collect();
+                    keys.sort();
+                    for from_blk in keys {
+                        let probs = &creature.genome.conn_probs[&from_blk];
+                        if probs.target_pref.is_empty() {
+                            continue;
+                        }
+                        let mut entries: Vec<(i8, f32)> =
+                            probs.target_pref.iter().map(|(&k, &v)| (k, v)).collect();
+                        // 按偏离 1.0 程度排序，最强的在前
+                        entries.sort_by(|a, b| {
+                            (b.1 - 1.0)
+                                .abs()
+                                .partial_cmp(&(a.1 - 1.0).abs())
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                        total_pref_entries += entries.len();
+                        pref_rows.push((from_blk, entries));
+                    }
+                    ui.label(format!("目标偏好基因  条目:{}", total_pref_entries));
+                    if total_pref_entries == 0 {
+                        ui.label("  (尚未演化出偏好)");
+                    } else {
+                        egui::ScrollArea::vertical()
+                            .max_height(140.0)
+                            .id_salt("target_pref_scroll")
+                            .show(ui, |ui| {
+                                for (from_blk, entries) in pref_rows {
+                                    let line: String = entries
+                                        .iter()
+                                        .take(6)
+                                        .map(|(t, w)| format!("{}={:.2}", t, w))
+                                        .collect::<Vec<_>>()
+                                        .join(" ");
+                                    ui.label(format!("  {:>3}→ {}", from_blk, line));
+                                }
+                            });
+                    }
                 }
             }
             Selection::Energy(id) => {
