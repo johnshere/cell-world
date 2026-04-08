@@ -25,7 +25,7 @@ cargo clippy          # 代码检查
 |          | `src/world/energy.rs`   | 能量粒子                    |
 |          | `src/world/trail.rs`    | 痕迹点系统                  |
 |          | `src/world/spatial.rs`  | 空间索引 O(1) 查询          |
-|          | `src/world/terrain.rs`  | 50×50 chunk 高度图（海底火山，生成后冻结）|
+|          | `src/world/terrain.rs`  | 50×50 chunk fBm 噪声高度图（火山圆锥+多倍频噪声，生成后冻结）|
 | 渲染     | `src/render/canvas.rs`  | 画布渲染、拖拽缩放          |
 |          | `src/render/panel.rs`   | 侧边栏统计面板              |
 | 应用     | `src/app.rs`            | egui 应用主循环、日志、选中 |
@@ -65,15 +65,17 @@ cargo clippy          # 代码检查
   - 两者各自独立演化（自变异时彼此独立，clamp 0.01~0.30）
 - **祖先追溯聚类**: 沿 parent_id 追溯最老活祖先，相似度 ≥0.9 归入同族
 - **正弦周期调制**: 火山/陨石的间隔和能量均随时间正弦波动，不同周期交织形成复杂环境
-- **地形系统（手动生成）**:
+- **地形系统（手动生成，fBm 噪声）**:
   - 与渲染网格共用常量 `GRID_WORLD_SIZE = 50.0`，每个 chunk 整数高度
-  - 海底火山主题：火山圆锥 + 6 圈环形山脉 + 12 条放射沟壑 + 微噪声
+  - **算法**：火山圆锥基底（中心高 → 向外平滑下降）+ 多倍频 value noise (fBm) 提供自然起伏
+  - **种子化**：相同 seed + 相同参数 → 相同地形；弹框中可手动输入或点 🎲 随机
+  - **可调参数**（在 ⛰ 弹框中实时调节）：火山口高度、圆锥衰减、噪声尺度、噪声幅度、倍频层数、随机种子
   - 用户点击侧边栏 "⛰" 按钮（在保存按钮左边）触发，二次确认后按当前 `volcano_radius` 一次性生成
   - 覆盖范围 = 半径 + 一格 chunk 余量（避免边界突兀）
   - 生成后**永久冻结**，`generated_radius` 快照与 UI 半径解耦；新扩展区域 `terrain_factor = 1.0`
   - 移动消耗 ×= `slope_factor × altitude_factor`：上坡费力（不补贴下坡）+ 远离中间舒适带费力
   - 配置项：`terrain_slope_cost`（默认 2.0）、`terrain_altitude_cost`（默认 0.5）
-  - 持久化方案 B：仅保存 `terrain_generated` 标志和半径，加载时重新生成
+  - 持久化方案 B：仅保存 `terrain_generated` 标志、半径、TerrainParams 快照，加载时按参数重新生成
 
 ## 开发注意
 

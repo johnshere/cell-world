@@ -1,9 +1,10 @@
-//! 地形系统：生成后冻结的高度图
+//! 地形系统：生成后冻结的 fBm 噪声高度图
 //!
 //! 网格基本单元 50×50（与渲染网格共用 GRID_WORLD_SIZE 常量）。
-//! 每个区块整数高度，描述海底火山周围地形：
-//!   - 中心高（火山口暖橙）→ 外围低（深蓝海底）
-//!   - 叠加环形山脉、放射沟壑、微噪声
+//! 高度由两部分构成：
+//!   1. 火山圆锥基底（中心高 → 向外平滑下降）
+//!   2. 多倍频 value noise (fBm) 提供自然起伏细节
+//! 地形通过种子参数化，相同 seed + 相同参数 → 相同地形。
 //!
 //! 设计原则：地形生成后**永久冻结**。后续 config.volcano_radius 调整不影响已生成区块；
 //! 若需重新生成需通过 TerrainMap::generate 显式调用。
@@ -17,6 +18,65 @@ use rustc_hash::FxHashMap;
 /// 渲染层、地形层及任何按格对齐的逻辑都应引用此常量。
 pub const GRID_WORLD_SIZE: f64 = 50.0;
 
+// =====================================================================
+// 噪声工具函数（手写，无外部依赖）
+// =====================================================================
+
+/// 32 位整数哈希 → [-1, 1]
+#[inline]
+fn hash2(x: i32, y: i32, seed: u32) -> f32 {
+    let mut h = (x as u32)
+        .wrapping_mul(374761393)
+        .wrapping_add((y as u32).wrapping_mul(668265263))
+        .wrapping_add(seed);
+    h = (h ^ (h >> 13)).wrapping_mul(1274126177);
+    h ^= h >> 16;
+    (h as f32 / u32::MAX as f32) * 2.0 - 1.0
+}
+
+/// 二次平滑曲线（Hermite smoothstep）
+#[inline]
+fn smoothstep(t: f32) -> f32 {
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// 双线性插值的 value noise，输入是浮点格点坐标
+fn value_noise(x: f32, y: f32, seed: u32) -> f32 {
+    let xi = x.floor() as i32;
+    let yi = y.floor() as i32;
+    let xf = x - xi as f32;
+    let yf = y - yi as f32;
+    let u = smoothstep(xf);
+    let v = smoothstep(yf);
+    let v00 = hash2(xi, yi, seed);
+    let v10 = hash2(xi + 1, yi, seed);
+    let v01 = hash2(xi, yi + 1, seed);
+    let v11 = hash2(xi + 1, yi + 1, seed);
+    let a = v00 + (v10 - v00) * u;
+    let b = v01 + (v11 - v01) * u;
+    a + (b - a) * v
+}
+
+/// fBm 多倍频叠加（lacunarity=2, persistence=0.5），归一化到 ≈ [-1, 1]
+fn fbm(x: f32, y: f32, octaves: i32, seed: u32) -> f32 {
+    let mut amp = 1.0_f32;
+    let mut freq = 1.0_f32;
+    let mut sum = 0.0_f32;
+    let mut norm = 0.0_f32;
+    for i in 0..octaves.max(1) {
+        let s = seed.wrapping_add((i as u32).wrapping_mul(0x9E3779B1));
+        sum += value_noise(x * freq, y * freq, s) * amp;
+        norm += amp;
+        amp *= 0.5;
+        freq *= 2.0;
+    }
+    sum / norm.max(1e-6)
+}
+
+// =====================================================================
+// 参数与地形函数
+// =====================================================================
+
 /// 地形生成参数（用户可在生成弹框中调整）
 #[derive(Clone, Copy, Debug)]
 pub struct TerrainParams {
@@ -24,16 +84,14 @@ pub struct TerrainParams {
     pub base_height: i32,
     /// 火山圆锥衰减距离（每该值距离下降 1）
     pub base_falloff: i32,
-    /// 环形山脉波长（峰到峰世界坐标距离）
-    pub ring_wavelength: f64,
-    /// 环形山脉幅度
-    pub ring_amp: f64,
-    /// 放射沟壑条数
-    pub radiate_count: i32,
-    /// 放射沟壑深度
-    pub radiate_amp: f64,
-    /// 微噪声幅度（±此值）
-    pub noise_amp: i32,
+    /// fBm 噪声特征尺寸（像素）—— 越大山脉块越大
+    pub fbm_scale: f64,
+    /// fBm 噪声起伏幅度
+    pub fbm_amp: f64,
+    /// fBm 倍频层数（越多细节越丰富）
+    pub fbm_octaves: i32,
+    /// 随机种子
+    pub seed: u32,
 }
 
 impl Default for TerrainParams {
@@ -41,54 +99,38 @@ impl Default for TerrainParams {
         Self {
             base_height: 60,
             base_falloff: 160,
-            // 环数减少 1/3：原 220 → 330
-            ring_wavelength: 330.0,
-            ring_amp: 6.0,
-            // 沟壑宽度减少 1/3 = 数量增加 1.5 倍：原 12 → 18
-            radiate_count: 18,
-            radiate_amp: 7.0,
-            noise_amp: 2,
+            fbm_scale: 280.0,
+            fbm_amp: 28.0,
+            fbm_octaves: 4,
+            seed: 1337,
         }
     }
 }
 
 /// 根据区块坐标 (cx, cy) 与生成参数计算该 chunk 的整数高度。
-/// 纯函数，与火山半径无关 —— 半径仅影响 `TerrainMap::generate` 的覆盖范围。
+/// 纯函数 —— 给定相同输入产生确定结果。
 pub fn chunk_terrain_height(chunk_x: i32, chunk_y: i32, params: &TerrainParams) -> i32 {
-    // 区块中心的世界坐标
     let chunk_size = GRID_WORLD_SIZE as i32;
-    let px = chunk_x * chunk_size + chunk_size / 2;
-    let py = chunk_y * chunk_size + chunk_size / 2;
+    let px = (chunk_x * chunk_size + chunk_size / 2) as f32;
+    let py = (chunk_y * chunk_size + chunk_size / 2) as f32;
+    let dist = (px * px + py * py).sqrt();
 
-    // 距离 & 角度
-    let dx = px;
-    let dy = py;
-    let dist_sq = dx * dx + dy * dy;
-    let dist = (dist_sq as f64).sqrt();
-    let dist_i = dist as i32;
-    let angle = (dy as f64).atan2(dx as f64);
+    // 1. 火山圆锥基底（用 f32 避免整数除法的阶梯）
+    let base = (params.base_height as f32 - dist / params.base_falloff.max(1) as f32)
+        .clamp(8.0, params.base_height as f32);
 
-    // ========== 1. 基础火山圆锥（整体圆形下降） ==========
-    let base = params.base_height - (dist_i / params.base_falloff.max(1));
-    let base = base.clamp(8, params.base_height);
+    // 2. fBm 噪声细节
+    let nx = px / params.fbm_scale.max(1.0) as f32;
+    let ny = py / params.fbm_scale.max(1.0) as f32;
+    let n = fbm(nx, ny, params.fbm_octaves, params.seed);
 
-    // ========== 2. 环形山脉（连续 sin 波，无突降） ==========
-    let ring = ((dist / params.ring_wavelength.max(1.0)) * std::f64::consts::TAU).sin()
-        * params.ring_amp;
-
-    // ========== 3. 放射沟壑（向外辐射结构） ==========
-    let radiate = (angle * params.radiate_count as f64).sin() * params.radiate_amp;
-
-    // ========== 4. 微小扰动 ==========
-    let noise_range = (params.noise_amp.max(0) * 2 + 1).max(1);
-    let noise = (px * 17 + py * 23).rem_euclid(noise_range) - params.noise_amp.max(0);
-
-    // ========== 总高度（整数） ==========
-    let height = base + ring.round() as i32 + radiate.round() as i32 + noise;
-
-    // 最低高度保护
-    height.max(8)
+    let height = base + n * params.fbm_amp as f32;
+    height.round().max(8.0) as i32
 }
+
+// =====================================================================
+// 地形数据结构
+// =====================================================================
 
 /// 已生成的地形数据
 #[cfg_attr(feature = "persistence", derive(Serialize, Deserialize, Default, Clone))]
@@ -108,17 +150,41 @@ pub struct TerrainMap {
     pub generated_params: TerrainParamsPersist,
 }
 
-/// 持久化用：为 TerrainParams 提供 Default + Serde（避免 Copy 字段隐式问题）
+/// 持久化用：为 TerrainParams 提供 Default + Serde
 #[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
 #[derive(Clone, Copy, Debug)]
 pub struct TerrainParamsPersist {
+    #[cfg_attr(feature = "persistence", serde(default = "default_base_height"))]
     pub base_height: i32,
+    #[cfg_attr(feature = "persistence", serde(default = "default_base_falloff"))]
     pub base_falloff: i32,
-    pub ring_wavelength: f64,
-    pub ring_amp: f64,
-    pub radiate_count: i32,
-    pub radiate_amp: f64,
-    pub noise_amp: i32,
+    #[cfg_attr(feature = "persistence", serde(default = "default_fbm_scale"))]
+    pub fbm_scale: f64,
+    #[cfg_attr(feature = "persistence", serde(default = "default_fbm_amp"))]
+    pub fbm_amp: f64,
+    #[cfg_attr(feature = "persistence", serde(default = "default_fbm_octaves"))]
+    pub fbm_octaves: i32,
+    #[cfg_attr(feature = "persistence", serde(default = "default_seed"))]
+    pub seed: u32,
+}
+
+fn default_base_height() -> i32 {
+    60
+}
+fn default_base_falloff() -> i32 {
+    160
+}
+fn default_fbm_scale() -> f64 {
+    280.0
+}
+fn default_fbm_amp() -> f64 {
+    28.0
+}
+fn default_fbm_octaves() -> i32 {
+    4
+}
+fn default_seed() -> u32 {
+    1337
 }
 
 impl Default for TerrainParamsPersist {
@@ -132,11 +198,10 @@ impl From<TerrainParams> for TerrainParamsPersist {
         Self {
             base_height: p.base_height,
             base_falloff: p.base_falloff,
-            ring_wavelength: p.ring_wavelength,
-            ring_amp: p.ring_amp,
-            radiate_count: p.radiate_count,
-            radiate_amp: p.radiate_amp,
-            noise_amp: p.noise_amp,
+            fbm_scale: p.fbm_scale,
+            fbm_amp: p.fbm_amp,
+            fbm_octaves: p.fbm_octaves,
+            seed: p.seed,
         }
     }
 }
@@ -146,11 +211,10 @@ impl From<TerrainParamsPersist> for TerrainParams {
         Self {
             base_height: p.base_height,
             base_falloff: p.base_falloff,
-            ring_wavelength: p.ring_wavelength,
-            ring_amp: p.ring_amp,
-            radiate_count: p.radiate_count,
-            radiate_amp: p.radiate_amp,
-            noise_amp: p.noise_amp,
+            fbm_scale: p.fbm_scale,
+            fbm_amp: p.fbm_amp,
+            fbm_octaves: p.fbm_octaves,
+            seed: p.seed,
         }
     }
 }

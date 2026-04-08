@@ -1335,34 +1335,46 @@ impl eframe::App for CellWorldApp {
                     );
                     param_row(
                         ui,
-                        "环波长",
-                        egui::Slider::new(&mut p.ring_wavelength, 100.0..=800.0),
-                        "↑ 环形山脉数量更少、过渡更平缓  ↓ 环更密更陡（ring_wavelength）",
-                    );
-                    param_row(
-                        ui,
-                        "环幅度",
-                        egui::Slider::new(&mut p.ring_amp, 0.0..=20.0),
-                        "↑ 环形山脉更突出  ↓ 环更不明显（ring_amp）",
-                    );
-                    param_row(
-                        ui,
-                        "沟壑数",
-                        egui::Slider::new(&mut p.radiate_count, 0..=48),
-                        "↑ 放射沟壑更多更细  ↓ 沟壑更少更宽（radiate_count）",
-                    );
-                    param_row(
-                        ui,
-                        "沟壑深度",
-                        egui::Slider::new(&mut p.radiate_amp, 0.0..=20.0),
-                        "↑ 沟壑更深、更难穿越  ↓ 沟壑更浅（radiate_amp）",
+                        "噪声尺度",
+                        egui::Slider::new(&mut p.fbm_scale, 80.0..=800.0),
+                        "↑ 山脉/盆地更大块、地势更连绵  ↓ 地形更碎更密（fbm_scale）",
                     );
                     param_row(
                         ui,
                         "噪声幅度",
-                        egui::Slider::new(&mut p.noise_amp, 0..=10),
-                        "↑ 局部更崎岖粗糙  ↓ 表面更光滑（noise_amp）",
+                        egui::Slider::new(&mut p.fbm_amp, 0.0..=80.0),
+                        "↑ 起伏更剧烈  ↓ 更平缓 · 设为 0 退化为纯圆锥（fbm_amp）",
                     );
+                    param_row(
+                        ui,
+                        "倍频层数",
+                        egui::Slider::new(&mut p.fbm_octaves, 1..=6),
+                        "↑ 细节更丰富但生成更慢  ↓ 地形更光滑（fbm_octaves）",
+                    );
+
+                    // 种子行：单独布局，标签 + 数字输入框 + 🎲 随机按钮
+                    ui.horizontal(|ui| {
+                        ui.add_sized([90.0, 18.0], egui::Label::new("随机种子"));
+                        ui.add(egui::DragValue::new(&mut p.seed).speed(1.0));
+                        if ui
+                            .button("🎲")
+                            .on_hover_text("随机一个新种子")
+                            .clicked()
+                        {
+                            p.seed = rand::random::<u32>();
+                        }
+                    });
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(
+                                "    相同种子复现相同地形；点 🎲 随机换一张（seed）",
+                            )
+                            .small()
+                            .color(hint_color),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(2.0);
 
                     ui.separator();
                     param_row(

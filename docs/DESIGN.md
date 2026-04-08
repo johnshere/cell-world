@@ -19,7 +19,7 @@
 - **正弦周期调制**：火山/陨石的间隔和能量均随正弦函数波动，模拟季节性变化
 - **环境温度**：火山热（三次方衰减）+ 集体热（附近生物能量贡献），推动集群涌现
 - **痕迹点系统**：移动消耗转化为痕迹（能量守恒），可被吸收
-- **海底火山地形**：可由用户一次性生成的高度图（50×50 chunk），影响生物移动消耗（坡度+海拔阻力），生成后冻结
+- **海底火山地形**：可由用户一次性生成的 fBm 噪声高度图（50×50 chunk，火山圆锥+多倍频噪声+种子），影响生物移动消耗（坡度+海拔阻力），生成后冻结
 
 ---
 
@@ -55,15 +55,17 @@
    - 地形未生成或所在 chunk 无数据时因子 = 1.0
 ```
 
-### 地形系统（海底火山）
+### 地形系统（海底火山，fBm 噪声）
 
 - **网格**：与渲染网格共用常量 `GRID_WORLD_SIZE = 50.0`，每个 50×50 chunk 一个整数高度
-- **覆盖范围**：以原点为中心、`volcano_radius + 一格` 的圆，确保边界平滑（任何与该圆相交的 chunk 都会生成）
+- **覆盖范围**：以原点为中心、`volcano_radius + 一格` 的圆，确保边界平滑
 - **高度算法**（`src/world/terrain.rs::chunk_terrain_height`）：
-  - 火山圆锥基底 `60 - dist/160`（clamp 8~60）
-  - 6 圈环形山脉 ±5
-  - 12 条放射沟壑 ±7
-  - 微噪声 ±2
+  - **火山圆锥基底**：`base_height - dist / base_falloff`（clamp 到 8~base_height），定大致地势
+  - **fBm 多倍频噪声**：`fbm(x/scale, y/scale, octaves, seed) × fbm_amp`，提供自然不规则起伏
+  - 内部 `fbm` 由 `value_noise` (4 角双线性 + smoothstep) 多次采样累加而成（lacunarity=2, persistence=0.5），手写无外部依赖
+  - 不再有环形/放射状结构，地形完全由噪声塑形
+- **可调参数**（`TerrainParams`）：`base_height`、`base_falloff`、`fbm_scale`、`fbm_amp`、`fbm_octaves`、`seed`
+- **种子化**：所有随机来自单个 `u32 seed`，相同参数 + 相同 seed → 完全确定性的地形
 - **生成时机**：用户点击侧边栏 "⛰" 按钮触发（二次确认），按当前 `config.volcano_radius` 一次性生成；生成后**永久冻结**
 - **半径变更解耦**：`TerrainMap` 内保存 `generated_radius` 快照；后续 UI 调整 `volcano_radius` 不影响已生成地形；新扩展区域 `terrain_factor = 1.0`
 - **持久化**：仅保存 `terrain_generated` 标志和 `terrain_generated_radius`，加载时重新调用 `generate()` 重建（确定性算法，节省存档体积）
