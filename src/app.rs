@@ -1300,50 +1300,77 @@ impl eframe::App for CellWorldApp {
                     }
                     ui.separator();
 
+                    let hint_color = egui::Color32::from_gray(150);
                     let p = &mut self.terrain_params;
-                    egui::Grid::new("terrain_params_grid")
-                        .num_columns(2)
-                        .spacing([8.0, 4.0])
-                        .show(ui, |ui| {
-                            ui.label("火山口高度").on_hover_text("base_height: 中心最高基底高度");
-                            ui.add(egui::Slider::new(&mut p.base_height, 20..=120));
-                            ui.end_row();
 
-                            ui.label("圆锥衰减")
-                                .on_hover_text("base_falloff: 每此距离下降 1，越大越平缓");
-                            ui.add(egui::Slider::new(&mut p.base_falloff, 40..=400));
-                            ui.end_row();
+                    // 每个参数：标签+滑块一行，下方灰色小字说明影响方向
+                    let param_row =
+                        |ui: &mut egui::Ui, label: &str, slider: egui::Slider<'_>, hint: &str| {
+                            ui.horizontal(|ui| {
+                                ui.add_sized([90.0, 18.0], egui::Label::new(label));
+                                ui.add(slider);
+                            });
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(format!("    {}", hint))
+                                        .small()
+                                        .color(hint_color),
+                                )
+                                .wrap(),
+                            );
+                            ui.add_space(2.0);
+                        };
 
-                            ui.label("环波长")
-                                .on_hover_text("ring_wavelength: 环形山脉峰到峰距离，越大环数越少");
-                            ui.add(egui::Slider::new(&mut p.ring_wavelength, 100.0..=800.0));
-                            ui.end_row();
+                    param_row(
+                        ui,
+                        "火山口高度",
+                        egui::Slider::new(&mut p.base_height, 20..=120),
+                        "↑ 火山口更高耸  ↓ 中心更平坦（base_height）",
+                    );
+                    param_row(
+                        ui,
+                        "圆锥衰减",
+                        egui::Slider::new(&mut p.base_falloff, 40..=400),
+                        "↑ 整体坡度更平缓、地形向外延展更远  ↓ 火山更陡峭（base_falloff）",
+                    );
+                    param_row(
+                        ui,
+                        "环波长",
+                        egui::Slider::new(&mut p.ring_wavelength, 100.0..=800.0),
+                        "↑ 环形山脉数量更少、过渡更平缓  ↓ 环更密更陡（ring_wavelength）",
+                    );
+                    param_row(
+                        ui,
+                        "环幅度",
+                        egui::Slider::new(&mut p.ring_amp, 0.0..=20.0),
+                        "↑ 环形山脉更突出  ↓ 环更不明显（ring_amp）",
+                    );
+                    param_row(
+                        ui,
+                        "沟壑数",
+                        egui::Slider::new(&mut p.radiate_count, 0..=48),
+                        "↑ 放射沟壑更多更细  ↓ 沟壑更少更宽（radiate_count）",
+                    );
+                    param_row(
+                        ui,
+                        "沟壑深度",
+                        egui::Slider::new(&mut p.radiate_amp, 0.0..=20.0),
+                        "↑ 沟壑更深、更难穿越  ↓ 沟壑更浅（radiate_amp）",
+                    );
+                    param_row(
+                        ui,
+                        "噪声幅度",
+                        egui::Slider::new(&mut p.noise_amp, 0..=10),
+                        "↑ 局部更崎岖粗糙  ↓ 表面更光滑（noise_amp）",
+                    );
 
-                            ui.label("环幅度")
-                                .on_hover_text("ring_amp: 环形山脉起伏强度");
-                            ui.add(egui::Slider::new(&mut p.ring_amp, 0.0..=20.0));
-                            ui.end_row();
-
-                            ui.label("沟壑数")
-                                .on_hover_text("radiate_count: 放射沟壑条数，越多每条越细");
-                            ui.add(egui::Slider::new(&mut p.radiate_count, 0..=48));
-                            ui.end_row();
-
-                            ui.label("沟壑深度")
-                                .on_hover_text("radiate_amp: 放射沟壑深度");
-                            ui.add(egui::Slider::new(&mut p.radiate_amp, 0.0..=20.0));
-                            ui.end_row();
-
-                            ui.label("噪声幅度")
-                                .on_hover_text("noise_amp: 微扰动 ±此值");
-                            ui.add(egui::Slider::new(&mut p.noise_amp, 0..=10));
-                            ui.end_row();
-
-                            ui.label("显示透明度")
-                                .on_hover_text("仅影响渲染，实时生效，无需重新生成");
-                            ui.add(egui::Slider::new(&mut self.canvas.terrain_alpha, 0..=255));
-                            ui.end_row();
-                        });
+                    ui.separator();
+                    param_row(
+                        ui,
+                        "显示透明度",
+                        egui::Slider::new(&mut self.canvas.terrain_alpha, 0..=255),
+                        "↑ 地形色更鲜明  ↓ 地形更隐约 · 仅影响渲染，实时生效",
+                    );
 
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
