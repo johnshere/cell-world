@@ -19,13 +19,13 @@ volcano_interval = 30.0
 # 火山喷射半径
 volcano_radius = 2300.0
 # 每次喷发粒子数
-volcano_count = 70
+volcano_count = 85
 # 火山粒子能量
 volcano_particle_energy = 185.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
-volcano_interval_cycle = 1500.0
+volcano_interval_cycle = 1700.0
 # 火山间隔振幅比（0~0.9）
 volcano_interval_amplitude = 0.2
 # 火山能量正弦周期（秒）
@@ -38,19 +38,19 @@ volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 15.0
+volcano_kill_radius = 50.0
 # 落地杀伤系数
-landing_damage_multiplier = 1.7
+landing_damage_multiplier = 1.0
 
 # === 温泉 ===
 # 温泉最大同时活跃数量
-spring_max_count = 0
+spring_max_count = 10
 # 温泉产生间隔（秒）
 spring_spawn_interval = 25.0
 # 温泉寿命（秒）
-spring_lifetime = 901.0
+spring_lifetime = 1010.0
 # 温泉喷出粒子间隔（秒）
-spring_emit_interval = 8.0
+spring_emit_interval = 7.0
 # 温泉每次喷出粒子数
 spring_emit_count = 1
 # 温泉粒子能量
@@ -70,28 +70,28 @@ eye_cooldown = 0.075
 # 眼睛扫描速度（度/秒）
 eye_scan_speed = 400.0
 # 嘴巴冷却时间（秒）
-mouth_cooldown = 0.5
+mouth_cooldown = 0.8
 # 咬合能量转移率
 bite_transfer_rate = 0.4
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
-energy_denominator = 450.0
+energy_denominator = 1200.0
 # 散热下限（指数衰减底板）
 heat_floor = 0.05
 
 # === 代谢 ===
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
-age_metabolism_factor = 0.025
+age_metabolism_factor = 0.03
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗（每单位距离）
-move_cost = 0.0005
+move_cost = 0.0002
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.6
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.001
+heat_dissipation_coefficient = 0.005
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -133,7 +133,7 @@ reproduce_cooldown = 20.0
 
 # === 算力能量 ===
 # 算力转能量系数（内部除以1亿，0 = 禁用）
-compute_energy_factor = 10.5
+compute_energy_factor = 11.0
 
 # === SNN ===
 # 每帧 SNN tick 数（同步模式）
@@ -156,10 +156,10 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = true
-auto_spawn_interval = 25.0
+auto_spawn_interval = 80.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
 terrain_slope_cost = 2.0
 # 地形海拔阻力系数（远离舒适带的开销倍率，0=禁用）
-terrain_altitude_cost = 0.5
+terrain_altitude_cost = 1.0
