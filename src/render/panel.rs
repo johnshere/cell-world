@@ -16,6 +16,8 @@ pub struct PanelAction {
     pub delete_template: Option<String>,
     pub clear_dominant: bool,
     pub save_snapshot: bool,
+    /// 生成地形
+    pub generate_terrain: bool,
     /// 保存指定族的代表基因（clan_hash）
     pub save_clan: Option<u64>,
 }
@@ -164,6 +166,7 @@ impl StatsPanel {
         ui.horizontal(|ui| {
             ui.heading("Cell World");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // 注意：right_to_left 布局下，先添加的按钮在最右边
                 if ui
                     .button("💾")
                     .on_hover_text("保存世界快照")
@@ -171,6 +174,14 @@ impl StatsPanel {
                     .clicked()
                 {
                     action.save_snapshot = true;
+                }
+                if ui
+                    .button("⛰")
+                    .on_hover_text("生成地形（一次性，不可撤销；已生成将被覆盖）")
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    action.generate_terrain = true;
                 }
             });
         });

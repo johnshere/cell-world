@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use rustc_hash::FxHashMap;
 
-use super::{Creature, EnergyParticle, HotSpring, TrailPoint};
+use super::{Creature, EnergyParticle, HotSpring, TerrainMap, TerrainParams, TrailPoint};
 use crate::config::Config;
 use crate::neural::Genome;
 use crate::snapshot::WorldSnapshot;
@@ -34,6 +34,8 @@ pub struct SimSnapshot {
     pub sim_step_count: u64,
     /// 灭绝停止标志
     pub stop_extinction_triggered: bool,
+    /// 地形快照（生成后冻结，每次都附带，便于渲染线程随时取用）
+    pub terrain: TerrainMap,
 }
 
 impl Default for SimSnapshot {
@@ -51,6 +53,7 @@ impl Default for SimSnapshot {
             volcano_countdown: 0.0,
             sim_step_count: 0,
             stop_extinction_triggered: false,
+            terrain: TerrainMap::default(),
         }
     }
 }
@@ -71,6 +74,8 @@ pub enum SimCommand {
     CaptureSnapshot(mpsc::Sender<WorldSnapshot>),
     /// 快照恢复
     RestoreSnapshot(WorldSnapshot),
+    /// 生成地形（一次性，覆盖已有）
+    GenerateTerrain(TerrainParams),
     Shutdown,
 }
 
@@ -168,6 +173,9 @@ fn sim_loop(
                         let ws = WorldSnapshot::capture(&world, &config);
                         let _ = reply.send(ws);
                     }
+                    SimCommand::GenerateTerrain(params) => {
+                        world.generate_terrain(&config, &params);
+                    }
                     SimCommand::RestoreSnapshot(ws) => {
                         let (mut new_world, new_config) = ws.into_world();
                         // 重建 neural bridge
@@ -232,6 +240,7 @@ fn export_snapshot(
         volcano_countdown,
         sim_step_count,
         stop_extinction_triggered: world.stop_extinction_triggered,
+        terrain: world.terrain.clone(),
     };
 
     if let Ok(mut guard) = snapshot.write() {

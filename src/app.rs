@@ -51,6 +51,10 @@ pub struct CellWorldApp {
     pending_restore: Option<WorldSnapshot>,
     // 保存确认弹框
     snapshot_confirm_save: bool,
+    // 生成地形确认弹框
+    terrain_confirm_generate: bool,
+    // 地形生成参数（弹框中可调）
+    terrain_params: crate::world::TerrainParams,
     // 是否启用画布渲染
     render_enabled: bool,
     // 快照捕获回调
@@ -120,6 +124,8 @@ impl CellWorldApp {
             frame_perf: FramePerfStats::default(),
             pending_restore,
             snapshot_confirm_save: false,
+            terrain_confirm_generate: false,
+            terrain_params: crate::world::TerrainParams::default(),
             render_enabled: true,
             snapshot_capture_rx: None,
         }
@@ -1269,6 +1275,102 @@ impl eframe::App for CellWorldApp {
             }
         }
 
+        // 生成地形确认弹框（含参数调整）
+        if self.terrain_confirm_generate {
+            let mut chose_yes = false;
+            let mut chose_no = false;
+            let mut chose_reset = false;
+            let already_generated = self.sim.snapshot().terrain.is_generated();
+            egui::Window::new("生成地形")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .default_width(360.0)
+                .show(ctx, |ui| {
+                    if already_generated {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(220, 180, 80),
+                            "⚠ 已存在地形，确认后将覆盖",
+                        );
+                    } else {
+                        ui.label(format!(
+                            "按当前火山半径 {:.0} 生成地形（生成后冻结）",
+                            self.config.volcano_radius
+                        ));
+                    }
+                    ui.separator();
+
+                    let p = &mut self.terrain_params;
+                    egui::Grid::new("terrain_params_grid")
+                        .num_columns(2)
+                        .spacing([8.0, 4.0])
+                        .show(ui, |ui| {
+                            ui.label("火山口高度").on_hover_text("base_height: 中心最高基底高度");
+                            ui.add(egui::Slider::new(&mut p.base_height, 20..=120));
+                            ui.end_row();
+
+                            ui.label("圆锥衰减")
+                                .on_hover_text("base_falloff: 每此距离下降 1，越大越平缓");
+                            ui.add(egui::Slider::new(&mut p.base_falloff, 40..=400));
+                            ui.end_row();
+
+                            ui.label("环波长")
+                                .on_hover_text("ring_wavelength: 环形山脉峰到峰距离，越大环数越少");
+                            ui.add(egui::Slider::new(&mut p.ring_wavelength, 100.0..=800.0));
+                            ui.end_row();
+
+                            ui.label("环幅度")
+                                .on_hover_text("ring_amp: 环形山脉起伏强度");
+                            ui.add(egui::Slider::new(&mut p.ring_amp, 0.0..=20.0));
+                            ui.end_row();
+
+                            ui.label("沟壑数")
+                                .on_hover_text("radiate_count: 放射沟壑条数，越多每条越细");
+                            ui.add(egui::Slider::new(&mut p.radiate_count, 0..=48));
+                            ui.end_row();
+
+                            ui.label("沟壑深度")
+                                .on_hover_text("radiate_amp: 放射沟壑深度");
+                            ui.add(egui::Slider::new(&mut p.radiate_amp, 0.0..=20.0));
+                            ui.end_row();
+
+                            ui.label("噪声幅度")
+                                .on_hover_text("noise_amp: 微扰动 ±此值");
+                            ui.add(egui::Slider::new(&mut p.noise_amp, 0..=10));
+                            ui.end_row();
+
+                            ui.label("显示透明度")
+                                .on_hover_text("仅影响渲染，实时生效，无需重新生成");
+                            ui.add(egui::Slider::new(&mut self.canvas.terrain_alpha, 0..=255));
+                            ui.end_row();
+                        });
+
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("确定生成").clicked() {
+                            chose_yes = true;
+                        }
+                        if ui.button("取消").clicked() {
+                            chose_no = true;
+                        }
+                        if ui.button("恢复默认").clicked() {
+                            chose_reset = true;
+                        }
+                    });
+                });
+            if chose_reset {
+                self.terrain_params = crate::world::TerrainParams::default();
+            }
+            if chose_yes {
+                self.sim
+                    .send(SimCommand::GenerateTerrain(self.terrain_params));
+                self.terrain_confirm_generate = false;
+            }
+            if chose_no {
+                self.terrain_confirm_generate = false;
+            }
+        }
+
         let now = std::time::Instant::now();
 
         // FPS 计算（真实帧率）+ SIM FPS
@@ -1406,6 +1508,11 @@ impl eframe::App for CellWorldApp {
         // 处理保存快照
         if panel_action.save_snapshot {
             self.snapshot_confirm_save = true;
+        }
+
+        // 处理生成地形
+        if panel_action.generate_terrain {
+            self.terrain_confirm_generate = true;
         }
 
         // 处理添加生物按钮（每次添加5个）

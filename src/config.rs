@@ -210,6 +210,21 @@ pub struct Config {
     /// 异步模式 tick 频率 (ticks/s)
     #[serde(default = "default_neural_tick_rate")]
     pub neural_tick_rate: f64,
+
+    // === 地形 ===
+    /// 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
+    #[serde(default = "default_terrain_slope_cost")]
+    pub terrain_slope_cost: f64,
+    /// 地形海拔阻力系数（远离舒适带的开销倍率，0=禁用）
+    #[serde(default = "default_terrain_altitude_cost")]
+    pub terrain_altitude_cost: f64,
+}
+
+fn default_terrain_slope_cost() -> f64 {
+    2.0
+}
+fn default_terrain_altitude_cost() -> f64 {
+    0.5
 }
 
 fn default_max_creatures() -> usize {

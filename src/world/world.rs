@@ -4,7 +4,10 @@ use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::time::Instant;
 
-use super::{Creature, EnergyParticle, HotSpring, ParticleSource, SpatialGrid, TrailPoint};
+use super::{
+    Creature, EnergyParticle, HotSpring, ParticleSource, SpatialGrid, TerrainMap, TerrainParams,
+    TrailPoint,
+};
 use crate::config::Config;
 use crate::neural::bridge::{CreatureEvent, CreatureInput, NeuralBridge};
 use crate::neural::Genome;
@@ -106,6 +109,9 @@ pub struct World {
     pub stop_extinction_triggered: bool,
     /// 自动投放定时器
     auto_spawn_timer: f64,
+
+    /// 地形高度图（生成后冻结）
+    pub terrain: TerrainMap,
 }
 
 /// 种族缓存（祖先追溯模型）
@@ -160,6 +166,7 @@ impl World {
             dominant_species: Vec::new(),
             stop_extinction_triggered: false,
             auto_spawn_timer: 0.0,
+            terrain: TerrainMap::default(),
         };
         // 初始连喷三波，提供充足起始能量（直接落地，不杀伤）
         for _ in 0..3 {
@@ -377,7 +384,46 @@ impl World {
             dominant_species,
             stop_extinction_triggered: false,
             auto_spawn_timer: 0.0,
+            terrain: TerrainMap::default(),
         }
+    }
+
+    /// 一次性生成地形（按当前 config.volcano_radius + 用户参数锁定）
+    pub fn generate_terrain(&mut self, config: &Config, params: &TerrainParams) {
+        self.terrain.generate(config.volcano_radius, params);
+    }
+
+    /// 地形对移动消耗的乘子。地形未生成或所在位置无数据时返回 1.0。
+    /// 公式：slope_factor × altitude_factor
+    /// - slope_factor = 1 + max(dh/dist, 0) × terrain_slope_cost  （上坡加成，下坡不补贴）
+    /// - altitude_factor = 1 + |h - comfort_h| / range × terrain_altitude_cost
+    fn terrain_move_factor(
+        &self,
+        x0: f64,
+        y0: f64,
+        x1: f64,
+        y1: f64,
+        distance: f64,
+        config: &Config,
+    ) -> f64 {
+        if !self.terrain.is_generated() || distance <= 0.0 {
+            return 1.0;
+        }
+        let h0 = self.terrain.height_at(x0, y0);
+        let h1 = self.terrain.height_at(x1, y1);
+        let (h0, h1) = match (h0, h1) {
+            (Some(a), Some(b)) => (a as f64, b as f64),
+            _ => return 1.0,
+        };
+        let dh = h1 - h0;
+        let slope_factor = 1.0 + (dh / distance).max(0.0) * config.terrain_slope_cost;
+
+        let range = (self.terrain.max_h - self.terrain.min_h).max(1) as f64;
+        let comfort_h = (self.terrain.min_h + self.terrain.max_h) as f64 * 0.5;
+        let altitude_factor =
+            1.0 + ((h0 - comfort_h).abs() / range) * config.terrain_altitude_cost;
+
+        slope_factor * altitude_factor
     }
 
     // ========== 生成 ==========
@@ -975,6 +1021,8 @@ impl World {
         let mut move_cost = 0.0;
         if actual_speed > 0.05 {
             let heading = self.creatures[creature_idx].heading;
+            let prev_x = self.creatures[creature_idx].x;
+            let prev_y = self.creatures[creature_idx].y;
             let dx = heading.cos() * actual_speed * dt;
             let dy = heading.sin() * actual_speed * dt;
             self.creatures[creature_idx].x += dx;
@@ -983,7 +1031,20 @@ impl World {
             let distance = (dx * dx + dy * dy).sqrt();
             let follow_discount =
                 self.creatures[creature_idx].follow_level * config.follow_cost_discount;
-            move_cost = distance * config.move_cost * actual_speed * (1.0 - follow_discount);
+            // 地形因子：未生成时 = 1.0
+            let terrain_factor = self.terrain_move_factor(
+                prev_x,
+                prev_y,
+                self.creatures[creature_idx].x,
+                self.creatures[creature_idx].y,
+                distance,
+                config,
+            );
+            move_cost = distance
+                * config.move_cost
+                * actual_speed
+                * (1.0 - follow_discount)
+                * terrain_factor;
             self.creatures[creature_idx].energy -= move_cost;
             self.action_counts[0] += 1; // 移动
         }

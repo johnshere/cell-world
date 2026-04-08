@@ -157,3 +157,9 @@ meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = true
 auto_spawn_interval = 25.0
+
+# === 地形 ===
+# 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
+terrain_slope_cost = 2.0
+# 地形海拔阻力系数（远离舒适带的开销倍率，0=禁用）
+terrain_altitude_cost = 0.5

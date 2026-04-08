@@ -19,6 +19,7 @@
 - **正弦周期调制**：火山/陨石的间隔和能量均随正弦函数波动，模拟季节性变化
 - **环境温度**：火山热（三次方衰减）+ 集体热（附近生物能量贡献），推动集群涌现
 - **痕迹点系统**：移动消耗转化为痕迹（能量守恒），可被吸收
+- **海底火山地形**：可由用户一次性生成的高度图（50×50 chunk），影响生物移动消耗（坡度+海拔阻力），生成后冻结
 
 ---
 
@@ -48,7 +49,25 @@
 3. 死亡条件：能量 ≤ 0 → 死亡
 4. 能量守恒：移动消耗 → 痕迹点能量
 5. 落地杀伤：火山/陨石粒子下落时砸死附近生物
+6. 地形阻力（仅当地形已生成）：移动消耗 ×= slope_factor × altitude_factor
+   - slope_factor = 1 + max(dh/distance, 0) × terrain_slope_cost  （上坡加倍开销，下坡不补贴）
+   - altitude_factor = 1 + |h - comfort_h| / range × terrain_altitude_cost  （远离中间舒适带加倍开销）
+   - 地形未生成或所在 chunk 无数据时因子 = 1.0
 ```
+
+### 地形系统（海底火山）
+
+- **网格**：与渲染网格共用常量 `GRID_WORLD_SIZE = 50.0`，每个 50×50 chunk 一个整数高度
+- **覆盖范围**：以原点为中心、`volcano_radius + 一格` 的圆，确保边界平滑（任何与该圆相交的 chunk 都会生成）
+- **高度算法**（`src/world/terrain.rs::chunk_terrain_height`）：
+  - 火山圆锥基底 `60 - dist/160`（clamp 8~60）
+  - 6 圈环形山脉 ±5
+  - 12 条放射沟壑 ±7
+  - 微噪声 ±2
+- **生成时机**：用户点击侧边栏 "⛰" 按钮触发（二次确认），按当前 `config.volcano_radius` 一次性生成；生成后**永久冻结**
+- **半径变更解耦**：`TerrainMap` 内保存 `generated_radius` 快照；后续 UI 调整 `volcano_radius` 不影响已生成地形；新扩展区域 `terrain_factor = 1.0`
+- **持久化**：仅保存 `terrain_generated` 标志和 `terrain_generated_radius`，加载时重新调用 `generate()` 重建（确定性算法，节省存档体积）
+- **渲染**：`canvas.rs::draw_terrain` 在背景之后、网格之前绘制；颜色按高度归一化，深蓝→青蓝→暖橙的"海底→火山口"渐变（alpha≈110）
 
 ---
 

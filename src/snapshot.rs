@@ -6,8 +6,8 @@ use rustc_hash::FxHashMap;
 use crate::config::Config;
 use crate::neural::{Genome, SpikingNetwork};
 use crate::world::{
-    Creature, DeathAgeStats, DominantCandidate, EnergyParticle, HotSpring, SpatialGrid, TrailPoint,
-    World,
+    Creature, DeathAgeStats, DominantCandidate, EnergyParticle, HotSpring, SpatialGrid,
+    TerrainParams, TrailPoint, World,
 };
 
 const SNAPSHOT_PATH: &str = "snapshot.json";
@@ -45,6 +45,15 @@ pub struct WorldSnapshot {
     /// 灭绝停止标志
     #[serde(default)]
     pub stop_extinction_triggered: bool,
+    /// 地形是否已生成（方案 B：加载时按 generated_radius 重建）
+    #[serde(default)]
+    pub terrain_generated: bool,
+    /// 地形生成时锁定的火山半径
+    #[serde(default)]
+    pub terrain_generated_radius: f64,
+    /// 地形生成时锁定的参数
+    #[serde(default)]
+    pub terrain_generated_params: crate::world::terrain::TerrainParamsPersist,
 }
 
 impl WorldSnapshot {
@@ -87,6 +96,9 @@ impl WorldSnapshot {
             spring_spawn_timer: world.spring_spawn_timer(),
             next_spring_id: world.next_spring_id(),
             stop_extinction_triggered: world.stop_extinction_triggered,
+            terrain_generated: world.terrain.is_generated(),
+            terrain_generated_radius: world.terrain.generated_radius,
+            terrain_generated_params: world.terrain.generated_params,
         }
     }
 
@@ -139,7 +151,10 @@ impl WorldSnapshot {
             trail_grid.insert(i, t.x, t.y);
         }
 
-        let world = World::from_snapshot(
+        let terrain_generated = self.terrain_generated;
+        let terrain_radius = self.terrain_generated_radius;
+        let terrain_params: TerrainParams = self.terrain_generated_params.into();
+        let mut world = World::from_snapshot(
             self.creatures,
             self.energy_particles,
             self.trail_points,
@@ -162,6 +177,9 @@ impl WorldSnapshot {
             self.dominant_species,
             &config,
         );
+        if terrain_generated && terrain_radius > 0.0 {
+            world.terrain.generate(terrain_radius, &terrain_params);
+        }
         (world, config)
     }
 }

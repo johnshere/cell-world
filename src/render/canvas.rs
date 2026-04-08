@@ -5,7 +5,7 @@ use egui::{
 use rustc_hash::FxHashMap;
 
 use super::Selection;
-use crate::world::SimSnapshot;
+use crate::world::{SimSnapshot, TerrainMap, GRID_WORLD_SIZE};
 
 /// 渲染上下文（种族颜色）
 pub struct RenderContext {
@@ -25,6 +25,8 @@ pub struct WorldCanvas {
     initial_scale: f32,
     /// 当前帧率（用于自适应渲染质量）
     pub fps: f64,
+    /// 地形显示透明度（0~255）
+    pub terrain_alpha: u8,
 }
 
 /// 可见世界范围
@@ -44,6 +46,7 @@ impl WorldCanvas {
             initialized: false,
             initial_scale,
             fps: 60.0,
+            terrain_alpha: 30,
         }
     }
 
@@ -104,6 +107,9 @@ impl WorldCanvas {
 
         // 绘制背景
         painter.rect_filled(rect, 0.0, Color32::from_rgb(10, 10, 20));
+
+        // 绘制地形（如已生成）
+        self.draw_terrain(&painter, rect, &snapshot.terrain);
 
         // 绘制网格
         self.draw_grid(&painter, rect);
@@ -486,9 +492,57 @@ impl WorldCanvas {
         }
     }
 
+    /// 绘制地形：每个 chunk 一个填充矩形，颜色按高度归一化
+    fn draw_terrain(&self, painter: &egui::Painter, rect: Rect, terrain: &TerrainMap) {
+        if !terrain.is_generated() || terrain.chunks.is_empty() {
+            return;
+        }
+        let chunk_size_screen = (GRID_WORLD_SIZE as f32) * self.scale;
+        if chunk_size_screen < 1.5 {
+            return; // 太密集不绘制
+        }
+
+        // 计算可见 chunk 范围
+        let vis = self.get_visible_world_bounds(rect);
+        let cx_min = (vis.min_x / GRID_WORLD_SIZE).floor() as i32 - 1;
+        let cx_max = (vis.max_x / GRID_WORLD_SIZE).ceil() as i32 + 1;
+        let cy_min = (vis.min_y / GRID_WORLD_SIZE).floor() as i32 - 1;
+        let cy_max = (vis.max_y / GRID_WORLD_SIZE).ceil() as i32 + 1;
+
+        let h_range = (terrain.max_h - terrain.min_h).max(1) as f32;
+
+        // 用 Mesh 批量绘制
+        let font_image_size = painter.ctx().fonts(|f| f.font_image_size());
+        let white_uv = Pos2::new(
+            0.5 / font_image_size[0] as f32,
+            0.5 / font_image_size[1] as f32,
+        );
+        let mut mesh = Mesh::default();
+
+        for cy in cy_min..=cy_max {
+            for cx in cx_min..=cx_max {
+                let Some(&h) = terrain.chunks.get(&(cx, cy)) else {
+                    continue;
+                };
+                let t = ((h - terrain.min_h) as f32 / h_range).clamp(0.0, 1.0);
+                let color = terrain_color(t, self.terrain_alpha);
+
+                let wx = cx as f64 * GRID_WORLD_SIZE;
+                let wy = cy as f64 * GRID_WORLD_SIZE;
+                let p0 = self.world_to_screen(Pos2::new(wx as f32, wy as f32), rect);
+                let p1 = Pos2::new(p0.x + chunk_size_screen, p0.y + chunk_size_screen);
+                add_rect(&mut mesh, p0, p1, color, white_uv);
+            }
+        }
+
+        if !mesh.vertices.is_empty() {
+            painter.add(egui::Shape::Mesh(mesh));
+        }
+    }
+
     /// 绘制网格
     fn draw_grid(&self, painter: &egui::Painter, rect: Rect) {
-        let grid_size = 50.0 * self.scale;
+        let grid_size = (GRID_WORLD_SIZE as f32) * self.scale;
         if grid_size < 10.0 {
             return; // 太密集不绘制
         }
@@ -563,6 +617,54 @@ fn add_quad(mesh: &mut Mesh, center: Pos2, half_size: f32, color: Color32, uv: P
     });
     mesh.indices
         .extend_from_slice(&[idx, idx + 1, idx + 2, idx, idx + 2, idx + 3]);
+}
+
+/// 在两点间添加矩形（左上 p0、右下 p1）到 mesh
+fn add_rect(mesh: &mut Mesh, p0: Pos2, p1: Pos2, color: Color32, uv: Pos2) {
+    let idx = mesh.vertices.len() as u32;
+    mesh.vertices.push(Vertex {
+        pos: Pos2::new(p0.x, p0.y),
+        uv,
+        color,
+    });
+    mesh.vertices.push(Vertex {
+        pos: Pos2::new(p1.x, p0.y),
+        uv,
+        color,
+    });
+    mesh.vertices.push(Vertex {
+        pos: Pos2::new(p1.x, p1.y),
+        uv,
+        color,
+    });
+    mesh.vertices.push(Vertex {
+        pos: Pos2::new(p0.x, p1.y),
+        uv,
+        color,
+    });
+    mesh.indices
+        .extend_from_slice(&[idx, idx + 1, idx + 2, idx, idx + 2, idx + 3]);
+}
+
+/// 地形高度颜色映射：海底火山主题（低=深蓝 → 中=青蓝 → 高=暖橙）
+fn terrain_color(t: f32, alpha: u8) -> Color32 {
+    let t = t.clamp(0.0, 1.0);
+    let (r, g, b) = if t < 0.5 {
+        let k = t / 0.5;
+        (
+            40.0 + (70.0 - 40.0) * k,
+            60.0 + (110.0 - 60.0) * k,
+            100.0 + (150.0 - 100.0) * k,
+        )
+    } else {
+        let k = (t - 0.5) / 0.5;
+        (
+            70.0 + (200.0 - 70.0) * k,
+            110.0 + (130.0 - 110.0) * k,
+            150.0 + (90.0 - 150.0) * k,
+        )
+    };
+    Color32::from_rgba_unmultiplied(r as u8, g as u8, b as u8, alpha)
 }
 
 /// HSL 转 RGB
