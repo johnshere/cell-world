@@ -473,27 +473,30 @@ impl Genome {
     }
 
     /// mutation_rate基因自身变异（base 和 block 独立变异）
+    /// 触发概率使用固定的元变异率，避免低变异率个体陷入"自我抑制"死锁；
+    /// 步长使用对数空间乘性扰动，避免 clamp 在下界处的下偏漂移。
     fn mutate_mutation_rate_gene(&mut self) {
+        const META_MUTATION_RATE: f64 = 0.1;
         let mut rng = rand::thread_rng();
 
         // base 变异
-        if rng.gen::<f64>() < self.mutation_rate.base {
+        if rng.gen::<f64>() < META_MUTATION_RATE {
             if rng.gen::<f64>() < 0.9 {
-                self.mutation_rate.base += rng.gen_range(-0.02..0.02);
+                let factor = rng.gen_range(-0.3..0.3_f64).exp();
+                self.mutation_rate.base = (self.mutation_rate.base * factor).clamp(0.01, 0.30);
             } else {
                 self.mutation_rate.base = rng.gen_range(0.01..0.30);
             }
-            self.mutation_rate.base = self.mutation_rate.base.clamp(0.01, 0.30);
         }
 
         // block 变异
-        if rng.gen::<f64>() < self.mutation_rate.block {
+        if rng.gen::<f64>() < META_MUTATION_RATE {
             if rng.gen::<f64>() < 0.9 {
-                self.mutation_rate.block += rng.gen_range(-0.02..0.02);
+                let factor = rng.gen_range(-0.3..0.3_f64).exp();
+                self.mutation_rate.block = (self.mutation_rate.block * factor).clamp(0.01, 0.30);
             } else {
                 self.mutation_rate.block = rng.gen_range(0.01..0.30);
             }
-            self.mutation_rate.block = self.mutation_rate.block.clamp(0.01, 0.30);
         }
     }
 
