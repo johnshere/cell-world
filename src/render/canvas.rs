@@ -46,7 +46,7 @@ impl WorldCanvas {
             initialized: false,
             initial_scale,
             fps: 60.0,
-            terrain_alpha: 30,
+            terrain_alpha: 5,
         }
     }
 

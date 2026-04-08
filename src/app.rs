@@ -646,6 +646,22 @@ impl CellWorldApp {
                     0.01,
                     0.0..=0.8,
                 );
+                changed |= config_drag_f64(
+                    ui,
+                    "地形坡度消耗",
+                    "上坡惩罚: move_cost*=1+max(dh/dist,0)*此值；下坡不补贴",
+                    &mut c.terrain_slope_cost,
+                    0.1,
+                    0.0..=10.0,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "地形海拔阻力",
+                    "远离中间舒适带惩罚: move_cost*=1+|h-中位|/range*此值",
+                    &mut c.terrain_altitude_cost,
+                    0.05,
+                    0.0..=5.0,
+                );
             });
 
             ui.collapsing("感知系统", |ui| {
