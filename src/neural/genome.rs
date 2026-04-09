@@ -514,9 +514,17 @@ impl Genome {
         }
     }
 
-    /// target_pref 变异：扰动现有条目 + 添加新条目 + 删除冷条目
+    /// target_pref 变异：遗忘 + 扰动现有条目 + 添加新条目 + 删除冷条目
     fn mutate_target_pref(probs: &mut ConnProbsGene, rate: f64, rng: &mut impl Rng) {
         const MAX_ENTRIES: usize = 16;
+        // 遗忘率：所有条目每代朝中性 1.0 衰减，半衰期约 17 代
+        // 选择压平衡点：≥4% 才能撑到 cap，2~3% 稳在 2~4，<1% 仅是软提示
+        const FORGET_RATE: f32 = 0.04;
+
+        // 操作0：遗忘——所有条目朝中性 1.0 衰减（无条件每代）
+        for w in probs.target_pref.values_mut() {
+            *w = *w * (1.0 - FORGET_RATE) + FORGET_RATE;
+        }
 
         // 操作1：扰动现有条目（对数空间，每条目独立判定）
         for w in probs.target_pref.values_mut() {
@@ -527,8 +535,8 @@ impl Genome {
             }
         }
 
-        // 操作2：添加新条目（中频）
-        if probs.target_pref.len() < MAX_ENTRIES && rng.gen::<f64>() < rate * 0.5 {
+        // 操作2：添加新条目（与删除等速，消除膨胀偏置）
+        if probs.target_pref.len() < MAX_ENTRIES && rng.gen::<f64>() < rate * 0.3 {
             // 在 -31..=31（排除 0）中随机选一个未出现的目标 block
             for _ in 0..8 {
                 let candidate: i8 = rng.gen_range(-31..=31);
@@ -541,8 +549,8 @@ impl Genome {
             }
         }
 
-        // 操作3：删除最接近 1.0 的冷条目（控制熵）
-        if !probs.target_pref.is_empty() && rng.gen::<f64>() < rate * 0.2 {
+        // 操作3：删除最接近 1.0 的冷条目（与添加等速）
+        if !probs.target_pref.is_empty() && rng.gen::<f64>() < rate * 0.3 {
             if let Some((&k, _)) = probs.target_pref.iter().min_by(|a, b| {
                 (a.1 - 1.0)
                     .abs()

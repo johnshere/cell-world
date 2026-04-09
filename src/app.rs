@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::render::{
-    format_dhms, PanelAction, RenderContext, Selection, StatsPanel, VisibleWorldBounds, WorldCanvas,
+    PanelAction, RenderContext, Selection, StatsPanel, VisibleWorldBounds, WorldCanvas,
 };
 use crate::snapshot::WorldSnapshot;
 use crate::store::{CreatureTemplate, Store};
@@ -83,6 +83,10 @@ impl CellWorldApp {
 
         let config = Config::load();
         let mut world = World::new(&config);
+        // 地形与 snapshot 解耦：启动时无条件读取独立 terrain.json
+        if let Some(loaded) = crate::world::TerrainMap::load_from_disk() {
+            world.terrain = loaded;
+        }
         let store = Store::new();
         world.dominant_species = store.dominant_species().clone();
         let now = std::time::Instant::now();
@@ -968,15 +972,6 @@ impl CellWorldApp {
                 egui::FontId::proportional(10.0),
                 label_color,
             );
-
-            // 时间标注
-            painter.text(
-                egui::pos2(rect.right() - 2.0, rect.bottom() - 2.0),
-                egui::Align2::RIGHT_BOTTOM,
-                format_dhms(t_max),
-                egui::FontId::proportional(10.0),
-                label_color,
-            );
         } else {
             painter.text(
                 rect.center(),
@@ -1249,6 +1244,13 @@ impl eframe::App for CellWorldApp {
             if let Ok(ws) = rx.try_recv() {
                 if let Err(e) = ws.save() {
                     eprintln!("保存快照失败: {}", e);
+                }
+                // 快照保存时同步写 terrain.json（地形已生成时才写）
+                let terrain = self.sim.snapshot().terrain.clone();
+                if terrain.is_generated() {
+                    if let Err(e) = terrain.save_to_disk() {
+                        eprintln!("保存地形失败: {}", e);
+                    }
                 }
                 self.snapshot_capture_rx = None;
             }

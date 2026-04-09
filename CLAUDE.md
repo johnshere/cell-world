@@ -75,7 +75,7 @@ cargo clippy          # 代码检查
   - 生成后**永久冻结**，`generated_radius` 快照与 UI 半径解耦；新扩展区域 `terrain_factor = 1.0`
   - 移动消耗 ×= `slope_factor × altitude_factor`：上坡费力（不补贴下坡）+ 远离中间舒适带费力
   - 配置项：`terrain_slope_cost`（默认 2.0）、`terrain_altitude_cost`（默认 0.5）
-  - 持久化方案 B：仅保存 `terrain_generated` 标志、半径、TerrainParams 快照，加载时按参数重新生成
+  - 持久化：地形独立 `terrain.json`（与 snapshot 解耦），⛰ 生成时立即写盘，启动无条件加载——无论"发现存档"对话框选恢复或新游戏，地形都保留
 
 ## 开发注意
 

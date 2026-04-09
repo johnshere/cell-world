@@ -175,6 +175,10 @@ fn sim_loop(
                     }
                     SimCommand::GenerateTerrain(params) => {
                         world.generate_terrain(&config, &params);
+                        // 立即写盘，下次启动可自动复用
+                        if let Err(e) = world.terrain.save_to_disk() {
+                            eprintln!("保存地形失败: {}", e);
+                        }
                     }
                     SimCommand::RestoreSnapshot(ws) => {
                         let (mut new_world, new_config) = ws.into_world();
@@ -182,6 +186,10 @@ fn sim_loop(
                         if new_config.neural_backend != "legacy" {
                             let bridge = crate::neural::thread::spawn_neural_thread(&new_config);
                             new_world.set_neural_bridge(bridge);
+                        }
+                        // 地形独立持久化：恢复存档时也从 terrain.json 读取
+                        if let Some(loaded) = crate::world::TerrainMap::load_from_disk() {
+                            new_world.terrain = loaded;
                         }
                         world = new_world;
                         config = new_config;

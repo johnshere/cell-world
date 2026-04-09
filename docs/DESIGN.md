@@ -68,7 +68,7 @@
 - **种子化**：所有随机来自单个 `u32 seed`，相同参数 + 相同 seed → 完全确定性的地形
 - **生成时机**：用户点击侧边栏 "⛰" 按钮触发（二次确认），按当前 `config.volcano_radius` 一次性生成；生成后**永久冻结**
 - **半径变更解耦**：`TerrainMap` 内保存 `generated_radius` 快照；后续 UI 调整 `volcano_radius` 不影响已生成地形；新扩展区域 `terrain_factor = 1.0`
-- **持久化**：仅保存 `terrain_generated` 标志和 `terrain_generated_radius`，加载时重新调用 `generate()` 重建（确定性算法，节省存档体积）
+- **持久化**：地形独立保存为 `terrain.json`，与 `snapshot.json` 解耦。⛰ 生成时立即写盘；启动时无条件加载——无论用户在"发现存档"对话框中选"恢复"或"新游戏"，地形都自动复用上一次的
 - **渲染**：`canvas.rs::draw_terrain` 在背景之后、网格之前绘制；颜色按高度归一化，深蓝→青蓝→暖橙的"海底→火山口"渐变（alpha≈110）
 
 ---

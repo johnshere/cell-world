@@ -9,9 +9,7 @@
 //! 设计原则：地形生成后**永久冻结**。后续 config.volcano_radius 调整不影响已生成区块；
 //! 若需重新生成需通过 TerrainMap::generate 显式调用。
 
-#[cfg(feature = "persistence")]
 use serde::{Deserialize, Serialize};
-
 use rustc_hash::FxHashMap;
 
 /// 渲染网格 / 地形 chunk 的世界坐标边长（像素）。
@@ -133,8 +131,8 @@ pub fn chunk_terrain_height(chunk_x: i32, chunk_y: i32, params: &TerrainParams) 
 // =====================================================================
 
 /// 已生成的地形数据
-#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize, Default, Clone))]
 #[cfg_attr(not(feature = "persistence"), derive(Default, Clone))]
+#[cfg_attr(feature = "persistence", derive(Clone))]
 pub struct TerrainMap {
     /// 已生成区块：(chunk_x, chunk_y) -> 高度
     pub chunks: FxHashMap<(i32, i32), i32>,
@@ -146,8 +144,86 @@ pub struct TerrainMap {
     pub min_h: i32,
     pub max_h: i32,
     /// 生成时锁定的参数（用于重建）
-    #[cfg_attr(feature = "persistence", serde(default))]
     pub generated_params: TerrainParamsPersist,
+}
+
+#[cfg(feature = "persistence")]
+impl Serialize for TerrainMap {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("generated", &self.generated)?;
+        map.serialize_entry("generated_radius", &self.generated_radius)?;
+        map.serialize_entry("min_h", &self.min_h)?;
+        map.serialize_entry("max_h", &self.max_h)?;
+        map.serialize_entry("generated_params", &self.generated_params)?;
+        // chunks: (i32,i32) key → "x,y" string
+        let chunks: std::collections::HashMap<String, i32> = self
+            .chunks
+            .iter()
+            .map(|(&(cx, cy), &h)| (format!("{},{}", cx, cy), h))
+            .collect();
+        map.serialize_entry("chunks", &chunks)?;
+        map.end()
+    }
+}
+
+#[cfg(feature = "persistence")]
+impl<'de> Deserialize<'de> for TerrainMap {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Helper {
+            generated: bool,
+            generated_radius: f64,
+            min_h: i32,
+            max_h: i32,
+            #[serde(default)]
+            generated_params: TerrainParamsPersist,
+            chunks: std::collections::HashMap<String, i32>,
+        }
+        let h = Helper::deserialize(deserializer)?;
+        let chunks: FxHashMap<(i32, i32), i32> = h
+            .chunks
+            .into_iter()
+            .filter_map(|(k, v)| {
+                let parts: Vec<&str> = k.split(',').collect();
+                if parts.len() == 2 {
+                    let cx = parts[0].parse().ok()?;
+                    let cy = parts[1].parse().ok()?;
+                    Some(((cx, cy), v))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        Ok(Self {
+            chunks,
+            generated: h.generated,
+            generated_radius: h.generated_radius,
+            min_h: h.min_h,
+            max_h: h.max_h,
+            generated_params: h.generated_params,
+        })
+    }
+}
+
+impl Default for TerrainMap {
+    fn default() -> Self {
+        Self {
+            chunks: FxHashMap::default(),
+            generated: false,
+            generated_radius: 0.0,
+            min_h: 8,
+            max_h: 8,
+            generated_params: TerrainParamsPersist::default(),
+        }
+    }
 }
 
 /// 持久化用：为 TerrainParams 提供 Default + Serde
@@ -266,6 +342,22 @@ impl TerrainMap {
         self.generated
     }
 
+    /// 保存到独立文件 `terrain.json`，与 snapshot 解耦。
+    /// ⛰ 生成地形时立即调用，确保下次启动可自动复用。
+    #[cfg(feature = "persistence")]
+    pub fn save_to_disk(&self) -> Result<(), String> {
+        let json = serde_json::to_string(self).map_err(|e| format!("地形序列化失败: {}", e))?;
+        std::fs::write(TERRAIN_PATH, json).map_err(|e| format!("地形写入失败: {}", e))?;
+        Ok(())
+    }
+
+    /// 从 `terrain.json` 加载。文件不存在或解析失败返回 `None`。
+    #[cfg(feature = "persistence")]
+    pub fn load_from_disk() -> Option<Self> {
+        let content = std::fs::read_to_string(TERRAIN_PATH).ok()?;
+        serde_json::from_str(&content).ok()
+    }
+
     /// 查询世界坐标 (x, y) 所在 chunk 的高度。未生成区域返回 None。
     pub fn height_at(&self, x: f64, y: f64) -> Option<i32> {
         if !self.generated {
@@ -276,3 +368,7 @@ impl TerrainMap {
         self.chunks.get(&(cx, cy)).copied()
     }
 }
+
+/// 独立地形文件路径（与 snapshot.json 解耦，启动时无条件加载）
+#[cfg(feature = "persistence")]
+const TERRAIN_PATH: &str = "terrain.json";
