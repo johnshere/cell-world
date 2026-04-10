@@ -20,6 +20,7 @@
 - **环境温度**：火山热（三次方衰减）+ 集体热（附近生物能量贡献），推动集群涌现
 - **痕迹点系统**：移动消耗转化为痕迹（能量守恒），可被吸收
 - **海底火山地形**：可由用户一次性生成的 fBm 噪声高度图（50×50 chunk，火山圆锥+多倍频噪声+种子），影响生物移动消耗（坡度+海拔阻力），生成后冻结
+- **时间模型**：固定步长 dt=1/30 模拟秒，加速通过每帧多次 update 实现（结果与速度无关）；SNN 每次 update 10 ticks（neural_tick_rate=300）；面板显示实际倍速
 
 ---
 
@@ -394,7 +395,7 @@ reproduce_cooldown = 20.0
 # SNN 神经后端
 neural_backend = "auto"        # auto | cpu | gpu | legacy
 snn_ticks_per_frame = 10
-neural_tick_rate = 600.0
+neural_tick_rate = 300.0        # 300 × (1/30) = 10 ticks/update
 compute_energy_factor = 10.5   # 算力转能量（除以 1e8，0 = 禁用）
 
 # 灭绝

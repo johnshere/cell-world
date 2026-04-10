@@ -11,8 +11,10 @@ use crate::snapshot::WorldSnapshot;
 use crate::world::world::{PerfStats, WorldStats};
 use crate::world::World;
 
-/// 模拟步长：每次 tick 推进 1/30 模拟秒
+/// 模拟步长：每次 update 推进固定 1/30 模拟秒，加速通过多次 update 实现
 const SIM_DT: f64 = 1.0 / 30.0;
+/// 渲染帧间隔：恒定 1/30 真实秒（~30fps），不随 speed 变化
+const FRAME_INTERVAL: Duration = Duration::from_nanos(33_333_333); // 1/30 s
 
 /// 模拟线程每帧导出给主线程的只读快照
 #[derive(Clone)]
@@ -34,6 +36,10 @@ pub struct SimSnapshot {
     pub sim_step_count: u64,
     /// 灭绝停止标志
     pub stop_extinction_triggered: bool,
+    /// 目标倍速
+    pub target_speed: f64,
+    /// 实际达到的倍速
+    pub actual_speed: f64,
     /// 地形快照（生成后冻结，每次都附带，便于渲染线程随时取用）
     pub terrain: TerrainMap,
 }
@@ -53,6 +59,8 @@ impl Default for SimSnapshot {
             volcano_countdown: 0.0,
             sim_step_count: 0,
             stop_extinction_triggered: false,
+            target_speed: 1.0,
+            actual_speed: 0.0,
             terrain: TerrainMap::default(),
         }
     }
@@ -136,11 +144,16 @@ fn sim_loop(
     let mut paused = false;
     let mut speed = config.initial_speed;
     let mut next_tick = Instant::now();
-    let mut tick_duration = Duration::from_secs_f64(SIM_DT / speed);
     let mut sim_step_count: u64 = 0;
+    // 累加器：支持非整数 speed（如 1.5 → 交替 1/2 次 update）
+    let mut speed_accumulator: f64 = 0.0;
+    // 实际速率统计
+    let mut actual_speed_timer = Instant::now();
+    let mut actual_speed_steps: u64 = 0;
+    let mut actual_speed: f64 = 0.0;
 
     // 导出初始快照
-    export_snapshot(&world, &config, &snapshot, speed, sim_step_count);
+    export_snapshot(&world, &config, &snapshot, speed, actual_speed, sim_step_count);
 
     loop {
         // 处理所有待处理命令
@@ -151,7 +164,6 @@ fn sim_loop(
                     SimCommand::Resume => paused = false,
                     SimCommand::SetSpeed(s) => {
                         speed = s;
-                        tick_duration = Duration::from_secs_f64(SIM_DT / speed);
                     }
                     SimCommand::SetConfig(c) => config = c,
                     SimCommand::SetViewport(min_x, min_y, max_x, max_y) => {
@@ -204,18 +216,31 @@ fn sim_loop(
             }
         }
 
-        // 固定步长模拟
+        // 固定步长模拟：dt 恒定 SIM_DT，speed 控制每帧 update 次数
         if !paused {
-            let sim_step = SIM_DT * speed;
-            world.update(sim_step, &config);
-            sim_step_count += 1;
+            speed_accumulator += speed;
+            let steps = speed_accumulator as usize;
+            speed_accumulator -= steps as f64;
+            for _ in 0..steps {
+                world.update(SIM_DT, &config);
+                sim_step_count += 1;
+                actual_speed_steps += 1;
+            }
+        }
+
+        // 每秒统计实际速率
+        let elapsed = actual_speed_timer.elapsed().as_secs_f64();
+        if elapsed >= 1.0 {
+            actual_speed = actual_speed_steps as f64 * SIM_DT / elapsed;
+            actual_speed_steps = 0;
+            actual_speed_timer = Instant::now();
         }
 
         // 导出快照
-        export_snapshot(&world, &config, &snapshot, speed, sim_step_count);
+        export_snapshot(&world, &config, &snapshot, speed, actual_speed, sim_step_count);
 
-        // 精确 sleep 到下一 tick
-        next_tick += tick_duration;
+        // 精确 sleep 到下一帧（恒定 ~30fps）
+        next_tick += FRAME_INTERVAL;
         let now = Instant::now();
         if next_tick > now {
             thread::sleep(next_tick - now);
@@ -231,7 +256,8 @@ fn export_snapshot(
     world: &World,
     config: &Config,
     snapshot: &Arc<RwLock<SimSnapshot>>,
-    _speed: f64,
+    target_speed: f64,
+    actual_speed: f64,
     sim_step_count: u64,
 ) {
     let world_stats = world.stats(config.species_similarity_threshold, config);
@@ -251,6 +277,8 @@ fn export_snapshot(
         volcano_countdown,
         sim_step_count,
         stop_extinction_triggered: world.stop_extinction_triggered,
+        target_speed,
+        actual_speed,
         terrain: world.terrain.clone(),
     };
 

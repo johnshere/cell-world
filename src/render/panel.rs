@@ -153,7 +153,7 @@ impl StatsPanel {
         &mut self,
         ui: &mut Ui,
         fps: f64,
-        sim_fps: f64,
+        actual_speed: f64,
         scale: f32,
         speed: &mut f64,
         paused: &mut bool,
@@ -189,7 +189,12 @@ impl StatsPanel {
 
         // FPS、缩放和时间
         ui.horizontal(|ui| {
-            ui.label(format!("FPS: {:.0} | SIM: {:.0} step/模拟s", fps, sim_fps));
+            let speed_label = if actual_speed > 0.0 && (*speed - actual_speed).abs() > 0.3 {
+                format!("FPS: {:.0} | 速度: {:.1}x/{:.1}x", fps, actual_speed, *speed)
+            } else {
+                format!("FPS: {:.0} | 速度: {:.1}x", fps, actual_speed)
+            };
+            ui.label(speed_label);
             ui.separator();
             ui.label(format!("×{:.2}", scale));
             ui.separator();

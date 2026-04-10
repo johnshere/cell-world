@@ -287,7 +287,7 @@ fn default_neural_backend() -> String {
     "auto".to_string()
 }
 fn default_neural_tick_rate() -> f64 {
-    600.0
+    300.0
 }
 
 impl Config {

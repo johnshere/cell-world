@@ -910,8 +910,8 @@ impl World {
                 }
             } else {
                 let perception = self.creatures[i].perception_cache;
-                // SNN tick 按 dt 缩放，保证每秒 sim-time tick 总数恒定
-                let snn_ticks = (config.neural_tick_rate * dt).round().max(1.0).min(100.0) as usize;
+                // SNN tick 按 dt 缩放，保证每模拟秒 tick 总数恒定（300 × 1/30 = 10 ticks/update）
+                let snn_ticks = (config.neural_tick_rate * dt).round().max(1.0) as usize;
                 let outputs = self.creatures[i].brain.tick_multi(&perception, snn_ticks);
                 for (j, &v) in outputs.iter().enumerate().take(7) {
                     self.creatures[i].last_outputs[j] = v;

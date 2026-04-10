@@ -33,8 +33,7 @@ pub struct CellWorldApp {
     fps: f64,
     frame_count: u32,
     fps_timer: std::time::Instant,
-    sim_fps: f64,
-    last_sim_step_count: u64,
+    actual_speed: f64,
     // 日志记录
     last_log_time: f64,
     log_initialized: bool,
@@ -117,8 +116,7 @@ impl CellWorldApp {
             fps: 0.0,
             frame_count: 0,
             fps_timer: now,
-            sim_fps: 0.0,
-            last_sim_step_count: 0,
+            actual_speed: 0.0,
             last_log_time: 0.0,
             log_initialized: false,
             selection: Selection::None,
@@ -1430,14 +1428,12 @@ impl eframe::App for CellWorldApp {
 
         let now = std::time::Instant::now();
 
-        // FPS 计算（真实帧率）+ SIM FPS
+        // FPS 计算（真实帧率）+ 从模拟线程读取实际速率
         self.frame_count += 1;
         let fps_elapsed = now.duration_since(self.fps_timer).as_secs_f64();
         if fps_elapsed >= 1.0 {
             self.fps = self.frame_count as f64 / fps_elapsed;
-            let current_sim_steps = self.sim.snapshot().sim_step_count;
-            self.sim_fps = (current_sim_steps - self.last_sim_step_count) as f64 / fps_elapsed;
-            self.last_sim_step_count = current_sim_steps;
+            self.actual_speed = self.sim.snapshot().actual_speed;
             self.frame_count = 0;
             self.fps_timer = now;
         }
@@ -1492,7 +1488,7 @@ impl eframe::App for CellWorldApp {
                 panel_action = self.panel.render(
                     ui,
                     self.fps,
-                    self.sim_fps,
+                    self.actual_speed,
                     self.canvas.scale,
                     &mut self.speed,
                     &mut self.paused,
