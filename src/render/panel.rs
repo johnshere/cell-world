@@ -189,7 +189,7 @@ impl StatsPanel {
 
         // FPS、缩放和时间
         ui.horizontal(|ui| {
-            ui.label(format!("FPS: {:.0} | SIM: {:.0}", fps, sim_fps));
+            ui.label(format!("FPS: {:.0} | SIM: {:.0} step/模拟s", fps, sim_fps));
             ui.separator();
             ui.label(format!("×{:.2}", scale));
             ui.separator();
@@ -505,7 +505,8 @@ impl StatsPanel {
                             self.save_dialog_open = true;
                             let version = env!("CARGO_PKG_VERSION");
                             let now = chrono::Local::now();
-                            self.save_name = format!("生物_v{}_{}", version, now.format("%m%d_%H%M"));
+                            self.save_name =
+                                format!("生物_v{}_{}", version, now.format("%m%d_%H%M"));
                         }
                     });
 

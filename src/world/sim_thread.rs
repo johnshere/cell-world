@@ -11,7 +11,7 @@ use crate::snapshot::WorldSnapshot;
 use crate::world::world::{PerfStats, WorldStats};
 use crate::world::World;
 
-/// 模拟步长：固定 30Hz
+/// 模拟步长：每次 tick 推进 1/30 模拟秒
 const SIM_DT: f64 = 1.0 / 30.0;
 
 /// 模拟线程每帧导出给主线程的只读快照
@@ -136,7 +136,7 @@ fn sim_loop(
     let mut paused = false;
     let mut speed = config.initial_speed;
     let mut next_tick = Instant::now();
-    let tick_duration = Duration::from_secs_f64(SIM_DT);
+    let mut tick_duration = Duration::from_secs_f64(SIM_DT / speed);
     let mut sim_step_count: u64 = 0;
 
     // 导出初始快照
@@ -149,7 +149,10 @@ fn sim_loop(
                 Ok(cmd) => match cmd {
                     SimCommand::Pause => paused = true,
                     SimCommand::Resume => paused = false,
-                    SimCommand::SetSpeed(s) => speed = s,
+                    SimCommand::SetSpeed(s) => {
+                        speed = s;
+                        tick_duration = Duration::from_secs_f64(SIM_DT / speed);
+                    }
                     SimCommand::SetConfig(c) => config = c,
                     SimCommand::SetViewport(min_x, min_y, max_x, max_y) => {
                         world.set_viewport(min_x, min_y, max_x, max_y);
