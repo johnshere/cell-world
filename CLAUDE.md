@@ -1,8 +1,19 @@
 # CLAUDE.md
 
-Cell-World v1.0 神经网络涌现生态模拟器 - Claude Code 开发指南
+Cell-World 神经网络涌现生态模拟器 - Claude Code 开发指南
 
 > **完整设计文档**: [docs/DESIGN.md](docs/DESIGN.md)
+
+## ⚠️ 文档同步铁律
+
+**每次修改代码都必须同步更新 CLAUDE.md 和 docs/DESIGN.md**，这是强制要求，不是建议。
+
+- 修改核心行为、数据结构、模块职责、架构、配置字段、关键常量 → 必须立刻更新两个文档中对应的段落
+- 新增/删除文件 → 必须更新 CLAUDE.md 的"核心模块"表
+- 修改时间模型、神经后端、线程通信协议 → 必须更新"关键设计"和 DESIGN.md "技术栈/世界特性"
+- 提交前自查：能否从文档推导出当前代码行为？不能就说明文档已过时
+
+文档失真比代码 bug 更难发现，一旦过时，未来的修改会基于错误的假设做出错误的决策。
 
 ## 常用命令
 
@@ -16,28 +27,52 @@ cargo clippy          # 代码检查
 
 ## 核心模块
 
-| 模块     | 文件                    | 职责                        |
-| -------- | ----------------------- | --------------------------- |
-| 神经网络 | `src/neural/genome.rs`  | NEAT 基因组，结构变异       |
-|          | `src/neural/network.rs` | 神经网络前向传播            |
-| 世界系统 | `src/world/world.rs`    | 主循环、感知、动作执行      |
-|          | `src/world/creature.rs` | 生物结构                    |
-|          | `src/world/energy.rs`   | 能量粒子                    |
-|          | `src/world/trail.rs`    | 痕迹点系统                  |
-|          | `src/world/spatial.rs`  | 空间索引 O(1) 查询          |
-|          | `src/world/terrain.rs`  | 50×50 chunk fBm 噪声高度图（火山圆锥+多倍频噪声，生成后冻结）|
-| 渲染     | `src/render/canvas.rs`  | 画布渲染、拖拽缩放          |
-|          | `src/render/panel.rs`   | 侧边栏统计面板              |
-| 应用     | `src/app.rs`            | egui 应用主循环、日志、选中 |
-| 配置     | `src/config.rs`         | 参数配置                    |
-| 存储     | `src/store.rs`          | 生物模板存档（JSON）        |
+| 模块     | 文件                       | 职责                                                  |
+| -------- | -------------------------- | ----------------------------------------------------- |
+| 神经网络 | `src/neural/genome.rs`     | NEAT 基因组，结构变异，MutationGene 双速率            |
+|          | `src/neural/spiking.rs`    | CPU SpikingNetwork 前向传播（legacy/cpu 后端）        |
+|          | `src/neural/block.rs`      | 分区（感官/联合/运动），ConnProbs 区块连接概率基因    |
+|          | `src/neural/bridge.rs`     | 同步批处理桥（TickRequest/TickResponse mpsc 通道）    |
+|          | `src/neural/thread.rs`     | 神经线程入口，TickExecutor trait，CpuExecutor 实现    |
+|          | `src/neural/gpu.rs`        | GPU 后端（wgpu），批处理 run_batch + 单次 readback    |
+|          | `src/neural/snn_tick.wgsl` | Compute shader：atomic spike 累加 + first_outputs     |
+|          | `src/neural/slot_alloc.rs` | GPU 固定槽位分配（MAX_CREATURES=512）                 |
+| 世界系统 | `src/world/world.rs`       | 主循环、感知、动作执行、bridge 同步调用              |
+|          | `src/world/sim_thread.rs`  | sim 线程入口，命令处理，快照导出                     |
+|          | `src/world/creature.rs`    | 生物结构                                              |
+|          | `src/world/energy.rs`      | 能量粒子                                              |
+|          | `src/world/trail.rs`       | 痕迹点系统                                            |
+|          | `src/world/spatial.rs`     | 空间索引 O(1) 查询                                    |
+|          | `src/world/terrain.rs`     | 50×50 chunk fBm 噪声高度图（生成后冻结）              |
+| 渲染     | `src/render/canvas.rs`     | 画布渲染、拖拽缩放                                    |
+|          | `src/render/panel.rs`      | 侧边栏统计面板                                        |
+| 应用     | `src/app.rs`               | egui 应用主循环、日志、选中                           |
+| 配置     | `src/config.rs`            | 参数配置                                              |
+| 存储     | `src/store.rs`             | 生物模板存档（JSON）                                  |
 
 ## 关键设计
 
-- **时间模型**: 固定步长 dt=1/30 模拟秒，加速通过每帧多次 update 实现；SNN 每次 update 固定 10 ticks（neural_tick_rate=300）
-  - **Legacy 后端**（本机 CPU）：世界/神经同一次 update 原子推进，严格 1:1，加速不影响结果
-  - **Bridge 后端**（异步/远程 GPU）：世界和神经解耦，容易出现"世界跑 10x、神经只跑 3x"的失真。采用自适应反压：`effective_speed = min(target, max(1, ceil(neural_smooth × 1.2)))`，EMA τ=2s 平滑神经吞吐，探针比例 ×1.2 让世界略领先以逼近 target；失真上界 ≤1/(N+1) 的决策漂移（一帧内首个 sub-step 用新鲜决策、其余用缓存）
-  - 面板速度标签：bridge 模式且神经显著落后时显示"神经/世界"双值，否则单值；目标倍速在滑杆上
+- **线程架构**: 三线程解耦
+  - UI 主线程（egui 渲染、面板、输入）
+  - sim 线程（world.update、感知并行、动作串行、快照导出，`sim_thread::spawn_sim_thread`）
+  - neural 线程（SNN 批处理，`neural::thread::spawn_neural_thread`，仅 bridge 模式存在）
+  - UI ↔ sim：`mpsc::Sender<SimCommand>`（命令）+ `Arc<RwLock<SimSnapshot>>`（快照数据）
+  - sim ↔ neural：`NeuralBridge` 内 `mpsc<TickRequest>`/`mpsc<TickResponse>`
+  - sim 墙钟节拍 = 1/30s（固定），每拍做 `speed × N` 次 `world.update(SIM_DT)`
+- **时间模型**: 固定步长 dt=1/30 模拟秒，加速通过每帧多次 update 实现；SNN 每次 update 固定 10 ticks（neural_tick_rate=300，`300 × 1/30 = 10 ticks/update`）
+- **加速语义主旨**: **加速只是更快获得结果，不影响结果**。任意倍速 v 下，给定初始状态 $S_0$ 和配置 $C$，运行 K 次 update 后的状态 $S_K$ 与 v 无关（二进制一致）
+  - **Legacy 后端**（`neural_backend="legacy"`）：world.update 内直接调用 `brain.tick_multi(perception, 10)`，CPU SpikingNetwork 原子推进
+  - **Bridge 后端**（`auto`/`cpu`/`gpu`）：world 每次 update 向 neural 线程发送 `TickRequest { events, inputs, tick_count=10 }`，**同步阻塞等** `TickResponse`。neural 线程完全由 world 驱动，没有独立节奏、没有反压、没有墙钟
+  - 两种后端都严格保持主旨
+- **GPU 批内单次 readback（C 方案）**: Bridge + GPU 模式的关键优化
+  - Shader（`snn_tick.wgsl`）：`binding 4=spike_counts (atomic<u32>)`、`5=first_outputs (f32)`、`6=tick_params uniform`
+  - 批开始：CPU 清零 spike_counts + first_outputs GPU 缓冲
+  - 批内每个 tick：write_tick_index → 独立 submit 一次 dispatch（ping-pong bind group 预构建）
+  - Shader 行为：tick 0 写直读输出到 first_outputs；所有 tick 内发放的输出节点 `atomicAdd(&spike_counts[out])`
+  - 批末尾：一次 `copy_buffer_to_buffer` 把 spike_counts + first_outputs 连续拷到 staging，`map_async` + `Maintain::Wait` 一次性读回
+  - CPU 侧按 `output_modes_cache` 决定每个输出是取 first_outputs 还是 `spike_counts / tick_count × 2 - 1`
+  - 对比旧方案：从每 tick 1 次 readback + spin_loop → 每批 1 次 readback + Wait，CPU↔GPU 同步开销 10×
+- **面板速度**: 同步批处理模型下只有单一"FPS: X | 速度: Nx"显示。历史上的"神经/世界"双值已移除（反压已删除）
 - **无限世界**: 无边界，视窗可自由拖拽缩放
 - **火山 + 陨石能量**: 火山定期喷发，陨石随机降落；间隔和能量均受正弦周期调制（模拟季节）
 - **感知系统（扫描眼）**:
@@ -84,15 +119,20 @@ cargo clippy          # 代码检查
 ## 开发注意
 
 1. NEAT 变异: `genome.rs` → `mutate(conf)` 使用 `MutationGene { base, block }` 双速率控制；base 管常规权重/连接/SNN/Layer，block 管 block 编号迁移与 conn_probs
-2. 感知系统: `world.rs` → `compute_perception_scanning()` 扫描推进+`compute_perception_scanning_inner()` 窄波束检测粒子/生物/痕迹
-3. 动作执行: `world.rs` → `execute_actions()` 7 输出映射（全直读），嘴巴食物吸收不受冷却限制，咬受冷却限制
-4. 战力+咬合: `config.rs` → `combat_power()` 公式，`world.rs` → 咬时攻方战力 × 咬合力 vs 守方战力
-5. 周围能量: `world.rs` → `compute_nearby_energy()` 查询 vision_range 内粒子+生物总能量
-6. 空间索引使用 FxHashMap，查询复用缓冲区避免分配（creature/energy 两套）
-7. 种族聚类: `calculate_clan_cache()` 每秒更新一次
-8. 所有复杂行为应是进化结果，避免硬编码
-9. 繁殖阈值和子代能量比例由神经网络输出[4][5]控制，非固定参数
-10. 周围能量密度是推动集群行为涌现的核心机制：生物聚集 →nearby_energy 升高 → 散热降低 → 存活率提升
+2. 感知系统: `world.rs` → `compute_perception_pure()` 窄波束扫描，左右眼各 8 通道，并行阶段使用（rayon）
+3. 动作执行: `world.rs` → `execute_actions()` 7 输出映射（全直读），嘴巴食物吸收不受冷却限制，咬受冷却限制。这部分是串行的，O(N) 扩展瓶颈
+4. update_creatures 三阶段:
+   - 2a 并行感知 + 应用代谢结果 + 收集 bridge_inputs
+   - 2b 同步调用 `bridge.run_batch_sync(inputs, 10)` 拿 fresh outputs
+   - 2c 串行动作执行 + reward
+5. 战力+咬合: `config.rs` → `combat_power()` 公式，`world.rs` → 咬时攻方战力 × 咬合力 vs 守方战力
+6. 周围能量: `world.rs` → `compute_nearby_energy_pure()` 查询 vision_range 内粒子+生物总能量
+7. 空间索引使用 FxHashMap，查询复用缓冲区避免分配（creature/energy 两套）
+8. 种族聚类: `calculate_clan_cache()` 每秒更新一次
+9. 神经后端切换: `config.toml` 的 `neural_backend = auto | cpu | gpu | legacy`；legacy 在 world 内直跑 CPU，其他通过 bridge 跑神经线程
+10. 所有复杂行为应是进化结果，避免硬编码
+11. 繁殖阈值和子代能量比例由神经网络输出[4][5]控制，非固定参数
+12. 周围能量密度是推动集群行为涌现的核心机制：生物聚集 →nearby_energy 升高 → 散热降低 → 存活率提升
 
 ## 待办
 
@@ -111,4 +151,4 @@ cargo clippy          # 代码检查
 
 ## 更新文档
 
-每次更新代码、更新版本号时都要更新文档；claude.md、design.md 两个文档，必须与代码保持一致
+见本文件最上方"⚠️ 文档同步铁律"。每次代码修改都是一次文档同步机会，不要等到"功能完成"再集中更新——那时候细节已经丢失。

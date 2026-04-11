@@ -20,10 +20,22 @@
 - **环境温度**：火山热（三次方衰减）+ 集体热（附近生物能量贡献），推动集群涌现
 - **痕迹点系统**：移动消耗转化为痕迹（能量守恒），可被吸收
 - **海底火山地形**：可由用户一次性生成的 fBm 噪声高度图（50×50 chunk，火山圆锥+多倍频噪声+种子），影响生物移动消耗（坡度+海拔阻力），生成后冻结
-- **时间模型**：固定步长 dt=1/30 模拟秒，加速通过每帧多次 update 实现；SNN 每次 update 10 ticks（neural_tick_rate=300）
-  - Legacy 后端：世界/神经原子推进，严格 1:1，加速不影响结果
-  - Bridge 后端：世界和神经异步解耦，用自适应反压限制世界倍速：`effective = min(target, max(1, ceil(neural_smooth × 1.2)))`，EMA τ=2s，探针比例 ×1.2；允许 ≤1/(N+1) 决策漂移以换取逼近 target
-  - 面板速度：bridge 模式神经落后时显示"神经/世界"双值，否则单值；目标倍速在滑杆上
+- **时间模型**：固定步长 `dt = SIM_DT = 1/30` 模拟秒；加速通过每帧多次 `world.update` 实现；SNN 每次 update 固定 10 ticks（`neural_tick_rate = 300`，`300 × 1/30 = 10`）
+- **加速语义主旨**：**加速只是更快获得结果，不影响结果**。任意倍速 v 下，给定 (S₀, config)，K 次 update 后的状态 S_K 与 v 二进制一致
+- **三线程架构**：
+  - UI 主线程：egui 渲染、面板、输入
+  - sim 线程：`world.update`（感知并行 + 动作串行）、快照导出，墙钟节拍 1/30s
+  - neural 线程（仅 bridge 模式）：SNN 批处理，由 sim 请求驱动，无独立节奏
+- **神经后端（两种都保持主旨）**：
+  - **Legacy**（`neural_backend="legacy"`）：world.update 直接调用 `brain.tick_multi(perception, 10)`，CPU SpikingNetwork 原子推进
+  - **Bridge**（`auto`/`cpu`/`gpu`）：world 每次 update 向 neural 线程发送 `TickRequest { events, inputs, tick_count=10 }` 并**同步阻塞等** `TickResponse`。neural 线程 `req_rx.recv()` 阻塞驱动，不按墙钟
+- **GPU 批内单次 readback（C 方案，bridge+gpu 专属优化）**：
+  - Shader 新增 binding：`4=spike_counts (atomic<u32>)`、`5=first_outputs (f32)`、`6=tick_params uniform`
+  - 批开始：清零 spike_counts + first_outputs GPU 缓冲
+  - 批内 10 个 dispatch：tick 0 写 first_outputs，每次 fire 时 `atomicAdd(&spike_counts[out])`
+  - 批末尾：一次 `copy_buffer_to_buffer` 把两段连续拷贝到 staging，`map_async` + `Maintain::Wait` 一次拉回
+  - 相比历史 per-tick readback + spin_loop，CPU↔GPU 同步开销降低 10×
+- **面板速度**：同步批处理下只有单值"FPS: X | 速度: Nx"；历史上的"神经/世界"双值和反压机制均已删除
 
 ---
 
@@ -430,7 +442,16 @@ auto_spawn_interval = 45.0
 - [x] **变异率拆分**：`MutationGene { base, block }`，由生物自演化
 - [x] **温泉系统**：动态生成/消亡的次级能量源
 - [x] **算力换能量**：神经计算时长可转化为生物能量（compute_energy_factor）
-- [x] 多神经后端：CPU SNN / GPU SNN / 可选异步线程
+- [x] 多神经后端：CPU SNN / GPU SNN / legacy 直跑
+
+### v2.4 - 同步批处理 Bridge + GPU readback 合批 ✅
+- [x] Bridge 协议从异步双缓冲改为**请求-响应同步** channel（`TickRequest`/`TickResponse`）
+- [x] Neural 线程从墙钟固定频率改为 `req_rx.recv()` 阻塞驱动，完全由 world 驱动
+- [x] 删除反压机制（`effective_speed = min(target, neural_smooth × 1.2)` 及相关 EMA 采样）
+- [x] 确立"加速只是更快获得结果，不影响结果"主旨：10 ticks/update 固定，任何倍速下结果二进制一致
+- [x] GPU 路径批内单次 readback：shader 端 atomic spike 累加 + tick 0 写 first_outputs，批末尾一次性 `copy_buffer_to_buffer` 拉回两段
+- [x] TickExecutor trait 新接口 `run_batch(inputs, tick_count)` 替换 `inject_inputs/tick/read_outputs` 三步
+- [x] 面板单值速度，删除"神经/世界"双值显示
 
 ### 未来方向
 - [ ] 长时间运行稳定性验证
