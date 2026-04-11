@@ -141,6 +141,9 @@ impl NeuralBridgeHandle {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
         {
+            // 成功消费一次新感知 = 一次跟上世界 sub-step 的决策轮
+            // 计数用于 sim_thread 反压探针，值与 target speed 倍率同单位
+            self.inference_count.fetch_add(1, Ordering::Relaxed);
             if let Ok(mut back) = self.input_back.lock() {
                 Some(std::mem::take(&mut *back))
             } else {
@@ -155,8 +158,6 @@ impl NeuralBridgeHandle {
         if let Ok(mut back) = self.output_back.lock() {
             *back = outputs;
         }
-        // 每完成一轮推理都计数（空批也算，用于反压探针）
-        self.inference_count.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn drain_events(&self) -> Vec<CreatureEvent> {
