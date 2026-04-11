@@ -98,10 +98,19 @@ cargo clippy          # 代码检查
 - **咬合系统**: 咬合力=|mouth|（mouth<-0.1 触发），伤害=战力比 ×bite_transfer_rate(0.8)，无额外咬消耗，冷却 1s；喂食机制已移除，能量分享通过痕迹实现
 - **战力系统**: 战力 = f(能量, 速度, 同族援助)，咬时攻方乘咬合力；同族援助范围=vision_range
 - **物理约束**: 存在消耗（基础代谢 × 年龄倍率+体温逸散）、繁殖成本（神经控制 10%~50%）、死亡条件（能量 ≤0）
-- **变异率基因 (MutationGene)**: 拆分为两个独立速率
-  - `base`（默认 0.15）：权重、连接增删、SNN 参数、Layer 切换、learning/reward 基因变异
-  - `block`（默认 0.15）：联合区 block 编号变异、conn_probs 区块概率基因变异
-  - 两者各自独立演化（自变异时彼此独立，clamp 0.01~0.30）
+- **变异率（v2.5 改为全局常量）**: `config.mutation_rate` 单一字段（默认 0.15）
+  - 同时作为 base/block 两类变异的触发概率
+  - **不再是基因组内可演化基因**（`MutationGene` 已删除）
+  - 原因：自适应变异率在稳定环境下必然塌到下界，拖累演化
+  - 想调节探索强度直接改 config
+- **Crossover（v2.5 改为全原子孟德尔）**: 所有连续参数按"原子"整取，不做算术平均
+  - 原子粒度：每条共享连接 / 每个共享节点 / 每个 block 的 ConnProbsGene / LearningGene 整块 / RewardGene 整块
+  - crossover 不创造新值，只重组；创造新值是 mutation 的职责
+  - 结果：crossover 不再主动收缩群体方差，多样性保持完全依赖 mutation 注入
+- **交配阈值（v2.5）**: `find_mate` 使用 `species_similarity_threshold × 0.9` 作为交配相似度下限
+  - 聚类阈值（0.95）严格 → 显示上的种族区分
+  - 交配阈值（0.855）宽松 → 允许跨 clan 基因流
+  - 目的：打破单一优势种垄断，保持种群遗传多样性
 - **祖先追溯聚类**: 沿 parent_id 追溯最老活祖先，相似度 ≥0.9 归入同族
 - **正弦周期调制**: 火山/陨石的间隔和能量均随时间正弦波动，不同周期交织形成复杂环境
 - **地形系统（手动生成，fBm 噪声）**:
@@ -118,7 +127,7 @@ cargo clippy          # 代码检查
 
 ## 开发注意
 
-1. NEAT 变异: `genome.rs` → `mutate(conf)` 使用 `MutationGene { base, block }` 双速率控制；base 管常规权重/连接/SNN/Layer，block 管 block 编号迁移与 conn_probs
+1. NEAT 变异: `genome.rs` → `mutate(conf)` 从 `conf.mutation_rate` 读取触发概率；base 管常规权重/连接/SNN/Layer，block 管 block 编号迁移与 conn_probs，两者目前共享同一个全局 rate
 2. 感知系统: `world.rs` → `compute_perception_pure()` 窄波束扫描，左右眼各 8 通道，并行阶段使用（rayon）
 3. 动作执行: `world.rs` → `execute_actions()` 7 输出映射（全直读），嘴巴食物吸收不受冷却限制，咬受冷却限制。这部分是串行的，O(N) 扩展瓶颈
 4. update_creatures 三阶段:

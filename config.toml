@@ -142,6 +142,9 @@ snn_ticks_per_frame = 10
 neural_backend = "auto"
 # 异步模式 tick 频率 (ticks/s)
 neural_tick_rate = 300.0
+# 变异率（全局常量，不再是基因组内可演化基因）
+# base/block 两类变异共享此触发概率
+mutation_rate = 0.15
 base_metabolism = 0.025
 max_speed = 20.0
 meteorite_interval = 0.0

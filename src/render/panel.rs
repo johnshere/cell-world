@@ -603,10 +603,9 @@ impl StatsPanel {
                     let hidden = node_count.saturating_sub(
                         crate::neural::Genome::INPUT_SIZE + crate::neural::Genome::OUTPUT_SIZE,
                     );
-                    let mr = &creature.genome.mutation_rate;
                     ui.label(format!(
-                        "节点:{} (隐:{})  连接:{}  变异率(b:{:.2} blk:{:.2})",
-                        node_count, hidden, conn_count, mr.base, mr.block
+                        "节点:{} (隐:{})  连接:{}",
+                        node_count, hidden, conn_count
                     ));
 
                     // 目标偏好基因（target_pref）

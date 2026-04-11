@@ -211,6 +211,11 @@ pub struct Config {
     #[serde(default = "default_neural_tick_rate")]
     pub neural_tick_rate: f64,
 
+    /// 变异率（全局常量，不再是基因组内可演化基因）
+    /// 同时作为 base/block 两类变异的触发概率
+    #[serde(default = "default_mutation_rate")]
+    pub mutation_rate: f64,
+
     // === 地形 ===
     /// 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
     #[serde(default = "default_terrain_slope_cost")]
@@ -288,6 +293,9 @@ fn default_neural_backend() -> String {
 }
 fn default_neural_tick_rate() -> f64 {
     300.0
+}
+fn default_mutation_rate() -> f64 {
+    0.15
 }
 
 impl Config {

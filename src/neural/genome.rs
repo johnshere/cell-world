@@ -76,24 +76,6 @@ impl Default for ConnProbsGene {
 /// 变异基因（控制各类变异的概率）
 // ============================================================================
 
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
-pub struct MutationGene {
-    /// 基础变异率：权重、启用/禁用、添加连接、SNN参数、layer切换
-    pub base: f64,
-    /// 分区变异率：block移动、区块概率基因变异
-    pub block: f64,
-}
-
-impl Default for MutationGene {
-    fn default() -> Self {
-        Self {
-            base: 0.15,
-            block: 0.15,
-        }
-    }
-}
-
 // ============================================================================
 /// 学习基因（控制神经网络如何从经验中学习）
 // ============================================================================
@@ -200,9 +182,6 @@ pub struct Genome {
     pub learning: LearningGene,
     /// 奖励基因
     pub reward: RewardGene,
-
-    /// 变异率基因
-    pub mutation_rate: MutationGene,
 
     next_node_id: usize,
     /// 预排序的启用连接缓存（用于快速 similarity 比较，避免每次重复排序+分配）
@@ -353,7 +332,6 @@ impl Genome {
             conn_probs: block_probs,
             learning: LearningGene::default(),
             reward: RewardGene::default(),
-            mutation_rate: MutationGene::default(),
             next_node_id: next_id,
             sorted_conns_cache: Vec::new(),
         };
@@ -380,10 +358,10 @@ impl Genome {
             .sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
     }
 
-    /// 变异（分离 base 和 block 变异率）
+    /// 变异（base/block 两类共享 config.mutation_rate）
     pub fn mutate(&self, conf: &Config) -> Self {
-        let base_rate = self.mutation_rate.base;
-        let block_rate = self.mutation_rate.block;
+        let base_rate = conf.mutation_rate;
+        let block_rate = conf.mutation_rate;
         let mut rng = rand::thread_rng();
         let mut child = self.clone();
 
@@ -465,39 +443,8 @@ impl Genome {
         // reward基因变异（使用 base_rate）
         child.mutate_reward_gene(base_rate);
 
-        // mutation_rate基因自身变异：base 和 block 独立变异
-        child.mutate_mutation_rate_gene();
-
         child.rebuild_sorted_cache();
         child
-    }
-
-    /// mutation_rate基因自身变异（base 和 block 独立变异）
-    /// 触发概率使用固定的元变异率，避免低变异率个体陷入"自我抑制"死锁；
-    /// 步长使用对数空间乘性扰动，避免 clamp 在下界处的下偏漂移。
-    fn mutate_mutation_rate_gene(&mut self) {
-        const META_MUTATION_RATE: f64 = 0.1;
-        let mut rng = rand::thread_rng();
-
-        // base 变异
-        if rng.gen::<f64>() < META_MUTATION_RATE {
-            if rng.gen::<f64>() < 0.9 {
-                let factor = rng.gen_range(-0.3..0.3_f64).exp();
-                self.mutation_rate.base = (self.mutation_rate.base * factor).clamp(0.05, 0.30);
-            } else {
-                self.mutation_rate.base = rng.gen_range(0.05..0.30);
-            }
-        }
-
-        // block 变异
-        if rng.gen::<f64>() < META_MUTATION_RATE {
-            if rng.gen::<f64>() < 0.9 {
-                let factor = rng.gen_range(-0.3..0.3_f64).exp();
-                self.mutation_rate.block = (self.mutation_rate.block * factor).clamp(0.05, 0.30);
-            } else {
-                self.mutation_rate.block = rng.gen_range(0.05..0.30);
-            }
-        }
     }
 
     /// block_probs基因变异（使用统一rate）
@@ -984,6 +931,21 @@ impl Genome {
     }
 
     /// NEAT 有性繁殖：两个父代基因交叉产生子代
+    /// Crossover（全原子孟德尔遗传）
+    ///
+    /// 所有连续参数按"原子"（不可分割的功能单元）从某一父代整取，
+    /// crossover 不创造新值，只做重组。新值由 mutation 提供。
+    /// 这保证 crossover 算子不会主动收缩群体方差。
+    ///
+    /// 原子粒度：
+    /// - 每条共享连接（整个 ConnectionGene）
+    /// - 每个共享节点（整个 NodeGene，含 SNN 参数和 layer）
+    /// - 每个 block 的 ConnProbsGene（整块）
+    /// - LearningGene（整块）
+    /// - RewardGene（整块）
+    ///
+    /// 独有连接/节点来自 fitter（标准 NEAT excess/disjoint），
+    /// 保留 weaker 独有节点以防基因流失（和旧代码一致）。
     pub fn crossover(parent_a: &Genome, parent_b: &Genome, a_is_fitter: bool) -> Genome {
         let (fitter, weaker) = if a_is_fitter {
             (parent_a, parent_b)
@@ -991,29 +953,29 @@ impl Genome {
             (parent_b, parent_a)
         };
 
-        // 构建 weaker 的连接映射
+        let mut rng = rand::thread_rng();
+
+        // === 连接：按位孟德尔 ===
         let weaker_conns: std::collections::HashMap<(usize, usize), &ConnectionGene> = weaker
             .connections
             .iter()
             .map(|c| ((c.in_node, c.out_node), c))
             .collect();
 
-        // 保守交叉：共享连接取权重平均值，独有连接继承自强者
         let mut child_connections = Vec::new();
         for conn in &fitter.connections {
             let key = (conn.in_node, conn.out_node);
             if let Some(&weaker_conn) = weaker_conns.get(&key) {
-                // 双方共有的连接：权重取平均，保留功能共识
-                let mut blended = conn.clone();
-                blended.weight = (conn.weight + weaker_conn.weight) / 2.0;
-                blended.enabled = conn.enabled || weaker_conn.enabled;
-                child_connections.push(blended);
+                // 共有连接：整条 50/50 选一方
+                let picked = if rng.gen_bool(0.5) { conn } else { weaker_conn };
+                child_connections.push(picked.clone());
             } else {
+                // fitter 独有：继承 fitter
                 child_connections.push(conn.clone());
             }
         }
 
-        // 节点：取两方并集，共有节点 SNN 参数取平均
+        // === 节点：按 id 孟德尔 ===
         let weaker_nodes: std::collections::HashMap<usize, &NodeGene> =
             weaker.nodes.iter().map(|n| (n.id, n)).collect();
 
@@ -1021,16 +983,19 @@ impl Genome {
         let mut child_nodes = Vec::new();
         for node in &fitter.nodes {
             node_ids.insert(node.id);
-            let mut blended = node.clone();
-            if let Some(&weaker_node) = weaker_nodes.get(&node.id) {
-                blended.decay = (node.decay + weaker_node.decay) / 2.0;
-                blended.threshold = (node.threshold + weaker_node.threshold) / 2.0;
-                blended.refractory_period = ((node.refractory_period as u16
-                    + weaker_node.refractory_period as u16)
-                    / 2) as u8;
-            }
-            child_nodes.push(blended);
+            let picked = if let Some(&weaker_node) = weaker_nodes.get(&node.id) {
+                // 共有节点：整个 NodeGene 50/50 选一方
+                if rng.gen_bool(0.5) {
+                    node.clone()
+                } else {
+                    weaker_node.clone()
+                }
+            } else {
+                node.clone()
+            };
+            child_nodes.push(picked);
         }
+        // weaker 独有节点保留（避免基因流失）
         for node in &weaker.nodes {
             if !node_ids.contains(&node.id) {
                 node_ids.insert(node.id);
@@ -1040,7 +1005,7 @@ impl Genome {
 
         let next_node_id = fitter.next_node_id.max(weaker.next_node_id);
 
-        // block_probs 交叉：逐block独立交叉
+        // === conn_probs：每个 block 作为原子 ===
         let child_block_probs = {
             let mut block_probs = HashMap::new();
             let all_blocks: std::collections::HashSet<i8> = fitter
@@ -1050,38 +1015,16 @@ impl Genome {
                 .cloned()
                 .collect();
             for blk in all_blocks {
-                let fitter_probs = fitter.conn_probs.get(&blk);
-                let weaker_probs = weaker.conn_probs.get(&blk);
-                let merged = match (fitter_probs, weaker_probs) {
+                let fp = fitter.conn_probs.get(&blk);
+                let wp = weaker.conn_probs.get(&blk);
+                let merged = match (fp, wp) {
                     (Some(fp), Some(wp)) => {
-                        let mut proc = [0.0; 5];
-                        let mut out = [0.0; 5];
-                        for i in 0..5 {
-                            proc[i] = (fp.proc[i] + wp.proc[i]) / 2.0;
-                            out[i] = (fp.out[i] + wp.out[i]) / 2.0;
+                        // 共有 block：整个 ConnProbsGene 50/50 选一方
+                        if rng.gen_bool(0.5) {
+                            fp.clone()
+                        } else {
+                            wp.clone()
                         }
-                        // 归一化
-                        let proc_sum: f64 = proc.iter().sum();
-                        if proc_sum > 0.0 {
-                            for p in &mut proc {
-                                *p /= proc_sum;
-                            }
-                        }
-                        let out_sum: f64 = out.iter().sum();
-                        if out_sum > 0.0 {
-                            for p in &mut out {
-                                *p /= out_sum;
-                            }
-                        }
-                        // target_pref 合并：并集，重叠键取几何平均
-                        let mut target_pref: HashMap<i8, f32> = fp.target_pref.clone();
-                        for (&k, &wv) in &wp.target_pref {
-                            target_pref
-                                .entry(k)
-                                .and_modify(|fv| *fv = (*fv * wv).sqrt())
-                                .or_insert(wv);
-                        }
-                        ConnProbsGene { proc, out, target_pref }
                     }
                     (Some(p), None) | (None, Some(p)) => p.clone(),
                     (None, None) => ConnProbsGene::default(),
@@ -1091,32 +1034,18 @@ impl Genome {
             block_probs
         };
 
-        // learning基因交叉
-        let child_learning = LearningGene {
-            learning_on: (fitter.learning.learning_on + weaker.learning.learning_on) / 2.0,
-            hebbian_rate: (fitter.learning.hebbian_rate + weaker.learning.hebbian_rate) / 2.0,
-            hebbian_sign: (fitter.learning.hebbian_sign + weaker.learning.hebbian_sign) / 2.0,
-            eligibility_decay: (fitter.learning.eligibility_decay
-                + weaker.learning.eligibility_decay)
-                / 2.0,
-            reinforcement_rate: (fitter.learning.reinforcement_rate
-                + weaker.learning.reinforcement_rate)
-                / 2.0,
-            metabolic_penalty: (fitter.learning.metabolic_penalty
-                + weaker.learning.metabolic_penalty)
-                / 2.0,
+        // === LearningGene：整块原子 ===
+        let child_learning = if rng.gen_bool(0.5) {
+            fitter.learning.clone()
+        } else {
+            weaker.learning.clone()
         };
 
-        // reward基因交叉
-        let child_reward = RewardGene {
-            reward_scale: (fitter.reward.reward_scale + weaker.reward.reward_scale) / 2.0,
-            td_discount: (fitter.reward.td_discount + weaker.reward.td_discount) / 2.0,
-            energy_sensitivity: (fitter.reward.energy_sensitivity
-                + weaker.reward.energy_sensitivity)
-                / 2.0,
-            reward_delay_tolerance: (fitter.reward.reward_delay_tolerance
-                + weaker.reward.reward_delay_tolerance)
-                / 2.0,
+        // === RewardGene：整块原子 ===
+        let child_reward = if rng.gen_bool(0.5) {
+            fitter.reward.clone()
+        } else {
+            weaker.reward.clone()
         };
 
         let mut genome = Genome {
@@ -1125,10 +1054,6 @@ impl Genome {
             conn_probs: child_block_probs,
             learning: child_learning,
             reward: child_reward,
-            mutation_rate: MutationGene {
-                base: (fitter.mutation_rate.base + weaker.mutation_rate.base) / 2.0,
-                block: (fitter.mutation_rate.block + weaker.mutation_rate.block) / 2.0,
-            },
             next_node_id,
             sorted_conns_cache: Vec::new(),
         };

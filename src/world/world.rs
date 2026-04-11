@@ -1320,9 +1320,11 @@ impl World {
             }
             let other = &self.creatures[other_idx];
             let dist = ((other.x - creature.x).powi(2) + (other.y - creature.y).powi(2)).sqrt();
-            // 基因相似度 >= 阈值即可配对，不再要求同 clan_hash
+            // 交配阈值 = 聚类阈值 × 0.9，允许跨 clan 基因流
+            // 聚类严格（0.95）、交配宽松（0.855），打破演化停滞
             if dist < config.contact_range
-                && creature.genome.similarity(&other.genome) >= config.species_similarity_threshold
+                && creature.genome.similarity(&other.genome)
+                    >= config.species_similarity_threshold * 0.9
             {
                 return Some(other.genome.clone());
             }

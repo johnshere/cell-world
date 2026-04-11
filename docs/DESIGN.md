@@ -176,39 +176,51 @@ struct Genome {
 }
 ```
 
-### 变异率基因 MutationGene
+### 变异率（v2.5 后为全局常量）
 
-变异率不再是全局 config，而是基因组内自演化的双速率：
+变异率由 `config.mutation_rate` 全局控制（默认 0.15），**不再是基因组内可演化基因**。
+历史上的 `MutationGene { base, block }` 双速率自适应机制已删除——稳定环境下它必然塌到下界，反而成为演化停滞的放大器。base/block 两类变异目前共享同一个全局 rate。
 
-```rust
-struct MutationGene {
-    base: f64,   // 默认 0.15，clamp 0.01~0.30
-    block: f64,  // 默认 0.15，clamp 0.01~0.30
-}
-```
+### 变异类型（触发概率均为 `config.mutation_rate`）
 
-- **base**：控制权重 / 连接增删 / SNN 参数 / Layer 切换 / learning / reward / mutation_rate 自身变异
-- **block**：控制联合区 block 编号迁移、conn_probs 区块概率基因变异
-- 两者各自独立演化（自变异时彼此独立）
-
-### 变异类型（base 速率）
-
-| 变异 | 触发概率 | 说明 |
-|------|----------|------|
-| 权重变异 | base，每条连接 | 90% 微调 ±0.5，10% 重置 [-1,1] |
+| 变异 | 类别 | 说明 |
+|------|------|------|
+| 权重变异 | base（每条连接） | 90% 微调 ±0.5，10% 重置 [-1,1] |
 | 新增连接 | base | 随机连接两个节点（受 conn_probs 加权） |
 | 新增节点 | base | 拆分现有连接，插入隐藏节点 |
 | 开关连接 | base | 启用/禁用随机连接 |
 | SNN 参数 | base | decay / threshold / refractory_period 抖动 |
 | Layer 切换 | base | Block 节点 Processing ↔ Output |
 | Learning/Reward | base | 学习/奖励基因抖动 |
-
-### 变异类型（block 速率）
-
-| 变异 | 触发概率 | 说明 |
-|------|----------|------|
 | Block 迁移 | block | 联合区节点 block 编号 ±2 移动（限制在 8~24） |
-| ConnProbs   | block | 区块连接概率基因抖动 |
+| ConnProbs | block | 区块连接概率基因抖动 |
+
+### Crossover（v2.5 改为全原子孟德尔遗传）
+
+所有连续参数按"原子"（不可分割的功能单元）从某一父代整取，**crossover 不做算术平均**。
+原因：算术平均是方差收缩算子，在稳定环境 + 选择压力下加速种群同质化；孟德尔遗传保持方差、保持多峰。
+
+| 原子 | 粒度 | 规则 |
+|------|------|------|
+| 共享连接 `ConnectionGene` | 整条（weight/enabled 一体） | 50/50 从一方继承 |
+| 共享节点 `NodeGene` | 整个 node（SNN 参数+layer 一体） | 50/50 从一方继承 |
+| 每个 block 的 `ConnProbsGene` | 整块（proc/out/target_pref 一体） | 50/50 从一方继承 |
+| `LearningGene` | 整个 struct | 50/50 从一方继承 |
+| `RewardGene` | 整个 struct | 50/50 从一方继承 |
+| fitter 独有连接/节点 | — | 标准 NEAT excess/disjoint，继承 fitter |
+| weaker 独有节点 | — | 保留（避免基因流失） |
+
+**分工**：crossover 只做重组（零方差贡献），mutation 是唯一的方差注入源。职责单一、行为可预测。
+
+### 交配阈值（v2.5 与聚类阈值解耦）
+
+`find_mate` 的相似度下限 = `species_similarity_threshold × 0.9`（而不是聚类阈值本身）。
+
+- 聚类阈值 0.95：严格，用于面板上种族计数与颜色标识
+- 交配阈值 0.855：宽松，允许跨 clan 基因流
+
+目的是打破单一优势种垄断后无法注入新基因的死锁：
+稀有变异个体相似度 <0.95 无法被计入主族，但 >0.855 时仍可与主族交配，让有益变异有机会回流基因池。
 
 ---
 
@@ -393,10 +405,10 @@ follow_cost_discount = 0.6
 max_speed = 20.0
 
 # 进化
-# 注：变异率已迁移至基因组内 MutationGene { base, block }，由生物自身演化
+mutation_rate = 0.15           # 全局变异率（base/block 两类共享）
 initial_connections_min = 6
 initial_connections_max = 12
-species_similarity_threshold = 0.95
+species_similarity_threshold = 0.95  # 聚类阈值；交配阈值 = × 0.9
 dominant_min_age = 250.0
 
 # 痕迹点
@@ -443,6 +455,13 @@ auto_spawn_interval = 45.0
 - [x] **温泉系统**：动态生成/消亡的次级能量源
 - [x] **算力换能量**：神经计算时长可转化为生物能量（compute_energy_factor）
 - [x] 多神经后端：CPU SNN / GPU SNN / legacy 直跑
+
+### v2.5 - 反演化停滞改造 ✅
+- [x] **Crossover 改为全原子孟德尔遗传**：删除所有连续参数的算术平均，每个原子（连接/节点/ConnProbs/LearningGene/RewardGene）50/50 从父代整取。Crossover 不再主动收缩群体方差
+- [x] **删除 `MutationGene`**：自适应变异率在稳定环境下必然塌到下界，改为 `config.mutation_rate` 单一全局常量（默认 0.15）
+- [x] **交配阈值与聚类阈值解耦**：`find_mate` 使用 `species_similarity_threshold × 0.9`（0.855），允许跨 clan 基因流，打破单一优势种垄断
+- [x] Panel 选中生物详情删除变异率显示（已无意义，查 config 即可）
+- 问题背景：演化 1 天后种群收敛到单峰、突变率塌到 0.05 地板、crossover 算术平均持续消灭多样性。此次改造从算子层面（crossover）+ 参数层面（mutation_rate）+ 种群结构（交配阈值）三处联合解决
 
 ### v2.4 - 同步批处理 Bridge + GPU readback 合批 ✅
 - [x] Bridge 协议从异步双缓冲改为**请求-响应同步** channel（`TickRequest`/`TickResponse`）
