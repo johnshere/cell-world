@@ -19,9 +19,9 @@ volcano_interval = 30.0
 # 火山喷射半径
 volcano_radius = 2300.0
 # 每次喷发粒子数
-volcano_count = 55
+volcano_count = 60
 # 火山粒子能量
-volcano_particle_energy = 155.0
+volcano_particle_energy = 150.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -38,13 +38,13 @@ volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 65.0
+volcano_kill_radius = 56.0
 # 落地杀伤系数
 landing_damage_multiplier = 3.0
 
 # === 温泉 ===
 # 温泉最大同时活跃数量
-spring_max_count = 10
+spring_max_count = 11
 # 温泉产生间隔（秒）
 spring_spawn_interval = 25.0
 # 温泉寿命（秒）
@@ -76,9 +76,9 @@ bite_transfer_rate = 0.4
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
-energy_denominator = 1500.0
+energy_denominator = 25.0
 # 散热下限（指数衰减底板）
-heat_floor = 0.05
+heat_floor = 0.03
 
 # === 代谢 ===
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
@@ -86,12 +86,12 @@ age_metabolism_factor = 0.025
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗（每单位距离）
-move_cost = 0.0012
+move_cost = 0.0015
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.8
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.008
+heat_dissipation_coefficient = 0.018
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -141,7 +141,7 @@ snn_ticks_per_frame = 10
 # 神经后端: auto | cpu | gpu | legacy
 neural_backend = "auto"
 # 异步模式 tick 频率 (ticks/s)
-neural_tick_rate = 300.0
+neural_tick_rate = 600.0
 base_metabolism = 0.025
 max_speed = 20.0
 meteorite_interval = 0.0
@@ -156,10 +156,10 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = false
-auto_spawn_interval = 100.0
+auto_spawn_interval = 99.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
-terrain_slope_cost = 2.5
+terrain_slope_cost = 3.0
 # 地形海拔阻力系数（远离舒适带的开销倍率，0=禁用）
 terrain_altitude_cost = 2.0

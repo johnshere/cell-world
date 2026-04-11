@@ -165,3 +165,187 @@ impl WorldSnapshot {
         (world, config)
     }
 }
+
+// =====================================================================
+// 目录格式存档（多存档支持）
+// =====================================================================
+
+const SNAPSHOTS_DIR: &str = "snapshots";
+
+/// 存档元信息
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ArchiveMeta {
+    pub version: u32,
+    pub world_time: f64,
+    pub creature_count: usize,
+    pub energy_count: usize,
+    pub trail_count: usize,
+    pub config_energy_denominator: f64,
+    pub config_heat_floor: f64,
+    pub config_heat_dissipation: f64,
+    pub original_file_size: u64,
+    pub converted_at: String,
+    pub saved_at: String,
+}
+
+/// 存档摘要（用于列表显示）
+#[derive(Clone)]
+pub struct ArchiveSummary {
+    pub name: String,
+    pub meta: ArchiveMeta,
+}
+
+/// 基因组库条目（保留用于未来优化）
+#[derive(Clone, Serialize, Deserialize)]
+struct GenomeEntry {
+    hash: String,
+    genome: Genome,
+}
+
+/// 基因组库（保留用于未来优化）
+#[derive(Clone, Serialize, Deserialize)]
+struct GenomeLibrary {
+    genomes: Vec<GenomeEntry>,
+}
+
+impl WorldSnapshot {
+    /// 保存到目录格式（多存档）
+    /// 格式：meta.json + data.json.gz（压缩的完整快照）
+    #[cfg(feature = "persistence")]
+    pub fn save_to_dir(&self, name: &str) -> Result<(), String> {
+        let dir = format!("{}/{}", SNAPSHOTS_DIR, name);
+
+        // 确保目录存在
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {}", e))?;
+
+        // 生成元信息
+        let meta = ArchiveMeta {
+            version: 2,
+            world_time: self.world_time,
+            creature_count: self.creatures.len(),
+            energy_count: self.energy_particles.len(),
+            trail_count: self.trail_points.len(),
+            config_energy_denominator: self.config.energy_denominator,
+            config_heat_floor: self.config.heat_floor,
+            config_heat_dissipation: self.config.heat_dissipation_coefficient,
+            original_file_size: 0,
+            converted_at: String::new(),
+            saved_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        };
+
+        // 写入 meta.json
+        let meta_json = serde_json::to_string_pretty(&meta)
+            .map_err(|e| format!("序列化meta失败: {}", e))?;
+        std::fs::write(format!("{}/meta.json", dir), meta_json)
+            .map_err(|e| format!("写入meta.json失败: {}", e))?;
+
+        // 序列化并压缩完整快照
+        let json = serde_json::to_string(self).map_err(|e| format!("序列化失败: {}", e))?;
+        let encoded = compress_gzip(json.as_bytes());
+        std::fs::write(format!("{}/data.json.gz", dir), &encoded)
+            .map_err(|e| format!("写入data.json.gz失败: {}", e))?;
+
+        Ok(())
+    }
+
+    /// 从目录加载
+    #[cfg(feature = "persistence")]
+    pub fn load_from_dir(name: &str) -> Option<Self> {
+        let dir = format!("{}/{}", SNAPSHOTS_DIR, name);
+
+        // 读取并解压数据
+        let data = std::fs::read(format!("{}/data.json.gz", dir)).ok()?;
+        let json = decompress_gzip(&data);
+
+        // 反序列化
+        serde_json::from_slice(&json).ok()
+    }
+}
+
+/// 列出所有存档
+#[cfg(feature = "persistence")]
+pub fn list_archives() -> Vec<ArchiveSummary> {
+    let mut archives = Vec::new();
+    let snapshots_dir = std::path::Path::new(SNAPSHOTS_DIR);
+
+    if !snapshots_dir.exists() {
+        return archives;
+    }
+
+    if let Ok(entries) = std::fs::read_dir(snapshots_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && path.join("meta.json").exists() {
+                if let Ok(meta_json) = std::fs::read_to_string(path.join("meta.json")) {
+                    if let Ok(meta) = serde_json::from_str::<ArchiveMeta>(&meta_json) {
+                        let name = path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("")
+                            .to_string();
+                        archives.push(ArchiveSummary { name, meta });
+                    }
+                }
+            }
+        }
+    }
+
+    // 按时间排序（最新的在前）
+    archives.sort_by(|a, b| b.meta.saved_at.cmp(&a.meta.saved_at));
+    archives
+}
+
+/// 删除存档
+#[cfg(feature = "persistence")]
+pub fn delete_archive(name: &str) -> Result<(), String> {
+    let dir = format!("{}/{}", SNAPSHOTS_DIR, name);
+    let path = std::path::Path::new(&dir);
+
+    if !path.exists() {
+        return Err("存档不存在".to_string());
+    }
+
+    std::fs::remove_dir_all(path).map_err(|e| format!("删除失败: {}", e))
+}
+
+/// 检测是否存在旧格式存档
+pub fn has_legacy_snapshot() -> bool {
+    std::path::Path::new(SNAPSHOT_PATH).exists()
+}
+
+// =====================================================================
+// 工具函数
+// =====================================================================
+
+/// 计算基因组的简单哈希
+fn genome_hash(genome: &Genome) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    // 使用关键字段做哈希
+    genome.nodes.len().hash(&mut hasher);
+    genome.connections.len().hash(&mut hasher);
+    if let Some(first_conn) = genome.connections.first() {
+        first_conn.weight.to_bits().hash(&mut hasher);
+    }
+    format!("{:016x}", hasher.finish())
+}
+
+/// Gzip压缩
+fn compress_gzip(data: &[u8]) -> Vec<u8> {
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    std::io::Write::write_all(&mut encoder, data).unwrap();
+    encoder.finish().unwrap()
+}
+
+/// Gzip解压
+fn decompress_gzip(data: &[u8]) -> Vec<u8> {
+    use flate2::read::GzDecoder;
+    use std::io::Read;
+    let mut decoder = GzDecoder::new(data);
+    let mut out = Vec::new();
+    decoder.read_to_end(&mut out).unwrap();
+    out
+}

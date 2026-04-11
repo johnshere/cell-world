@@ -483,9 +483,9 @@ impl Genome {
         if rng.gen::<f64>() < META_MUTATION_RATE {
             if rng.gen::<f64>() < 0.9 {
                 let factor = rng.gen_range(-0.3..0.3_f64).exp();
-                self.mutation_rate.base = (self.mutation_rate.base * factor).clamp(0.01, 0.30);
+                self.mutation_rate.base = (self.mutation_rate.base * factor).clamp(0.05, 0.30);
             } else {
-                self.mutation_rate.base = rng.gen_range(0.01..0.30);
+                self.mutation_rate.base = rng.gen_range(0.05..0.30);
             }
         }
 
@@ -493,9 +493,9 @@ impl Genome {
         if rng.gen::<f64>() < META_MUTATION_RATE {
             if rng.gen::<f64>() < 0.9 {
                 let factor = rng.gen_range(-0.3..0.3_f64).exp();
-                self.mutation_rate.block = (self.mutation_rate.block * factor).clamp(0.01, 0.30);
+                self.mutation_rate.block = (self.mutation_rate.block * factor).clamp(0.05, 0.30);
             } else {
-                self.mutation_rate.block = rng.gen_range(0.01..0.30);
+                self.mutation_rate.block = rng.gen_range(0.05..0.30);
             }
         }
     }

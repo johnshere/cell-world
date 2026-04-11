@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::render::{
     PanelAction, RenderContext, Selection, StatsPanel, VisibleWorldBounds, WorldCanvas,
 };
-use crate::snapshot::WorldSnapshot;
+use crate::snapshot::{WorldSnapshot, list_archives, delete_archive, ArchiveSummary};
 use crate::store::{CreatureTemplate, Store};
 use crate::world::sim_thread::{spawn_sim_thread, SimCommand, SimHandle, SimSnapshot};
 use crate::world::World;
@@ -48,6 +48,12 @@ pub struct CellWorldApp {
     frame_perf: FramePerfStats,
     // 快照恢复：启动时如果存在存档，暂存在此
     pending_restore: Option<WorldSnapshot>,
+    // 存档列表弹框相关
+    show_archive_list: bool,
+    archive_list: Vec<ArchiveSummary>,
+    archive_selected: Option<usize>,
+    // 待保存的存档名（save弹框中输入）
+    pending_save_name: Option<String>,
     // 保存确认弹框
     snapshot_confirm_save: bool,
     // 生成地形确认弹框
@@ -102,8 +108,10 @@ impl CellWorldApp {
         // 启动模拟线程
         let sim = spawn_sim_thread(world, config.clone());
 
-        // 尝试加载存档
-        let pending_restore = WorldSnapshot::load();
+        // 检查存档列表
+        let archive_list = list_archives();
+        let show_archive_list = !archive_list.is_empty();
+        let pending_restore = None; // 存档选择改由弹框处理
 
         Self {
             sim,
@@ -125,6 +133,10 @@ impl CellWorldApp {
             last_render_ctx_update: now,
             frame_perf: FramePerfStats::default(),
             pending_restore,
+            show_archive_list,
+            archive_list,
+            archive_selected: None,
+            pending_save_name: None,
             snapshot_confirm_save: false,
             terrain_confirm_generate: false,
             terrain_params: crate::world::TerrainParams::default(),
@@ -603,10 +615,10 @@ impl CellWorldApp {
                 changed |= config_drag_f64(
                     ui,
                     "能量分母",
-                    "nearby_energy归一化分母，越大需更多聚集才降温",
+                    "nearby_energy归一化分母，越大需更多聚集才降温(1~30)",
                     &mut c.energy_denominator,
-                    50.0,
-                    100.0..=5000.0,
+                    1.0,
+                    1.0..=30.0,
                 );
                 changed |= config_drag_f64(
                     ui,
@@ -1202,36 +1214,90 @@ impl CellWorldApp {
 
 impl eframe::App for CellWorldApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // 启动恢复弹框
-        if self.pending_restore.is_some() {
-            let mut chose_restore = false;
+        // 存档列表弹框
+        if self.show_archive_list {
+            let mut chose_load = false;
+            let mut chose_delete = None;
             let mut chose_new = false;
-            egui::Window::new("发现存档")
+
+            egui::Window::new("选择存档")
                 .collapsible(false)
-                .resizable(false)
+                .resizable(true)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .default_width(400.0)
                 .show(ctx, |ui| {
-                    ui.label("检测到世界存档，是否恢复？");
+                    ui.label("请选择存档：");
+                    ui.add_space(4.0);
+
+                    egui::ScrollArea::vertical()
+                        .max_height(300.0)
+                        .show(ui, |ui| {
+                            for (i, archive) in self.archive_list.iter().enumerate() {
+                                ui.horizontal(|ui| {
+                                    let selected = self.archive_selected == Some(i);
+                                    if ui.selectable_label(selected, format!(
+                                                                "[{}] {} - 生物:{} 能量:{} 时间:{:.0}",
+                                                                archive.meta.saved_at,
+                                                                archive.name,
+                                                                archive.meta.creature_count,
+                                                                archive.meta.energy_count,
+                                                                archive.meta.world_time
+                                                            )).clicked() {
+                                        self.archive_selected = Some(i);
+                                    }
+                                    if ui.button("删除").clicked() {
+                                        chose_delete = Some(i);
+                                    }
+                                });
+                            }
+                        });
+
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button("恢复存档").clicked() {
-                            chose_restore = true;
+                        if ui.button("载入").clicked() {
+                            chose_load = true;
                         }
                         if ui.button("新开始").clicked() {
                             chose_new = true;
                         }
                     });
                 });
-            if chose_restore {
-                if let Some(ws) = self.pending_restore.take() {
-                    self.config = ws.config.clone();
-                    self.sim.send(SimCommand::RestoreSnapshot(ws));
-                    self.render_ctx_cache = None;
+
+            if chose_load {
+                if let Some(idx) = self.archive_selected {
+                    if idx < self.archive_list.len() {
+                        let name = self.archive_list[idx].name.clone();
+                        if let Some(ws) = WorldSnapshot::load_from_dir(&name) {
+                            self.config = ws.config.clone();
+                            self.sim.send(SimCommand::RestoreSnapshot(ws));
+                            self.render_ctx_cache = None;
+                            self.show_archive_list = false;
+                            self.archive_list.clear();
+                            self.archive_selected = None;
+                        }
+                    }
                 }
             }
-            if chose_new {
-                self.pending_restore = None;
+
+            if let Some(idx) = chose_delete {
+                if idx < self.archive_list.len() {
+                    let name = self.archive_list[idx].name.clone();
+                    if delete_archive(&name).is_ok() {
+                        self.archive_list.remove(idx);
+                        self.archive_selected = None;
+                        if self.archive_list.is_empty() {
+                            self.show_archive_list = false;
+                        }
+                    }
+                }
             }
+
+            if chose_new {
+                self.show_archive_list = false;
+                self.archive_list.clear();
+                self.archive_selected = None;
+            }
+
             // 有弹框时暂停世界逻辑
             ctx.request_repaint();
             return;
@@ -1240,9 +1306,15 @@ impl eframe::App for CellWorldApp {
         // 检查快照捕获完成
         if let Some(ref rx) = self.snapshot_capture_rx {
             if let Ok(ws) = rx.try_recv() {
-                if let Err(e) = ws.save() {
-                    eprintln!("保存快照失败: {}", e);
+                // 使用目录格式保存
+                if let Some(ref name) = self.pending_save_name {
+                    if let Err(e) = ws.save_to_dir(name) {
+                        eprintln!("保存快照失败: {}", e);
+                    }
+                    // 刷新存档列表
+                    self.archive_list = list_archives();
                 }
+                self.pending_save_name = None;
                 // 快照保存时同步写 terrain.json（地形已生成时才写）
                 let terrain = self.sim.snapshot().terrain.clone();
                 if terrain.is_generated() {
@@ -1258,17 +1330,13 @@ impl eframe::App for CellWorldApp {
         if self.snapshot_confirm_save {
             let mut chose_save = false;
             let mut chose_cancel = false;
-            let has_existing = WorldSnapshot::exists();
+            let save_name = chrono::Local::now().format("archive_%Y%m%d_%H%M%S").to_string();
             egui::Window::new("保存存档")
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
-                    if has_existing {
-                        ui.label("将覆盖现有存档，确定保存？");
-                    } else {
-                        ui.label("保存当前世界存档？");
-                    }
+                    ui.label(format!("将保存为：{}", save_name));
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         if ui.button("确定").clicked() {
@@ -1280,6 +1348,7 @@ impl eframe::App for CellWorldApp {
                     });
                 });
             if chose_save {
+                self.pending_save_name = Some(save_name);
                 // 通过命令请求模拟线程捕获快照
                 let (tx, rx) = mpsc::channel();
                 self.sim.send(SimCommand::CaptureSnapshot(tx));
@@ -1372,11 +1441,7 @@ impl eframe::App for CellWorldApp {
                     ui.horizontal(|ui| {
                         ui.add_sized([90.0, 18.0], egui::Label::new("随机种子"));
                         ui.add(egui::DragValue::new(&mut p.seed).speed(1.0));
-                        if ui
-                            .button("🎲")
-                            .on_hover_text("随机一个新种子")
-                            .clicked()
-                        {
+                        if ui.button("🎲").on_hover_text("随机一个新种子").clicked() {
                             p.seed = rand::random::<u32>();
                         }
                     });
