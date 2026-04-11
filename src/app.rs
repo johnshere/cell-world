@@ -34,6 +34,7 @@ pub struct CellWorldApp {
     frame_count: u32,
     fps_timer: std::time::Instant,
     actual_speed: f64,
+    neural_speed: f64,
     // 日志记录
     last_log_time: f64,
     log_initialized: bool,
@@ -125,6 +126,7 @@ impl CellWorldApp {
             frame_count: 0,
             fps_timer: now,
             actual_speed: 0.0,
+            neural_speed: 0.0,
             last_log_time: 0.0,
             log_initialized: false,
             selection: Selection::None,
@@ -1498,7 +1500,11 @@ impl eframe::App for CellWorldApp {
         let fps_elapsed = now.duration_since(self.fps_timer).as_secs_f64();
         if fps_elapsed >= 1.0 {
             self.fps = self.frame_count as f64 / fps_elapsed;
-            self.actual_speed = self.sim.snapshot().actual_speed;
+            {
+                let snap = self.sim.snapshot();
+                self.actual_speed = snap.actual_speed;
+                self.neural_speed = snap.neural_speed;
+            }
             self.frame_count = 0;
             self.fps_timer = now;
         }
@@ -1554,6 +1560,7 @@ impl eframe::App for CellWorldApp {
                     ui,
                     self.fps,
                     self.actual_speed,
+                    self.neural_speed,
                     self.canvas.scale,
                     &mut self.speed,
                     &mut self.paused,

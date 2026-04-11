@@ -1,6 +1,6 @@
 use std::sync::mpsc;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
 };
 
@@ -42,6 +42,8 @@ pub struct NeuralBridge {
     pub running: Arc<AtomicBool>,
     /// 输入是否已被消费（世界 swap 时重置，神经线程消费后置 true）
     input_consumed: Arc<AtomicBool>,
+    /// 神经线程完成的推理轮次计数（每次 write_outputs 自增，空批也算）
+    inference_count: Arc<AtomicU64>,
 }
 
 impl NeuralBridge {
@@ -56,7 +58,13 @@ impl NeuralBridge {
             event_rx: Arc::new(Mutex::new(event_rx)),
             running: Arc::new(AtomicBool::new(true)),
             input_consumed: Arc::new(AtomicBool::new(true)),
+            inference_count: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// 读取神经线程累计完成的推理轮次（sim_thread 反压采样用）
+    pub fn inference_count(&self) -> u64 {
+        self.inference_count.load(Ordering::Relaxed)
     }
 
     // === 世界线程侧 API ===
@@ -110,6 +118,7 @@ impl NeuralBridge {
             event_rx: Arc::clone(&self.event_rx),
             running: Arc::clone(&self.running),
             input_consumed: Arc::clone(&self.input_consumed),
+            inference_count: Arc::clone(&self.inference_count),
         }
     }
 }
@@ -121,6 +130,7 @@ pub struct NeuralBridgeHandle {
     event_rx: Arc<Mutex<mpsc::Receiver<CreatureEvent>>>,
     running: Arc<AtomicBool>,
     input_consumed: Arc<AtomicBool>,
+    inference_count: Arc<AtomicU64>,
 }
 
 impl NeuralBridgeHandle {
@@ -145,6 +155,8 @@ impl NeuralBridgeHandle {
         if let Ok(mut back) = self.output_back.lock() {
             *back = outputs;
         }
+        // 每完成一轮推理都计数（空批也算，用于反压探针）
+        self.inference_count.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn drain_events(&self) -> Vec<CreatureEvent> {

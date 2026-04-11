@@ -38,8 +38,10 @@ pub struct SimSnapshot {
     pub stop_extinction_triggered: bool,
     /// 目标倍速
     pub target_speed: f64,
-    /// 实际达到的倍速
+    /// 实际达到的倍速（世界实际每真实秒推进的模拟秒数）
     pub actual_speed: f64,
+    /// 神经线程实际倍速（平滑后），bridge 模式下作为世界反压上限源
+    pub neural_speed: f64,
     /// 地形快照（生成后冻结，每次都附带，便于渲染线程随时取用）
     pub terrain: TerrainMap,
 }
@@ -61,6 +63,7 @@ impl Default for SimSnapshot {
             stop_extinction_triggered: false,
             target_speed: 1.0,
             actual_speed: 0.0,
+            neural_speed: 0.0,
             terrain: TerrainMap::default(),
         }
     }
@@ -152,8 +155,26 @@ fn sim_loop(
     let mut actual_speed_steps: u64 = 0;
     let mut actual_speed: f64 = 0.0;
 
+    // 神经吞吐反压采样（bridge 模式下生效）
+    // - 每帧采样 inference_count 增量 → 瞬时 raw_speed
+    // - 指数平均 τ=2s，避免抖动
+    // - 有效 speed = min(target, max(1, ceil(smooth × 1.2)))
+    const NEURAL_EMA_TAU: f64 = 2.0;
+    const PROBE_RATIO: f64 = 1.2;
+    let mut neural_speed_smooth: f64 = 0.0;
+    let mut last_inference_count: u64 = world.neural_inference_count();
+    let mut last_neural_sample = Instant::now();
+
     // 导出初始快照
-    export_snapshot(&world, &config, &snapshot, speed, actual_speed, sim_step_count);
+    export_snapshot(
+        &world,
+        &config,
+        &snapshot,
+        speed,
+        actual_speed,
+        neural_speed_smooth,
+        sim_step_count,
+    );
 
     loop {
         // 处理所有待处理命令
@@ -161,7 +182,12 @@ fn sim_loop(
             match cmd_rx.try_recv() {
                 Ok(cmd) => match cmd {
                     SimCommand::Pause => paused = true,
-                    SimCommand::Resume => paused = false,
+                    SimCommand::Resume => {
+                        paused = false;
+                        // 恢复时重置神经采样基线，避免把暂停期也算进去
+                        last_inference_count = world.neural_inference_count();
+                        last_neural_sample = Instant::now();
+                    }
                     SimCommand::SetSpeed(s) => {
                         speed = s;
                     }
@@ -208,6 +234,10 @@ fn sim_loop(
                         }
                         world = new_world;
                         config = new_config;
+                        // 世界被替换，重置神经采样基线
+                        last_inference_count = world.neural_inference_count();
+                        last_neural_sample = Instant::now();
+                        neural_speed_smooth = 0.0;
                     }
                     SimCommand::Shutdown => return,
                 },
@@ -216,9 +246,36 @@ fn sim_loop(
             }
         }
 
-        // 固定步长模拟：dt 恒定 SIM_DT，speed 控制每帧 update 次数
+        // 采样神经吞吐并更新 EMA（bridge 模式才有意义，legacy 下 count 恒为 0）
+        let has_bridge = world.has_neural_bridge();
+        if has_bridge && !paused {
+            let now = Instant::now();
+            let elapsed_real = now.duration_since(last_neural_sample).as_secs_f64();
+            if elapsed_real > 1e-6 {
+                let current_count = world.neural_inference_count();
+                let delta = current_count.saturating_sub(last_inference_count);
+                // 每 inference 代表 SIM_DT 模拟秒的决策输出
+                // raw_speed = (delta × SIM_DT) / elapsed_real，单位与 target speed 一致
+                let raw_speed = delta as f64 * SIM_DT / elapsed_real;
+                // EMA：α = 1 - exp(-Δt/τ)
+                let alpha = 1.0 - (-elapsed_real / NEURAL_EMA_TAU).exp();
+                neural_speed_smooth += alpha * (raw_speed - neural_speed_smooth);
+                last_inference_count = current_count;
+                last_neural_sample = now;
+            }
+        }
+
+        // 计算本帧有效 speed：legacy 严格 = target；bridge = 反压探针
+        let effective_speed = if has_bridge {
+            let probe = (neural_speed_smooth * PROBE_RATIO).ceil().max(1.0);
+            speed.min(probe)
+        } else {
+            speed
+        };
+
+        // 固定步长模拟：dt 恒定 SIM_DT，effective_speed 控制每帧 update 次数
         if !paused {
-            speed_accumulator += speed;
+            speed_accumulator += effective_speed;
             let steps = speed_accumulator as usize;
             speed_accumulator -= steps as f64;
             for _ in 0..steps {
@@ -237,7 +294,15 @@ fn sim_loop(
         }
 
         // 导出快照
-        export_snapshot(&world, &config, &snapshot, speed, actual_speed, sim_step_count);
+        export_snapshot(
+            &world,
+            &config,
+            &snapshot,
+            speed,
+            actual_speed,
+            neural_speed_smooth,
+            sim_step_count,
+        );
 
         // 精确 sleep 到下一帧（恒定 ~30fps）
         next_tick += FRAME_INTERVAL;
@@ -258,6 +323,7 @@ fn export_snapshot(
     snapshot: &Arc<RwLock<SimSnapshot>>,
     target_speed: f64,
     actual_speed: f64,
+    neural_speed: f64,
     sim_step_count: u64,
 ) {
     let world_stats = world.stats(config.species_similarity_threshold, config);
@@ -279,6 +345,7 @@ fn export_snapshot(
         stop_extinction_triggered: world.stop_extinction_triggered,
         target_speed,
         actual_speed,
+        neural_speed,
         terrain: world.terrain.clone(),
     };
 

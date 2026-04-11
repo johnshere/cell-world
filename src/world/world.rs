@@ -178,6 +178,19 @@ impl World {
         world
     }
 
+    /// 是否启用了异步神经桥（bridge 模式）
+    pub fn has_neural_bridge(&self) -> bool {
+        self.neural_bridge.is_some()
+    }
+
+    /// 读取神经线程累计推理轮次（sim_thread 反压采样用）
+    pub fn neural_inference_count(&self) -> u64 {
+        self.neural_bridge
+            .as_ref()
+            .map(|b| b.inference_count())
+            .unwrap_or(0)
+    }
+
     /// 设置异步神经桥
     pub fn set_neural_bridge(&mut self, bridge: NeuralBridge) {
         // 向桥注册所有已有生物
