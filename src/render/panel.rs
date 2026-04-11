@@ -193,9 +193,9 @@ impl StatsPanel {
             // 目标倍速在滑杆上已有，这里只显示实际情况：
             // - bridge 模式且神经显著落后世界 → "神经/世界" 双值，提示反压生效
             // - 其他情况 → 单值世界实际
-            let speed_label = if neural_speed > 0.0
-                && (actual_speed - neural_speed).abs() > 0.3
-            {
+            // bridge 模式（neural_speed>0）始终显示「神经/世界」双值
+            // legacy 模式 neural_speed 恒为 0，仅显示世界单值
+            let speed_label = if neural_speed > 0.0 {
                 format!(
                     "FPS: {:.0} | 速度: {:.1}/{:.1}x",
                     fps, neural_speed, actual_speed
