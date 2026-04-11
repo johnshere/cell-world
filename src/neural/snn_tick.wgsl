@@ -1,6 +1,11 @@
 // SNN Tick Compute Shader
 // 每线程处理一个神经元
 // global_id = creature_slot * MAX_NODES + node_local
+//
+// 同步批处理模型（C 方案）：
+//   - spike_counts: GPU 端原子累加，整批 tick 内累计发放次数，末尾一次读回
+//   - first_outputs: tick 0 时保存直读输出 tanh 值，末尾一次读回
+//   - params.tick_index: 当前是批内第几个 tick（0-based），由 CPU 在每次 dispatch 前写入
 
 const MAX_NODES: u32 = 64u;
 const MAX_CONNS: u32 = 128u;
@@ -18,8 +23,8 @@ struct GpuNode {
 
 // 连接数据
 struct GpuConnection {
-    from_node: u32,   // 局部节点索引
-    to_node: u32,     // 局部节点索引
+    from_node: u32,
+    to_node: u32,
     weight: f32,
     _pad: u32,
 }
@@ -32,11 +37,21 @@ struct GpuCreatureMeta {
     output_count: u32,
 }
 
+// CPU 在每次 dispatch 前通过 queue.write_buffer 更新
+struct TickParams {
+    tick_index: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
 @group(0) @binding(0) var<storage, read> nodes_prev: array<GpuNode>;
 @group(0) @binding(1) var<storage, read_write> nodes_next: array<GpuNode>;
 @group(0) @binding(2) var<storage, read> connections: array<GpuConnection>;
 @group(0) @binding(3) var<storage, read> creature_meta: array<GpuCreatureMeta>;
-@group(0) @binding(4) var<storage, read_write> outputs: array<f32>;
+@group(0) @binding(4) var<storage, read_write> spike_counts: array<atomic<u32>>;
+@group(0) @binding(5) var<storage, read_write> first_outputs: array<f32>;
+@group(0) @binding(6) var<uniform> params: TickParams;
 
 fn is_fired(flags: u32) -> bool {
     return (flags & 1u) != 0u;
@@ -147,25 +162,29 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     nodes_next[node_global] = next_node;
 
-    // 输出节点：写入 outputs buffer
+    // 输出节点：写入 spike_counts / first_outputs
     if is_output(prev.flags) {
-        var output_val: f32 = 0.0;
-        if is_direct_read(next_node.flags) {
-            // tanh 近似
-            let x = next_node.membrane;
-            let x2 = x * x;
-            output_val = clamp(x * (27.0 + x2) / (27.0 + 9.0 * x2), -1.0, 1.0);
-        } else {
-            if is_fired(next_node.flags) {
-                output_val = 1.0;
-            } else {
-                output_val = 0.0;
-            }
-        }
-        // 输出 buffer：每个生物最多7个输出
         let output_idx = node_local - creature_meta_data.input_count;
         if output_idx < 7u {
-            outputs[creature_slot * 7u + output_idx] = output_val;
+            let out_global = creature_slot * 7u + output_idx;
+
+            if is_direct_read(next_node.flags) {
+                // 直读输出：tick 0 时保存 tanh 值（CPU 末尾读回）
+                if params.tick_index == 0u {
+                    let x = next_node.membrane;
+                    let x2 = x * x;
+                    first_outputs[out_global] = clamp(
+                        x * (27.0 + x2) / (27.0 + 9.0 * x2),
+                        -1.0,
+                        1.0,
+                    );
+                }
+            } else {
+                // 脉冲输出：发放则原子累加
+                if is_fired(next_node.flags) {
+                    atomicAdd(&spike_counts[out_global], 1u);
+                }
+            }
         }
     }
 }

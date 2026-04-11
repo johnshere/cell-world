@@ -154,7 +154,6 @@ impl StatsPanel {
         ui: &mut Ui,
         fps: f64,
         actual_speed: f64,
-        neural_speed: f64,
         scale: f32,
         speed: &mut f64,
         paused: &mut bool,
@@ -190,21 +189,10 @@ impl StatsPanel {
 
         // FPS、缩放和时间
         ui.horizontal(|ui| {
-            // 目标倍速在滑杆上已有，这里只显示实际情况：
-            // - bridge 模式且神经显著落后世界 → "神经/世界" 双值，提示反压生效
-            // - 其他情况 → 单值世界实际
-            // bridge 模式（neural_speed>0）始终显示「神经/世界」双值
-            // legacy 模式 neural_speed 恒为 0，仅显示世界单值
-            let speed_label = if neural_speed > 0.0 {
-                format!(
-                    "FPS: {:.0} | 速度: {:.1}/{:.1}x",
-                    fps, neural_speed, actual_speed
-                )
-            } else {
-                format!("FPS: {:.0} | 速度: {:.1}x", fps, actual_speed)
-            };
+            // 同步批处理模型下，世界实际倍速就是唯一指标
+            let speed_label = format!("FPS: {:.0} | 速度: {:.1}x", fps, actual_speed);
             ui.label(speed_label)
-                .on_hover_text("世界实际倍速；bridge 模式下神经落后时显示「神经/世界」");
+                .on_hover_text("世界实际达成的倍速");
             ui.separator();
             ui.label(format!("×{:.2}", scale));
             ui.separator();

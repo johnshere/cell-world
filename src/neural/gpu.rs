@@ -11,6 +11,12 @@ mod inner {
     pub const MAX_CREATURES: usize = 512;
     pub const MAX_NODES: usize = 64;
     pub const MAX_CONNS: usize = 128;
+    pub const OUTPUTS_PER_CREATURE: usize = 7;
+
+    const COUNTER_ELEMS: usize = MAX_CREATURES * OUTPUTS_PER_CREATURE;
+    const COUNTER_BYTES: u64 = (COUNTER_ELEMS * 4) as u64; // u32 / f32 同宽
+    const STAGING_BYTES: u64 = COUNTER_BYTES * 2; // spike_counts + first_outputs
+    const TICK_PARAMS_BYTES: u64 = 16; // vec4<u32> 对齐
 
     /// GPU 探测结果
     pub enum GpuProbeResult {
@@ -23,7 +29,6 @@ mod inner {
         },
     }
 
-    /// GPU 节点数据（C 布局，匹配 WGSL）
     #[repr(C)]
     #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
     pub struct GpuNode {
@@ -33,7 +38,6 @@ mod inner {
         pub flags: u32,
     }
 
-    /// GPU 连接数据
     #[repr(C)]
     #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
     pub struct GpuConnection {
@@ -43,7 +47,6 @@ mod inner {
         pub _pad: u32,
     }
 
-    /// 每个生物的元数据
     #[repr(C)]
     #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
     pub struct GpuCreatureMeta {
@@ -79,6 +82,44 @@ mod inner {
         }
     }
 
+    fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
+        wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }
+    }
+
+    fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+        wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }
+    }
+
+    fn bind_group_layout_entries() -> [wgpu::BindGroupLayoutEntry; 7] {
+        [
+            storage_entry(0, true),  // nodes_prev
+            storage_entry(1, false), // nodes_next
+            storage_entry(2, true),  // connections
+            storage_entry(3, true),  // creature_meta
+            storage_entry(4, false), // spike_counts (atomic)
+            storage_entry(5, false), // first_outputs
+            uniform_entry(6),        // tick_params
+        ]
+    }
+
     /// 探测 GPU 是否适合计算
     pub fn probe_gpu() -> GpuProbeResult {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -103,7 +144,6 @@ mod inner {
         let info = adapter.get_info();
         eprintln!("[GPU] 检测到适配器: {} ({:?})", info.name, info.device_type);
 
-        // 排除集显和 CPU 模拟
         match info.device_type {
             wgpu::DeviceType::IntegratedGpu => {
                 return GpuProbeResult::Unsuitable {
@@ -118,7 +158,6 @@ mod inner {
             _ => {}
         }
 
-        // 尝试创建 device
         let (device, queue) = match pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("snn-probe"),
@@ -136,23 +175,16 @@ mod inner {
             }
         };
 
-        // 验证 shader 编译
+        // 验证 shader 编译 + 新 bind group layout
         let shader_source = include_str!("snn_tick.wgsl");
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("snn-tick-probe"),
             source: wgpu::ShaderSource::Wgsl(shader_source.into()),
         });
 
-        // 创建最小 pipeline 验证
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("snn-layout-probe"),
-            entries: &[
-                storage_entry(0, true),  // nodes_prev (read)
-                storage_entry(1, false), // nodes_next (read_write)
-                storage_entry(2, true),  // connections (read)
-                storage_entry(3, true),  // creature_meta (read)
-                storage_entry(4, false), // outputs (read_write)
-            ],
+            entries: &bind_group_layout_entries(),
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -170,12 +202,11 @@ mod inner {
             cache: None,
         });
 
-        // 简单 benchmark：空 dispatch
+        // benchmark：空 dispatch
         let start = Instant::now();
         for _ in 0..100 {
             let encoder =
                 device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-            // 仅提交空 encoder 测量基础开销
             queue.submit(Some(encoder.finish()));
             device.poll(wgpu::Maintain::Wait);
         }
@@ -195,41 +226,44 @@ mod inner {
         }
     }
 
-    fn storage_entry(binding: u32, read_only: bool) -> wgpu::BindGroupLayoutEntry {
-        wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }
-    }
-
-    /// GPU 计算引擎
+    /// GPU 计算引擎（同步批处理）
     pub struct GpuCompute {
         device: wgpu::Device,
         queue: wgpu::Queue,
         pipeline: wgpu::ComputePipeline,
-        bind_group_layout: wgpu::BindGroupLayout,
-        // 双缓冲节点
+
+        // 节点双缓冲
         nodes_buf_a: wgpu::Buffer,
         nodes_buf_b: wgpu::Buffer,
         connections_buf: wgpu::Buffer,
         meta_buf: wgpu::Buffer,
-        outputs_buf: wgpu::Buffer,
+
+        // 输出累加（GPU 端）
+        spike_counts_buf: wgpu::Buffer,
+        first_outputs_buf: wgpu::Buffer,
+
+        // uniform：tick_index
+        tick_params_buf: wgpu::Buffer,
+
+        // 回读 staging：连续存放 spike_counts(14336) + first_outputs(14336)
         staging_buf: wgpu::Buffer,
-        // 当前读写方向
+
+        // 预构建 bind group：读A→写B / 读B→写A
+        bind_group_ping: wgpu::BindGroup,
+        bind_group_pong: wgpu::BindGroup,
+
         ping: bool,
-        // CPU 侧数据（用于上传）
+
+        // CPU 侧镜像（基因组/元数据上传路径使用）
         nodes_cpu: Vec<GpuNode>,
         connections_cpu: Vec<GpuConnection>,
         meta_cpu: Vec<GpuCreatureMeta>,
-        // 异步 readback 状态
-        pending_readback: Option<std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
-        last_raw_outputs: Vec<f32>,
+
+        // 清零用零缓冲（长度 = COUNTER_BYTES，复用避免分配）
+        zero_counter_bytes: Vec<u8>,
+
+        // 上一批读回的原始字节（spike_counts + first_outputs）
+        last_raw: Vec<u8>,
     }
 
     impl GpuCompute {
@@ -262,13 +296,7 @@ mod inner {
             let bind_group_layout =
                 device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("snn-layout"),
-                    entries: &[
-                        storage_entry(0, true),
-                        storage_entry(1, false),
-                        storage_entry(2, true),
-                        storage_entry(3, true),
-                        storage_entry(4, false),
-                    ],
+                    entries: &bind_group_layout_entries(),
                 });
 
             let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -288,71 +316,158 @@ mod inner {
 
             let total_nodes = MAX_CREATURES * MAX_NODES;
             let total_conns = MAX_CREATURES * MAX_CONNS;
-            let total_outputs = MAX_CREATURES * 7;
 
             let nodes_size = (total_nodes * std::mem::size_of::<GpuNode>()) as u64;
             let conns_size = (total_conns * std::mem::size_of::<GpuConnection>()) as u64;
             let meta_size = (MAX_CREATURES * std::mem::size_of::<GpuCreatureMeta>()) as u64;
-            let output_size = (total_outputs * std::mem::size_of::<f32>()) as u64;
 
-            let usage_rw = wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC;
+            let usage_storage_rw =
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC;
+            let usage_storage_r =
+                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
 
             let nodes_buf_a = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("nodes_a"),
                 size: nodes_size,
-                usage: usage_rw,
+                usage: usage_storage_rw,
                 mapped_at_creation: false,
             });
             let nodes_buf_b = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("nodes_b"),
                 size: nodes_size,
-                usage: usage_rw,
+                usage: usage_storage_rw,
                 mapped_at_creation: false,
             });
             let connections_buf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("connections"),
                 size: conns_size,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                usage: usage_storage_r,
                 mapped_at_creation: false,
             });
             let meta_buf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("meta"),
                 size: meta_size,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                usage: usage_storage_r,
                 mapped_at_creation: false,
             });
-            let outputs_buf = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("outputs"),
-                size: output_size,
-                usage: usage_rw,
+            let spike_counts_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("spike_counts"),
+                size: COUNTER_BYTES,
+                usage: usage_storage_rw,
+                mapped_at_creation: false,
+            });
+            let first_outputs_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("first_outputs"),
+                size: COUNTER_BYTES,
+                usage: usage_storage_rw,
+                mapped_at_creation: false,
+            });
+            let tick_params_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("tick_params"),
+                size: TICK_PARAMS_BYTES,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
             let staging_buf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("staging"),
-                size: output_size,
+                size: STAGING_BYTES,
                 usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
+
+            let bind_group_ping = Self::make_bind_group(
+                &device,
+                &bind_group_layout,
+                &nodes_buf_a,
+                &nodes_buf_b,
+                &connections_buf,
+                &meta_buf,
+                &spike_counts_buf,
+                &first_outputs_buf,
+                &tick_params_buf,
+                "snn-bind-ping",
+            );
+            let bind_group_pong = Self::make_bind_group(
+                &device,
+                &bind_group_layout,
+                &nodes_buf_b,
+                &nodes_buf_a,
+                &connections_buf,
+                &meta_buf,
+                &spike_counts_buf,
+                &first_outputs_buf,
+                &tick_params_buf,
+                "snn-bind-pong",
+            );
 
             Some(Self {
                 device,
                 queue,
                 pipeline,
-                bind_group_layout,
                 nodes_buf_a,
                 nodes_buf_b,
                 connections_buf,
                 meta_buf,
-                outputs_buf,
+                spike_counts_buf,
+                first_outputs_buf,
+                tick_params_buf,
                 staging_buf,
+                bind_group_ping,
+                bind_group_pong,
                 ping: true,
                 nodes_cpu: vec![GpuNode::default(); total_nodes],
                 connections_cpu: vec![GpuConnection::default(); total_conns],
                 meta_cpu: vec![GpuCreatureMeta::default(); MAX_CREATURES],
-                pending_readback: None,
-                last_raw_outputs: vec![0.0f32; total_outputs],
+                zero_counter_bytes: vec![0u8; COUNTER_BYTES as usize],
+                last_raw: vec![0u8; STAGING_BYTES as usize],
+            })
+        }
+
+        fn make_bind_group(
+            device: &wgpu::Device,
+            layout: &wgpu::BindGroupLayout,
+            read_buf: &wgpu::Buffer,
+            write_buf: &wgpu::Buffer,
+            conn: &wgpu::Buffer,
+            meta: &wgpu::Buffer,
+            spike: &wgpu::Buffer,
+            first: &wgpu::Buffer,
+            params: &wgpu::Buffer,
+            label: &str,
+        ) -> wgpu::BindGroup {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: read_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: write_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: conn.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: meta.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: spike.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: first.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: params.as_entire_binding(),
+                    },
+                ],
             })
         }
 
@@ -365,7 +480,6 @@ mod inner {
             let node_base = slot * MAX_NODES;
             let conn_base = slot * MAX_CONNS;
 
-            // 清空 slot
             for i in 0..MAX_NODES {
                 self.nodes_cpu[node_base + i] = GpuNode::default();
             }
@@ -373,7 +487,6 @@ mod inner {
                 self.connections_cpu[conn_base + i] = GpuConnection::default();
             }
 
-            // 建立 genome node_id → 局部索引映射
             let mut id_to_local: FxHashMap<usize, u32> = FxHashMap::default();
             let mut input_count = 0u32;
             let mut output_count = 0u32;
@@ -410,7 +523,6 @@ mod inner {
                 self.nodes_cpu[node_base + local_idx] = gpu_node;
             }
 
-            // 上传连接
             let mut conn_idx = 0;
             for conn in &genome.connections {
                 if !conn.enabled {
@@ -440,7 +552,7 @@ mod inner {
                 output_count,
             };
 
-            // 上传到 GPU
+            // 上传到 GPU（两侧节点缓冲都刷一次，确保 ping/pong 初始一致）
             let node_offset = (node_base * std::mem::size_of::<GpuNode>()) as u64;
             let node_data = bytemuck::cast_slice(&self.nodes_cpu[node_base..node_base + MAX_NODES]);
             self.queue
@@ -460,7 +572,6 @@ mod inner {
                 .write_buffer(&self.meta_buf, meta_offset, meta_data);
         }
 
-        /// 清空 slot
         pub fn clear_slot(&mut self, slot: usize) {
             if slot >= MAX_CREATURES {
                 return;
@@ -472,7 +583,7 @@ mod inner {
                 .write_buffer(&self.meta_buf, meta_offset, meta_data);
         }
 
-        /// 上传感知输入（设置输入节点的 membrane 和 fired）
+        /// 上传感知输入到当前 read 侧的 nodes 缓冲
         pub fn upload_inputs(&mut self, slot: usize, perception: &[f64; 17]) {
             if slot >= MAX_CREATURES {
                 return;
@@ -480,7 +591,7 @@ mod inner {
             let node_base = slot * MAX_NODES;
             let input_count = self.meta_cpu[slot].input_count as usize;
 
-            for i in 0..input_count.min(10) {
+            for i in 0..input_count.min(17) {
                 self.nodes_cpu[node_base + i].membrane = perception[i] as f32;
                 self.nodes_cpu[node_base + i].set_fired(true);
             }
@@ -488,48 +599,39 @@ mod inner {
             let offset = (node_base * std::mem::size_of::<GpuNode>()) as u64;
             let input_size = input_count.min(MAX_NODES);
             let data = bytemuck::cast_slice(&self.nodes_cpu[node_base..node_base + input_size]);
-            let buf = if self.ping {
+            // 写入"下次 dispatch 将读取"的缓冲
+            let target = if self.ping {
                 &self.nodes_buf_a
             } else {
                 &self.nodes_buf_b
             };
-            self.queue.write_buffer(buf, offset, data);
+            self.queue.write_buffer(target, offset, data);
         }
 
-        /// 执行一个 GPU tick
-        pub fn dispatch_tick(&mut self) {
-            let (read_buf, write_buf) = if self.ping {
-                (&self.nodes_buf_a, &self.nodes_buf_b)
-            } else {
-                (&self.nodes_buf_b, &self.nodes_buf_a)
-            };
+        /// 清零 spike_counts 和 first_outputs（每个批开始时调用）
+        pub fn clear_counters(&mut self) {
+            self.queue
+                .write_buffer(&self.spike_counts_buf, 0, &self.zero_counter_bytes);
+            self.queue
+                .write_buffer(&self.first_outputs_buf, 0, &self.zero_counter_bytes);
+        }
 
-            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("snn-bind-group"),
-                layout: &self.bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: read_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: write_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: self.connections_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: self.meta_buf.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: self.outputs_buf.as_entire_binding(),
-                    },
-                ],
-            });
+        /// 写入当前 tick_index 到 uniform
+        fn write_tick_index(&mut self, tick_index: u32) {
+            let data = [tick_index, 0u32, 0u32, 0u32];
+            self.queue
+                .write_buffer(&self.tick_params_buf, 0, bytemuck::cast_slice(&data));
+        }
+
+        /// 执行一个 GPU tick（独立 submit）
+        pub fn dispatch_tick(&mut self, tick_index: u32) {
+            self.write_tick_index(tick_index);
+
+            let bind_group = if self.ping {
+                &self.bind_group_ping
+            } else {
+                &self.bind_group_pong
+            };
 
             let mut encoder = self
                 .device
@@ -543,8 +645,7 @@ mod inner {
                     timestamp_writes: None,
                 });
                 pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &bind_group, &[]);
-                // 总线程数 = MAX_CREATURES * MAX_NODES，workgroup_size = 64
+                pass.set_bind_group(0, bind_group, &[]);
                 let workgroups = (MAX_CREATURES * MAX_NODES + 63) / 64;
                 pass.dispatch_workgroups(workgroups as u32, 1, 1);
             }
@@ -553,87 +654,78 @@ mod inner {
             self.ping = !self.ping;
         }
 
-        /// 发起异步 readback：copy + map_async
-        /// 同一个 staging buffer 不能有两个 pending map，所以必须先阻塞回收上一次
-        pub fn begin_readback(&mut self) {
-            // 必须先阻塞回收上一次（staging buffer 只有一个）
-            self.finish_pending_readback();
-
-            let output_count = MAX_CREATURES * 7;
-            let output_size = (output_count * std::mem::size_of::<f32>()) as u64;
-
+        /// 阻塞读回 spike_counts + first_outputs（批结束时调用一次）
+        pub fn readback_all_blocking(&mut self) {
+            // 1. copy 两段到 staging
             let mut encoder = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("readback"),
+                    label: Some("readback-all"),
                 });
-            encoder.copy_buffer_to_buffer(&self.outputs_buf, 0, &self.staging_buf, 0, output_size);
+            encoder.copy_buffer_to_buffer(
+                &self.spike_counts_buf,
+                0,
+                &self.staging_buf,
+                0,
+                COUNTER_BYTES,
+            );
+            encoder.copy_buffer_to_buffer(
+                &self.first_outputs_buf,
+                0,
+                &self.staging_buf,
+                COUNTER_BYTES,
+                COUNTER_BYTES,
+            );
             self.queue.submit(Some(encoder.finish()));
 
+            // 2. map_async 阻塞等待
             let slice = self.staging_buf.slice(..);
             let (tx, rx) = std::sync::mpsc::channel();
             slice.map_async(wgpu::MapMode::Read, move |result| {
                 let _ = tx.send(result);
             });
-            self.pending_readback = Some(rx);
-        }
-
-        /// 阻塞等待 pending readback 完成，更新 last_raw_outputs
-        fn finish_pending_readback(&mut self) {
-            let rx = match self.pending_readback.take() {
-                Some(rx) => rx,
-                None => return,
-            };
-            loop {
-                self.device.poll(wgpu::Maintain::Poll);
-                match rx.try_recv() {
-                    Ok(Ok(())) => {
-                        let slice = self.staging_buf.slice(..);
-                        let data = slice.get_mapped_range();
-                        self.last_raw_outputs
-                            .copy_from_slice(bytemuck::cast_slice(&data));
-                        drop(data);
-                        self.staging_buf.unmap();
-                        return;
-                    }
-                    Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {
-                        std::hint::spin_loop();
-                    }
+            // Maintain::Wait 让驱动自己推进，不做 CPU 空转
+            self.device.poll(wgpu::Maintain::Wait);
+            match rx.recv() {
+                Ok(Ok(())) => {
+                    let data = slice.get_mapped_range();
+                    self.last_raw.copy_from_slice(&data);
+                    drop(data);
+                    self.staging_buf.unmap();
+                }
+                _ => {
+                    // 读取失败，last_raw 保持原值
                 }
             }
         }
 
-        /// 阻塞读取最新输出（用于 inject tick，必须拿到准确数据）
-        pub fn finish_and_read(&mut self) -> &[f32] {
-            self.finish_pending_readback();
-            &self.last_raw_outputs
-        }
+        /// 从 last_raw 读取指定 slot 的脉冲计数和直读输出
+        pub fn slot_raw(&self, slot: usize) -> ([u32; 7], [f32; 7]) {
+            let mut spikes = [0u32; 7];
+            let mut firsts = [0.0f32; 7];
+            let base_bytes = slot * OUTPUTS_PER_CREATURE * 4;
+            let spike_src =
+                &self.last_raw[base_bytes..base_bytes + OUTPUTS_PER_CREATURE * 4];
+            let first_base = COUNTER_BYTES as usize + base_bytes;
+            let first_src =
+                &self.last_raw[first_base..first_base + OUTPUTS_PER_CREATURE * 4];
 
-        /// 非阻塞读取缓存输出（可能是上一 tick 的数据）
-        pub fn try_readback_outputs(&mut self) -> &[f32] {
-            if self.pending_readback.is_some() {
-                // 非阻塞 poll 推动 GPU
-                self.device.poll(wgpu::Maintain::Poll);
-                // 尝试回收
-                if let Some(rx) = self.pending_readback.take() {
-                    match rx.try_recv() {
-                        Ok(Ok(())) => {
-                            let slice = self.staging_buf.slice(..);
-                            let data = slice.get_mapped_range();
-                            self.last_raw_outputs
-                                .copy_from_slice(bytemuck::cast_slice(&data));
-                            drop(data);
-                            self.staging_buf.unmap();
-                        }
-                        Err(std::sync::mpsc::TryRecvError::Empty) => {
-                            self.pending_readback = Some(rx);
-                        }
-                        _ => {} // 出错或断开，丢弃
-                    }
-                }
+            for i in 0..7 {
+                spikes[i] = u32::from_le_bytes([
+                    spike_src[i * 4],
+                    spike_src[i * 4 + 1],
+                    spike_src[i * 4 + 2],
+                    spike_src[i * 4 + 3],
+                ]);
+                firsts[i] = f32::from_le_bytes([
+                    first_src[i * 4],
+                    first_src[i * 4 + 1],
+                    first_src[i * 4 + 2],
+                    first_src[i * 4 + 3],
+                ]);
             }
-            &self.last_raw_outputs
+
+            (spikes, firsts)
         }
     }
 
@@ -641,15 +733,12 @@ mod inner {
     pub struct GpuExecutor {
         gpu: GpuCompute,
         slots: SlotAllocator,
-        last_tick_ns: u64,
-        /// 首次 tick（注入输入时）的直读输出值
-        first_outputs: FxHashMap<u64, [f32; 7]>,
-        /// 脉冲发放计数（每帧重置）
-        spike_counts: FxHashMap<u64, [u32; 7]>,
-        /// 帧内 tick 计数
-        tick_count: u32,
         /// 输出模式缓存：creature_id -> output_modes (true=直读)
         output_modes_cache: FxHashMap<u64, Vec<bool>>,
+        /// 上批 tick 数（用于脉冲发放率计算）
+        last_tick_count: u32,
+        /// 上批整体耗时（所有生物均摊）
+        last_batch_ns: u64,
     }
 
     impl GpuExecutor {
@@ -658,11 +747,9 @@ mod inner {
             Some(Self {
                 gpu,
                 slots: SlotAllocator::new(MAX_CREATURES),
-                last_tick_ns: 0,
-                first_outputs: FxHashMap::default(),
-                spike_counts: FxHashMap::default(),
-                tick_count: 0,
                 output_modes_cache: FxHashMap::default(),
+                last_tick_count: 0,
+                last_batch_ns: 0,
             })
         }
     }
@@ -671,7 +758,6 @@ mod inner {
         fn register(&mut self, id: u64, genome: &Genome) {
             if let Some(slot) = self.slots.allocate(id) {
                 self.gpu.upload_genome(slot, genome);
-                // 构建输出模式：threshold == 0 为直读
                 let output_modes: Vec<bool> = genome
                     .nodes
                     .iter()
@@ -679,7 +765,6 @@ mod inner {
                     .map(|n| n.threshold == 0.0)
                     .collect();
                 self.output_modes_cache.insert(id, output_modes);
-                self.spike_counts.insert(id, [0; 7]);
             }
         }
 
@@ -688,98 +773,58 @@ mod inner {
                 self.gpu.clear_slot(slot);
             }
             self.slots.free(id);
-            self.first_outputs.remove(&id);
             self.output_modes_cache.remove(&id);
-            self.spike_counts.remove(&id);
         }
 
-        fn inject_inputs(&mut self, inputs: &[CreatureInput]) {
-            self.tick_count = 0;
-            for counts in self.spike_counts.values_mut() {
-                *counts = [0; 7];
-            }
+        fn run_batch(&mut self, inputs: &[CreatureInput], tick_count: usize) {
+            let t0 = Instant::now();
+            let n = tick_count.max(1);
+            self.last_tick_count = n as u32;
+
+            // 1. 上传本批次输入到当前 read 侧缓冲
             for input in inputs {
                 if let Some(slot) = self.slots.get_slot(input.creature_id) {
                     self.gpu.upload_inputs(slot, &input.perception);
                 }
             }
-        }
 
-        fn tick(&mut self) {
-            let t0 = Instant::now();
-            self.gpu.dispatch_tick();
-            self.gpu.begin_readback();
-            self.tick_count += 1;
-            let inject = self.tick_count == 1;
+            // 2. 清零 GPU 端计数器（spike_counts + first_outputs）
+            self.gpu.clear_counters();
 
-            // inject tick（决定直读输出）必须同步拿到准确数据；后续 tick 异步
-            let raw = if inject {
-                self.gpu.finish_and_read()
-            } else {
-                self.gpu.try_readback_outputs()
-            };
-            self.last_tick_ns = t0.elapsed().as_nanos() as u64;
-
-            for (&creature_id, &slot) in self.slots.active_entries() {
-                let base = slot * 7;
-                if base + 7 > raw.len() {
-                    continue;
-                }
-
-                let current_outputs = [
-                    raw[base],
-                    raw[base + 1],
-                    raw[base + 2],
-                    raw[base + 3],
-                    raw[base + 4],
-                    raw[base + 5],
-                    raw[base + 6],
-                ];
-
-                // 首次 tick：保存直读输出值
-                if inject {
-                    self.first_outputs.insert(creature_id, current_outputs);
-                }
-
-                // 累积脉冲发放
-                if let Some(modes) = self.output_modes_cache.get(&creature_id) {
-                    if let Some(counts) = self.spike_counts.get_mut(&creature_id) {
-                        for (j, (&v, &direct_read)) in
-                            current_outputs.iter().zip(modes.iter()).enumerate()
-                        {
-                            if !direct_read && v > 0.5 {
-                                counts[j] += 1;
-                            }
-                        }
-                    }
-                }
+            // 3. 执行 N 个 tick
+            for i in 0..n {
+                self.gpu.dispatch_tick(i as u32);
             }
+
+            // 4. 批末尾一次性读回
+            self.gpu.readback_all_blocking();
+
+            self.last_batch_ns = t0.elapsed().as_nanos() as u64;
         }
 
         fn read_outputs(&self) -> Vec<CreatureOutput> {
-            let active_count = self.slots.active_entries().count().max(1) as u64;
-            let per_creature_ns = self.last_tick_ns / active_count;
-            let mut results = Vec::new();
-            for (&creature_id, _) in self.slots.active_entries() {
-                // 直读输出取首次 tick 的值，脉冲输出取发放率
-                let first = self
-                    .first_outputs
-                    .get(&creature_id)
-                    .copied()
-                    .unwrap_or([0.0; 7]);
+            let active: Vec<(u64, usize)> = self
+                .slots
+                .active_entries()
+                .map(|(&id, &slot)| (id, slot))
+                .collect();
+            let active_count = active.len().max(1) as u64;
+            let per_creature_ns = self.last_batch_ns / active_count;
+
+            let mut results = Vec::with_capacity(active.len());
+            for (creature_id, slot) in active {
+                let (spikes, firsts) = self.gpu.slot_raw(slot);
                 let mut final_outputs = [0.0f64; 7];
                 for i in 0..7 {
-                    final_outputs[i] = first[i] as f64;
+                    final_outputs[i] = firsts[i] as f64;
                 }
 
                 if let Some(modes) = self.output_modes_cache.get(&creature_id) {
-                    if let Some(counts) = self.spike_counts.get(&creature_id) {
-                        if self.tick_count > 0 {
-                            for (j, &direct_read) in modes.iter().enumerate().take(7) {
-                                if !direct_read {
-                                    let rate = counts[j] as f64 / self.tick_count as f64;
-                                    final_outputs[j] = rate * 2.0 - 1.0;
-                                }
+                    if self.last_tick_count > 0 {
+                        for (j, &direct_read) in modes.iter().enumerate().take(7) {
+                            if !direct_read {
+                                let rate = spikes[j] as f64 / self.last_tick_count as f64;
+                                final_outputs[j] = rate * 2.0 - 1.0;
                             }
                         }
                     }

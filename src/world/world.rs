@@ -92,12 +92,8 @@ pub struct World {
     energy_grid_dirty: bool,
     trail_grid_dirty: bool,
 
-    /// 异步神经桥（None = 同步模式）
+    /// 神经桥（None = legacy 纯 CPU 同步模式）
     neural_bridge: Option<NeuralBridge>,
-    /// 异步模式下的输出缓存
-    neural_output_cache: FxHashMap<u64, [f64; 7]>,
-    /// 异步 SNN 耗时缓存
-    neural_compute_cache: FxHashMap<u64, u64>,
 
     /// 种族源头基因组：clan_hash -> 建族者的 genome（用于后代相似度比较）
     clan_genomes: FxHashMap<u64, Genome>,
@@ -160,8 +156,6 @@ impl World {
             energy_grid_dirty: true,
             trail_grid_dirty: true,
             neural_bridge: None,
-            neural_output_cache: FxHashMap::default(),
-            neural_compute_cache: FxHashMap::default(),
             clan_genomes: FxHashMap::default(),
             dominant_species: Vec::new(),
             stop_extinction_triggered: false,
@@ -178,20 +172,7 @@ impl World {
         world
     }
 
-    /// 是否启用了异步神经桥（bridge 模式）
-    pub fn has_neural_bridge(&self) -> bool {
-        self.neural_bridge.is_some()
-    }
-
-    /// 读取神经线程累计推理轮次（sim_thread 反压采样用）
-    pub fn neural_inference_count(&self) -> u64 {
-        self.neural_bridge
-            .as_ref()
-            .map(|b| b.inference_count())
-            .unwrap_or(0)
-    }
-
-    /// 设置异步神经桥
+    /// 设置神经桥（同步批处理模式）
     pub fn set_neural_bridge(&mut self, bridge: NeuralBridge) {
         // 向桥注册所有已有生物
         for creature in &self.creatures {
@@ -391,8 +372,6 @@ impl World {
             energy_grid_dirty: true,
             trail_grid_dirty: true,
             neural_bridge: None,
-            neural_output_cache: FxHashMap::default(),
-            neural_compute_cache: FxHashMap::default(),
             clan_genomes,
             dominant_species,
             stop_extinction_triggered: false,
@@ -730,19 +709,6 @@ impl World {
     fn update_creatures(&mut self, dt: f64, config: &Config) {
         let has_bridge = self.neural_bridge.is_some();
 
-        // 异步模式：交换缓冲区，读取输出
-        if has_bridge {
-            if let Some(ref bridge) = self.neural_bridge {
-                bridge.swap_outputs();
-                let outputs = bridge.read_outputs();
-                for o in &outputs {
-                    self.neural_output_cache.insert(o.creature_id, o.outputs);
-                    self.neural_compute_cache
-                        .insert(o.creature_id, o.compute_ns);
-                }
-            }
-        }
-
         let creature_count = self.creatures.len();
         let need_per_creature_timing = config.compute_energy_factor > 0.0;
 
@@ -848,9 +814,7 @@ impl World {
 
         let perceive_time = perceive_start.elapsed().as_secs_f64() * 1000.0;
 
-        // ========== 阶段2: 串行应用结果 + SNN + 动作 ==========
-
-        // 异步模式：收集感知数据
+        // ========== 阶段2a: 应用感知/代谢结果 + 收集 bridge 输入 ==========
         let mut bridge_inputs: Vec<CreatureInput> = if has_bridge {
             Vec::with_capacity(alive_count)
         } else {
@@ -882,6 +846,38 @@ impl World {
                 continue;
             }
 
+            if has_bridge {
+                bridge_inputs.push(CreatureInput {
+                    creature_id: self.creatures[i].id,
+                    perception: self.creatures[i].perception_cache,
+                });
+            }
+        }
+
+        // ========== 阶段2b: 同步执行神经批 ==========
+        // 每次 update 固定 snn_ticks 个 tick，加速仅增加 update 频率，保证结果与倍速无关
+        let snn_ticks = (config.neural_tick_rate * dt).round().max(1.0) as usize;
+        let output_map: FxHashMap<u64, ([f64; 7], u64)> = if has_bridge {
+            let outputs = self
+                .neural_bridge
+                .as_ref()
+                .unwrap()
+                .run_batch_sync(bridge_inputs, snn_ticks);
+            outputs
+                .into_iter()
+                .map(|o| (o.creature_id, (o.outputs, o.compute_ns)))
+                .collect()
+        } else {
+            FxHashMap::default()
+        };
+
+        // ========== 阶段2c: 串行动作执行 ==========
+        for result in &perception_results {
+            let i = result.creature_idx;
+            if !self.creatures[i].alive {
+                continue;
+            }
+
             let creature_t0 = if need_per_creature_timing {
                 Instant::now()
             } else {
@@ -889,42 +885,29 @@ impl World {
             };
 
             if has_bridge {
-                bridge_inputs.push(CreatureInput {
-                    creature_id: self.creatures[i].id,
-                    perception: self.creatures[i].perception_cache,
-                });
-                let outputs = self
-                    .neural_output_cache
+                let (outputs, snn_ns) = output_map
                     .get(&self.creatures[i].id)
                     .copied()
-                    .unwrap_or(self.creatures[i].last_outputs);
+                    .unwrap_or((self.creatures[i].last_outputs, 0));
                 self.creatures[i].last_outputs = outputs;
 
                 let energy_before = self.creatures[i].energy;
                 self.execute_actions(i, &outputs.to_vec(), dt, config);
 
-                // 计算奖励信号并应用到脑
                 let energy_delta = self.creatures[i].energy - energy_before;
                 if energy_delta != 0.0 {
-                    let reward = (energy_delta / config.initial_energy)
-                        .clamp(-1.0, 1.0);
+                    let reward = (energy_delta / config.initial_energy).clamp(-1.0, 1.0);
                     self.creatures[i].brain.set_reward_signal(reward);
                     self.creatures[i].brain.apply_reward();
                 }
 
                 if need_per_creature_timing {
                     let main_ns = creature_t0.elapsed().as_nanos() as u64;
-                    let snn_ns = self
-                        .neural_compute_cache
-                        .get(&self.creatures[i].id)
-                        .copied()
-                        .unwrap_or(0);
                     self.creatures[i].frame_compute_ns = main_ns + snn_ns;
                 }
             } else {
+                // legacy 纯 CPU 同步路径
                 let perception = self.creatures[i].perception_cache;
-                // SNN tick 按 dt 缩放，保证每模拟秒 tick 总数恒定（300 × 1/30 = 10 ticks/update）
-                let snn_ticks = (config.neural_tick_rate * dt).round().max(1.0) as usize;
                 let outputs = self.creatures[i].brain.tick_multi(&perception, snn_ticks);
                 for (j, &v) in outputs.iter().enumerate().take(7) {
                     self.creatures[i].last_outputs[j] = v;
@@ -933,11 +916,9 @@ impl World {
                 let energy_before = self.creatures[i].energy;
                 self.execute_actions(i, &outputs, dt, config);
 
-                // 计算奖励信号并应用到脑
                 let energy_delta = self.creatures[i].energy - energy_before;
                 if energy_delta != 0.0 {
-                    let reward = (energy_delta / config.initial_energy)
-                        .clamp(-1.0, 1.0);
+                    let reward = (energy_delta / config.initial_energy).clamp(-1.0, 1.0);
                     self.creatures[i].brain.set_reward_signal(reward);
                     self.creatures[i].brain.apply_reward();
                 }
@@ -946,14 +927,6 @@ impl World {
                     let main_ns = creature_t0.elapsed().as_nanos() as u64;
                     self.creatures[i].frame_compute_ns = main_ns;
                 }
-            }
-        }
-
-        // 异步模式：写入感知并交换
-        if has_bridge {
-            if let Some(ref bridge) = self.neural_bridge {
-                bridge.write_inputs(bridge_inputs);
-                bridge.swap_inputs();
             }
         }
 

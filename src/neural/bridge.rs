@@ -1,6 +1,6 @@
 use std::sync::mpsc;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
 
@@ -27,149 +27,101 @@ pub enum CreatureEvent {
     Died { id: u64 },
 }
 
-/// 世界线程与神经线程之间的通信桥
+/// 世界线程 → 神经线程的一次 tick 批请求
+pub struct TickRequest {
+    pub events: Vec<CreatureEvent>,
+    pub inputs: Vec<CreatureInput>,
+    pub tick_count: usize,
+}
+
+/// 神经线程 → 世界线程的一次响应
+pub struct TickResponse {
+    pub outputs: Vec<CreatureOutput>,
+}
+
+/// 世界线程与神经线程之间的同步通信桥
+///
+/// 语义：世界每次 update 调用 `run_batch_sync` 提交一批请求并阻塞等待结果。
+/// 神经线程完全由世界驱动，没有独立节奏。加速倍速仅影响世界调用频率，
+/// 单次批的 tick_count 固定，确保"加速只是更快获得结果，不影响结果"。
 pub struct NeuralBridge {
-    /// 感知输入：世界写 front，神经读 back，帧开始时交换
-    input_front: Arc<Mutex<Vec<CreatureInput>>>,
-    input_back: Arc<Mutex<Vec<CreatureInput>>>,
-    /// 动作输出：神经写 back，世界读 front，定期交换
-    output_front: Arc<Mutex<Vec<CreatureOutput>>>,
-    output_back: Arc<Mutex<Vec<CreatureOutput>>>,
-    /// 生命周期事件
-    event_tx: mpsc::Sender<CreatureEvent>,
-    pub(crate) event_rx: Arc<Mutex<mpsc::Receiver<CreatureEvent>>>,
-    /// 运行标志
-    pub running: Arc<AtomicBool>,
-    /// 输入是否已被消费（世界 swap 时重置，神经线程消费后置 true）
-    input_consumed: Arc<AtomicBool>,
-    /// 神经线程完成的推理轮次计数（每次 write_outputs 自增，空批也算）
-    inference_count: Arc<AtomicU64>,
+    req_tx: mpsc::Sender<TickRequest>,
+    resp_rx: Mutex<mpsc::Receiver<TickResponse>>,
+    /// 累积待发送的生命周期事件，run_batch_sync 时打包进请求
+    pending_events: Mutex<Vec<CreatureEvent>>,
+    running: Arc<AtomicBool>,
 }
 
 impl NeuralBridge {
-    pub fn new() -> Self {
-        let (event_tx, event_rx) = mpsc::channel();
-        Self {
-            input_front: Arc::new(Mutex::new(Vec::new())),
-            input_back: Arc::new(Mutex::new(Vec::new())),
-            output_front: Arc::new(Mutex::new(Vec::new())),
-            output_back: Arc::new(Mutex::new(Vec::new())),
-            event_tx,
-            event_rx: Arc::new(Mutex::new(event_rx)),
-            running: Arc::new(AtomicBool::new(true)),
-            input_consumed: Arc::new(AtomicBool::new(true)),
-            inference_count: Arc::new(AtomicU64::new(0)),
-        }
+    pub fn new() -> (Self, BridgeServerHandle) {
+        let (req_tx, req_rx) = mpsc::channel();
+        let (resp_tx, resp_rx) = mpsc::channel();
+        let running = Arc::new(AtomicBool::new(true));
+        let bridge = Self {
+            req_tx,
+            resp_rx: Mutex::new(resp_rx),
+            pending_events: Mutex::new(Vec::new()),
+            running: Arc::clone(&running),
+        };
+        let handle = BridgeServerHandle {
+            req_rx,
+            resp_tx,
+            running,
+        };
+        (bridge, handle)
     }
 
-    /// 读取神经线程累计完成的推理轮次（sim_thread 反压采样用）
-    pub fn inference_count(&self) -> u64 {
-        self.inference_count.load(Ordering::Relaxed)
-    }
-
-    // === 世界线程侧 API ===
-
-    /// 写入感知数据（世界线程调用）
-    pub fn write_inputs(&self, inputs: Vec<CreatureInput>) {
-        if let Ok(mut front) = self.input_front.lock() {
-            *front = inputs;
-        }
-    }
-
-    /// 交换输入缓冲区（帧开始时调用）
-    pub fn swap_inputs(&self) {
-        if let (Ok(mut front), Ok(mut back)) = (self.input_front.lock(), self.input_back.lock()) {
-            std::mem::swap(&mut *front, &mut *back);
-        }
-        self.input_consumed.store(false, Ordering::Release);
-    }
-
-    /// 读取输出（世界线程调用，take 替代 clone 避免分配）
-    pub fn read_outputs(&self) -> Vec<CreatureOutput> {
-        if let Ok(mut front) = self.output_front.lock() {
-            std::mem::take(&mut *front)
-        } else {
-            Vec::new()
-        }
-    }
-
-    /// 交换输出缓冲区
-    pub fn swap_outputs(&self) {
-        if let (Ok(mut front), Ok(mut back)) = (self.output_front.lock(), self.output_back.lock()) {
-            std::mem::swap(&mut *front, &mut *back);
-        }
-    }
-
-    /// 发送生命周期事件
+    /// 向桥推送生命周期事件（即将在下次 run_batch_sync 打包给神经线程）
     pub fn send_event(&self, event: CreatureEvent) {
-        let _ = self.event_tx.send(event);
+        if let Ok(mut buf) = self.pending_events.lock() {
+            buf.push(event);
+        }
+    }
+
+    /// 同步执行一批 tick：打包事件+感知+次数，阻塞等待神经线程返回决策输出
+    pub fn run_batch_sync(
+        &self,
+        inputs: Vec<CreatureInput>,
+        tick_count: usize,
+    ) -> Vec<CreatureOutput> {
+        let events = self
+            .pending_events
+            .lock()
+            .map(|mut v| std::mem::take(&mut *v))
+            .unwrap_or_default();
+
+        if self
+            .req_tx
+            .send(TickRequest {
+                events,
+                inputs,
+                tick_count,
+            })
+            .is_err()
+        {
+            return Vec::new();
+        }
+
+        match self.resp_rx.lock() {
+            Ok(rx) => rx.recv().map(|r| r.outputs).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
     }
 
     /// 停止神经线程
     pub fn shutdown(&self) {
         self.running.store(false, Ordering::Relaxed);
     }
-
-    /// 创建线程侧句柄（克隆 Arc 引用）
-    pub fn thread_handle(&self) -> NeuralBridgeHandle {
-        NeuralBridgeHandle {
-            input_back: Arc::clone(&self.input_back),
-            output_back: Arc::clone(&self.output_back),
-            event_rx: Arc::clone(&self.event_rx),
-            running: Arc::clone(&self.running),
-            input_consumed: Arc::clone(&self.input_consumed),
-            inference_count: Arc::clone(&self.inference_count),
-        }
-    }
 }
 
-/// 神经线程持有的桥接句柄
-pub struct NeuralBridgeHandle {
-    input_back: Arc<Mutex<Vec<CreatureInput>>>,
-    output_back: Arc<Mutex<Vec<CreatureOutput>>>,
-    event_rx: Arc<Mutex<mpsc::Receiver<CreatureEvent>>>,
-    running: Arc<AtomicBool>,
-    input_consumed: Arc<AtomicBool>,
-    inference_count: Arc<AtomicU64>,
+/// 神经线程持有的服务端句柄
+pub struct BridgeServerHandle {
+    pub req_rx: mpsc::Receiver<TickRequest>,
+    pub resp_tx: mpsc::Sender<TickResponse>,
+    pub running: Arc<AtomicBool>,
 }
 
-impl NeuralBridgeHandle {
-    /// 尝试消费输入（仅在世界提供新数据后返回 Some，之后返回 None 直到下一帧）
-    pub fn try_consume_inputs(&self) -> Option<Vec<CreatureInput>> {
-        if self
-            .input_consumed
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
-        {
-            // 成功消费一次新感知 = 一次跟上世界 sub-step 的决策轮
-            // 计数用于 sim_thread 反压探针，值与 target speed 倍率同单位
-            self.inference_count.fetch_add(1, Ordering::Relaxed);
-            if let Ok(mut back) = self.input_back.lock() {
-                Some(std::mem::take(&mut *back))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    pub fn write_outputs(&self, outputs: Vec<CreatureOutput>) {
-        if let Ok(mut back) = self.output_back.lock() {
-            *back = outputs;
-        }
-    }
-
-    pub fn drain_events(&self) -> Vec<CreatureEvent> {
-        let mut events = Vec::new();
-        if let Ok(rx) = self.event_rx.lock() {
-            while let Ok(event) = rx.try_recv() {
-                events.push(event);
-            }
-        }
-        events
-    }
-
+impl BridgeServerHandle {
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
     }
