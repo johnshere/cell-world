@@ -48,8 +48,8 @@ pub struct Creature {
     #[cfg_attr(feature = "persistence", serde(default))]
     pub follow_level: f64,
 
-    // 感知结果缓存（17维：左眼8 + 右眼8 + 自身1）
-    pub perception_cache: [f64; 17],
+    // 感知结果缓存（18维：左眼8 + 右眼8 + 自身1 + 地形1）
+    pub perception_cache: [f64; 18],
 
     // 上一帧 SNN 输出缓存
     pub last_outputs: [f64; 7],
@@ -101,7 +101,7 @@ impl Creature {
             clan_hash: genome_hash, // 默认用自身 hash，繁殖时由调用者覆盖
             current_speed: 0.0,
             follow_level: 0.0,
-            perception_cache: [0.0; 17],
+            perception_cache: [0.0; 18],
             last_outputs: [0.0; 7],
             eye_cooldown_timer: 0.0,
             eye_scan_offset: [0.0; 2],

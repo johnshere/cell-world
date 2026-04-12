@@ -114,7 +114,7 @@
 - **朝向差 / 速度差**：仅当最近目标是生物时有值，否则为 0
 - **自身状态**：1 通道，每帧都更新
 
-### 输入（17 维）
+### 输入（18 维）
 
 ```
 左眼 [0..7]:
@@ -132,9 +132,14 @@
 
 自身状态 [16]:
   [16] 自身能量        (energy / 2000).min(1)
+
+地形感知 [17]:
+  [17] 前方坡度方向    dh.signum()  {-1=下坡, 0=平地/无地形, 1=上坡}
+       前瞻 15px，归入 block 0（体感区）
+       地形未生成时恒为 0
 ```
 
-> 常量来源：`Genome::INPUT_SIZE = 17`，写入逻辑见 `src/world/world.rs::compute_perception_pure`。
+> 常量来源：`Genome::INPUT_SIZE = 18`，写入逻辑见 `src/world/world.rs::compute_perception_pure`。
 
 ### 输出（7 维，固定，全部直读 tanh）
 

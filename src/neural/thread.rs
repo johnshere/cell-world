@@ -25,7 +25,7 @@ pub trait TickExecutor: Send {
 /// CPU 执行器
 pub struct CpuExecutor {
     networks: FxHashMap<u64, SpikingNetwork>,
-    current_inputs: FxHashMap<u64, [f64; 17]>,
+    current_inputs: FxHashMap<u64, [f64; 18]>,
     first_outputs: FxHashMap<u64, [f64; 7]>,
     compute_times: FxHashMap<u64, u64>,
     spike_counts: FxHashMap<u64, [u32; 7]>,

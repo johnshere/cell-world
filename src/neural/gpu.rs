@@ -584,14 +584,14 @@ mod inner {
         }
 
         /// 上传感知输入到当前 read 侧的 nodes 缓冲
-        pub fn upload_inputs(&mut self, slot: usize, perception: &[f64; 17]) {
+        pub fn upload_inputs(&mut self, slot: usize, perception: &[f64; 18]) {
             if slot >= MAX_CREATURES {
                 return;
             }
             let node_base = slot * MAX_NODES;
             let input_count = self.meta_cpu[slot].input_count as usize;
 
-            for i in 0..input_count.min(17) {
+            for i in 0..input_count.min(crate::neural::genome::Genome::INPUT_SIZE) {
                 self.nodes_cpu[node_base + i].membrane = perception[i] as f32;
                 self.nodes_cpu[node_base + i].set_fired(true);
             }

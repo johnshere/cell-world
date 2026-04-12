@@ -43,7 +43,7 @@ pub fn sensory_block_for_input(input_id: usize) -> i8 {
     match input_id {
         0..=7 => -1,   // 左眼
         8..=15 => 1,   // 右眼
-        16 => 0,       // 自身状态
+        16 | 17 => 0,  // 自身状态 + 地形感知
         _ => 0,
     }
 }

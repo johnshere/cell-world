@@ -10,7 +10,7 @@ use super::genome::Genome;
 #[derive(Clone)]
 pub struct CreatureInput {
     pub creature_id: u64,
-    pub perception: [f64; 17],
+    pub perception: [f64; 18],
 }
 
 /// 生物动作输出

@@ -731,6 +731,7 @@ impl World {
         let creature_grid_ref = &self.creature_grid;
         let trail_grid_ref = &self.trail_grid;
         let trail_disabled = self.trail_disabled;
+        let terrain_ref = &self.terrain;
 
         let perception_results: Vec<PerceptionResult> = alive_indices
             .par_iter()
@@ -793,6 +794,7 @@ impl World {
                         creature_grid_ref,
                         trail_grid_ref,
                         trail_disabled,
+                        terrain_ref,
                         &mut energy_buf,
                         &mut creature_buf,
                         &mut trail_buf,
@@ -1763,7 +1765,7 @@ fn angle_diff(a: f64, b: f64) -> f64 {
 /// 感知阶段每只生物的计算结果（由并行阶段产出，串行阶段消费）
 struct PerceptionResult {
     creature_idx: usize,
-    perception_cache: [f64; 17],
+    perception_cache: [f64; 18],
     eye_scan_offset: [f64; 2],
     energy_after_metabolism: f64,
     alive: bool,
@@ -1846,15 +1848,29 @@ fn compute_perception_pure(
     creature_grid: &SpatialGrid,
     trail_grid: &SpatialGrid,
     trail_disabled: bool,
+    terrain: &TerrainMap,
     energy_buf: &mut Vec<usize>,
     creature_buf: &mut Vec<usize>,
     trail_buf: &mut Vec<usize>,
-) -> ([f64; 17], [f64; 2], f64) {
+) -> ([f64; 18], [f64; 2], f64) {
     let mut perception = creature.perception_cache;
     let mut scan_offsets = creature.eye_scan_offset;
 
     // 自身状态 [16] 始终更新
     perception[16] = (creature.energy / 2000.0).min(1.0);
+
+    // 地形感知 [17]：前方地面高于/低于/等于当前位置（-1/0/1）
+    perception[17] = if terrain.is_generated() {
+        let ahead_dist = 15.0;
+        let ahead_x = creature.x + creature.heading.cos() * ahead_dist;
+        let ahead_y = creature.y + creature.heading.sin() * ahead_dist;
+        let h_current = terrain.height_at(creature.x, creature.y).unwrap_or(0);
+        let h_ahead = terrain.height_at(ahead_x, ahead_y).unwrap_or(0);
+        let dh = (h_ahead - h_current) as f64;
+        dh.signum()
+    } else {
+        0.0
+    };
 
     // 推进扫描角度
     let scan_advance = config.eye_scan_speed.to_radians() * dt;
