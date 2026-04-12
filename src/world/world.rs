@@ -1104,6 +1104,7 @@ impl World {
         let heading = self.creatures[idx].heading;
         let cx = self.creatures[idx].x;
         let cy = self.creatures[idx].y;
+        let my_clan_hash = self.creatures[idx].clan_hash;
 
         // 锥形吸收区域：从身体中心到嘴巴弧线外缘，heading ± 25° 扇形
         let mouth_outer_r = mouth_arc_r + mouth_stroke * 0.5;
@@ -1138,7 +1139,7 @@ impl World {
             let nearby_trails = self.trail_grid.query(cx, cy, mouth_outer_r);
             for &trail_idx in &nearby_trails {
                 let trail = &self.trail_points[trail_idx];
-                if trail.alive && trail.age > 2.0 && trail.creator_id != my_id {
+                if trail.alive && trail.age > 2.0 && trail.creator_id != my_id && trail.clan_hash == my_clan_hash {
                     let dx = trail.x - cx;
                     let dy = trail.y - cy;
                     if dx * dx + dy * dy <= mouth_outer_r_sq {

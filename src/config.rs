@@ -186,7 +186,7 @@ pub struct Config {
     // === 痕迹点 ===
     /// 痕迹点能量衰减率（/秒）
     pub trail_decay_rate: f64,
-    /// 痕迹抑制半径（px，范围内有其他生物痕迹则不产生）
+    /// 痕迹抑制半径（px，范围内有痕迹则不产生）
     pub trail_suppress_radius: f64,
     /// 痕迹生成间隔（秒，每个生物独立计时）
     pub trail_emit_interval: f64,

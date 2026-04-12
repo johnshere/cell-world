@@ -601,6 +601,14 @@ impl CellWorldApp {
                     0.01,
                     0.01..=1.0,
                 );
+                changed |= config_drag_f64(
+                    ui,
+                    "变异率",
+                    "base/block两类变异触发概率",
+                    &mut c.mutation_rate,
+                    0.01,
+                    0.01..=0.5,
+                );
             });
 
             ui.collapsing("环境压力", |ui| {
@@ -786,7 +794,7 @@ impl CellWorldApp {
                 changed |= config_drag_f64(
                     ui,
                     "抑制半径",
-                    "范围内有他人痕迹则不产生(px)",
+                    "范围内有痕迹则不产生(px)",
                     &mut c.trail_suppress_radius,
                     1.0,
                     5.0..=100.0,
