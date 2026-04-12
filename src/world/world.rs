@@ -411,9 +411,8 @@ impl World {
         let slope_factor = 1.0 + (dh / distance).max(0.0) * config.terrain_slope_cost;
 
         let range = (self.terrain.max_h - self.terrain.min_h).max(1) as f64;
-        let comfort_h = (self.terrain.min_h + self.terrain.max_h) as f64 * 0.5;
         let altitude_factor =
-            1.0 + ((h0 - comfort_h).abs() / range) * config.terrain_altitude_cost;
+            1.0 + ((h0 - self.terrain.comfort_h).abs() / range) * config.terrain_altitude_cost;
 
         slope_factor * altitude_factor
     }

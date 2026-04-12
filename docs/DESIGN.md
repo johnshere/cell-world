@@ -67,7 +67,8 @@
 5. 落地杀伤：火山/陨石粒子下落时砸死附近生物
 6. 地形阻力（仅当地形已生成）：移动消耗 ×= slope_factor × altitude_factor
    - slope_factor = 1 + max(dh/distance, 0) × terrain_slope_cost  （上坡加倍开销，下坡不补贴）
-   - altitude_factor = 1 + |h - comfort_h| / range × terrain_altitude_cost  （远离中间舒适带加倍开销）
+   - altitude_factor = 1 + |h - comfort_h| / range × terrain_altitude_cost  （远离舒适带加倍开销）
+   - comfort_h 在地形生成时预计算：取 min(volcano_radius, clamp_dist) 的 2/3 处线性圆锥高度
    - 地形未生成或所在 chunk 无数据时因子 = 1.0
 ```
 
