@@ -7,6 +7,19 @@ use crate::config::Config;
 use crate::neural::Genome;
 use crate::neural::SpikingNetwork;
 
+#[cfg(feature = "persistence")]
+fn deserialize_perception_cache<'de, D>(deserializer: D) -> Result<[f64; 18], D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v: Vec<f64> = Vec::deserialize(deserializer)?;
+    let mut arr = [0.0f64; 18];
+    for (i, &val) in v.iter().enumerate().take(18) {
+        arr[i] = val;
+    }
+    Ok(arr)
+}
+
 /// 生物
 #[derive(Clone)]
 #[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
@@ -49,6 +62,8 @@ pub struct Creature {
     pub follow_level: f64,
 
     // 感知结果缓存（18维：左眼8 + 右眼8 + 自身1 + 地形1）
+    // 扫描眼逐帧增量更新，必须持久化；兼容旧存档 17 维（第 18 通道补 0）
+    #[cfg_attr(feature = "persistence", serde(deserialize_with = "deserialize_perception_cache"))]
     pub perception_cache: [f64; 18],
 
     // 上一帧 SNN 输出缓存
