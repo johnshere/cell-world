@@ -4,8 +4,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
-use crate::neural::Genome;
-use crate::neural::SpikingNetwork;
+use crate::neural::{PhysioGene, Genome, SpikingNetwork};
 
 #[cfg(feature = "persistence")]
 fn deserialize_perception_cache<'de, D>(deserializer: D) -> Result<[f64; 18], D::Error>
@@ -18,6 +17,33 @@ where
         arr[i] = val;
     }
     Ok(arr)
+}
+
+/// 生理状态缓冲（世界注入，帧内累积，apply 后清零）
+/// 框架设计：每新增一种生理通道只需加一个字段
+#[derive(Clone, Default)]
+pub struct PhysioState {
+    /// 快乐（多巴胺类）：摄食、繁殖等正向事件
+    pub pleasure: f64,
+    // 后续扩展：
+    // pub pain: f64,
+    // pub comfort: f64,
+}
+
+impl PhysioState {
+    /// 清零所有通道（帧开始时调用）
+    pub fn clear(&mut self) {
+        self.pleasure = 0.0;
+    }
+
+    /// 各通道乘以对应敏感度基因后求和，返回最终学习信号
+    pub fn total_reward(&self, gene: &PhysioGene) -> f64 {
+        let pleasure = self.pleasure * gene.pleasure_sensitivity;
+        // 后续扩展：
+        // let pain = -self.pain * gene.pain_sensitivity;
+        // let comfort = self.comfort * gene.comfort_sensitivity;
+        pleasure
+    }
 }
 
 /// 生物
@@ -84,6 +110,10 @@ pub struct Creature {
 
     // 本帧 CPU 计算耗时（纳秒）
     pub frame_compute_ns: u64,
+
+    // 本帧生理状态（世界注入，帧末 apply 后失效，不持久化）
+    #[cfg_attr(feature = "persistence", serde(skip))]
+    pub physio: PhysioState,
 }
 
 impl Creature {
@@ -124,6 +154,7 @@ impl Creature {
             trail_emit_timer: 0.0,
             reproduce_cooldown_timer: 0.0,
             frame_compute_ns: 0,
+            physio: PhysioState::default(),
         }
     }
 

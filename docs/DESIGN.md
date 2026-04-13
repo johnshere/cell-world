@@ -197,7 +197,7 @@ struct Genome {
 | 开关连接 | base | 启用/禁用随机连接 |
 | SNN 参数 | base | decay / threshold / refractory_period 抖动 |
 | Layer 切换 | base | Block 节点 Processing ↔ Output |
-| Learning/Reward | base | 学习/奖励基因抖动 |
+| Learning/Physio | base | 学习/生理基因抖动 |
 | Block 迁移 | block | 联合区节点 block 编号 ±2 移动（限制在 8~24） |
 | ConnProbs | block | 区块连接概率基因抖动 |
 
@@ -212,7 +212,7 @@ struct Genome {
 | 共享节点 `NodeGene` | 整个 node（SNN 参数+layer 一体） | 50/50 从一方继承 |
 | 每个 block 的 `ConnProbsGene` | 整块（proc/out/target_pref 一体） | 50/50 从一方继承 |
 | `LearningGene` | 整个 struct | 50/50 从一方继承 |
-| `RewardGene` | 整个 struct | 50/50 从一方继承 |
+| `PhysioGene` | 整个 struct | 50/50 从一方继承 |
 | fitter 独有连接/节点 | — | 标准 NEAT excess/disjoint，继承 fitter |
 | weaker 独有节点 | — | 保留（避免基因流失） |
 
@@ -463,7 +463,7 @@ auto_spawn_interval = 45.0
 - [x] 多神经后端：CPU SNN / GPU SNN / legacy 直跑
 
 ### v2.5 - 反演化停滞改造 ✅
-- [x] **Crossover 改为全原子孟德尔遗传**：删除所有连续参数的算术平均，每个原子（连接/节点/ConnProbs/LearningGene/RewardGene）50/50 从父代整取。Crossover 不再主动收缩群体方差
+- [x] **Crossover 改为全原子孟德尔遗传**：删除所有连续参数的算术平均，每个原子（连接/节点/ConnProbs/LearningGene/PhysioGene）50/50 从父代整取。Crossover 不再主动收缩群体方差
 - [x] **删除 `MutationGene`**：自适应变异率在稳定环境下必然塌到下界，改为 `config.mutation_rate` 单一全局常量（默认 0.15）
 - [x] **交配阈值与聚类阈值解耦**：`find_mate` 使用 `species_similarity_threshold × 0.9`（0.855），允许跨 clan 基因流，打破单一优势种垄断
 - [x] Panel 选中生物详情删除变异率显示（已无意义，查 config 即可）

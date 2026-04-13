@@ -53,7 +53,7 @@ cargo clippy          # 代码检查
 
 | 模块     | 文件                       | 职责                                                  |
 | -------- | -------------------------- | ----------------------------------------------------- |
-| 神经网络 | `src/neural/genome.rs`     | NEAT 基因组，结构变异，MutationGene 双速率            |
+| 神经网络 | `src/neural/genome.rs`     | NEAT 基因组，结构变异，PhysioGene 生理敏感度基因      |
 |          | `src/neural/spiking.rs`    | CPU SpikingNetwork 前向传播（legacy/cpu 后端）        |
 |          | `src/neural/block.rs`      | 分区（感官/联合/运动），ConnProbs 区块连接概率基因    |
 |          | `src/neural/bridge.rs`     | 同步批处理桥（TickRequest/TickResponse mpsc 通道）    |
@@ -122,6 +122,12 @@ cargo clippy          # 代码检查
 - **火山中心富集**: u² 分布，50%粒子在 25%半径内
 - **咬合系统**: 咬合力=|mouth|（mouth<-0.1 触发），伤害=战力比 ×bite_transfer_rate(0.8)，无额外咬消耗，冷却 1s；喂食机制已移除，能量分享通过痕迹实现
 - **战力系统**: 战力 = f(能量, 速度, 同族援助)，咬时攻方乘咬合力；同族援助范围=vision_range
+- **生理系统（框架 + 快乐通道）**:
+  - 框架：`PhysioState` 帧内缓冲（世界注入），`PhysioGene` 各通道敏感度（可演化）
+  - 当前通道：**快乐**（pleasure）—— 摄食吸收 `+absorbed/initial_energy`、成功繁殖 `+0.5`
+  - 学习路径：`total_reward = Σ(通道值 × 敏感度)` → eligibility trace × total_reward × hebbian_sign × hebbian_rate → Δw
+  - 后续可扩展：痛觉（被咬）、舒适（散热）、运动负荷等，每种只需加字段 + 写入点
+  - 替换旧 RewardGene（其 4 字段从未被 spiking.rs 使用）
 - **物理约束**: 存在消耗（基础代谢 × 年龄倍率+体温逸散）、繁殖成本（神经控制 10%~50%）、死亡条件（能量 ≤0）
 - **变异率（v2.5 改为全局常量）**: `config.mutation_rate` 单一字段（默认 0.15）
   - 同时作为 base/block 两类变异的触发概率
@@ -129,7 +135,7 @@ cargo clippy          # 代码检查
   - 原因：自适应变异率在稳定环境下必然塌到下界，拖累演化
   - 想调节探索强度直接改 config
 - **Crossover（v2.5 改为全原子孟德尔）**: 所有连续参数按"原子"整取，不做算术平均
-  - 原子粒度：每条共享连接 / 每个共享节点 / 每个 block 的 ConnProbsGene / LearningGene 整块 / RewardGene 整块
+  - 原子粒度：每条共享连接 / 每个共享节点 / 每个 block 的 ConnProbsGene / LearningGene 整块 / PhysioGene 整块
   - crossover 不创造新值，只重组；创造新值是 mutation 的职责
   - 结果：crossover 不再主动收缩群体方差，多样性保持完全依赖 mutation 注入
 - **交配阈值（v2.5）**: `find_mate` 使用 `species_similarity_threshold × 0.9` 作为交配相似度下限
@@ -159,7 +165,7 @@ cargo clippy          # 代码检查
 4. update_creatures 三阶段:
    - 2a 并行感知 + 应用代谢结果 + 收集 bridge_inputs
    - 2b 同步调用 `bridge.run_batch_sync(inputs, 10)` 拿 fresh outputs
-   - 2c 串行动作执行 + reward
+   - 2c 串行动作执行 + 情绪信号收集 + apply_emotions
 5. 战力+咬合: `config.rs` → `combat_power()` 公式，`world.rs` → 咬时攻方战力 × 咬合力 vs 守方战力
 6. 周围能量: `world.rs` → `compute_nearby_energy_pure()` 查询 vision_range 内粒子+生物总能量
 7. 空间索引使用 FxHashMap，查询复用缓冲区避免分配（creature/energy 两套）

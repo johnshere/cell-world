@@ -45,8 +45,6 @@ pub struct SpikingNetwork {
     eligibility_traces: FxHashMap<(usize, usize), f64>,
     /// 学习基因（从基因组复制，运行时只读）
     learning_gene: LearningGene,
-    /// 当前奖励信号（外部传入）
-    reward_signal: f64,
 }
 
 impl Default for SpikingNetwork {
@@ -63,7 +61,6 @@ impl Default for SpikingNetwork {
             prev_state: FxHashMap::default(),
             eligibility_traces: FxHashMap::default(),
             learning_gene: LearningGene::default(),
-            reward_signal: 0.0,
         }
     }
 }
@@ -162,7 +159,6 @@ impl SpikingNetwork {
             prev_state,
             eligibility_traces: FxHashMap::default(),
             learning_gene: genome.learning.clone(),
-            reward_signal: 0.0,
         }
     }
 
@@ -435,19 +431,13 @@ impl SpikingNetwork {
         }
     }
 
-    /// 设置奖励信号
-    pub fn set_reward_signal(&mut self, reward: f64) {
-        self.reward_signal = reward;
-    }
-
-    /// 应用奖励信号到权重
-    pub fn apply_reward(&mut self) {
+    /// 应用生理信号到权重（多通道独立计算后叠加）
+    /// 调用方将各通道 × 敏感度后求和，传入最终 total_reward
+    pub fn apply_physiology(&mut self, total_reward: f64) {
         if self.learning_gene.learning_on < 0.5 {
             return; // 学习禁用
         }
-
-        let reward = self.reward_signal;
-        if reward.abs() < 0.001 {
+        if total_reward.abs() < 0.001 {
             return;
         }
 
@@ -463,7 +453,7 @@ impl SpikingNetwork {
                 let key = (in_node, out_node);
                 if let Some(&trace) = self.eligibility_traces.get(&key) {
                     if trace.abs() > 0.001 {
-                        let delta = rate * trace * reward * sign;
+                        let delta = rate * trace * total_reward * sign;
                         updates.push((key, delta));
                     }
                 }
@@ -476,7 +466,7 @@ impl SpikingNetwork {
                 let key = (in_node, out_node);
                 if let Some(&trace) = self.eligibility_traces.get(&key) {
                     if trace.abs() > 0.001 {
-                        let delta = rate * trace * reward * sign;
+                        let delta = rate * trace * total_reward * sign;
                         updates.push((key, delta));
                     }
                 }
@@ -485,7 +475,6 @@ impl SpikingNetwork {
 
         // 应用更新
         for ((in_node, out_node), delta) in updates {
-            // 尝试在正向连接中更新
             if let Some(inputs) = self.forward_inputs.get_mut(&out_node) {
                 for (src, weight) in inputs.iter_mut() {
                     if *src == in_node {
@@ -494,7 +483,6 @@ impl SpikingNetwork {
                     }
                 }
             }
-            // 尝试在回环连接中更新
             if let Some(inputs) = self.recurrent_inputs.get_mut(&out_node) {
                 for (src, weight) in inputs.iter_mut() {
                     if *src == in_node {
@@ -507,11 +495,8 @@ impl SpikingNetwork {
 
         // 清空资格迹（应用后）
         for trace in self.eligibility_traces.values_mut() {
-            *trace *= 0.1; // 基本清零，但留一点尾巴
+            *trace *= 0.1;
         }
-
-        // 清空奖励信号
-        self.reward_signal = 0.0;
     }
 
 }

@@ -892,15 +892,13 @@ impl World {
                     .unwrap_or((self.creatures[i].last_outputs, 0));
                 self.creatures[i].last_outputs = outputs;
 
-                let energy_before = self.creatures[i].energy;
+                self.creatures[i].physio.clear();
                 self.execute_actions(i, &outputs.to_vec(), dt, config);
 
-                let energy_delta = self.creatures[i].energy - energy_before;
-                if energy_delta != 0.0 {
-                    let reward = (energy_delta / config.initial_energy).clamp(-1.0, 1.0);
-                    self.creatures[i].brain.set_reward_signal(reward);
-                    self.creatures[i].brain.apply_reward();
-                }
+                let total_reward = self.creatures[i].physio.total_reward(
+                    &self.creatures[i].genome.physio,
+                );
+                self.creatures[i].brain.apply_physiology(total_reward);
 
                 if need_per_creature_timing {
                     let main_ns = creature_t0.elapsed().as_nanos() as u64;
@@ -914,15 +912,13 @@ impl World {
                     self.creatures[i].last_outputs[j] = v;
                 }
 
-                let energy_before = self.creatures[i].energy;
+                self.creatures[i].physio.clear();
                 self.execute_actions(i, &outputs, dt, config);
 
-                let energy_delta = self.creatures[i].energy - energy_before;
-                if energy_delta != 0.0 {
-                    let reward = (energy_delta / config.initial_energy).clamp(-1.0, 1.0);
-                    self.creatures[i].brain.set_reward_signal(reward);
-                    self.creatures[i].brain.apply_reward();
-                }
+                let total_reward = self.creatures[i].physio.total_reward(
+                    &self.creatures[i].genome.physio,
+                );
+                self.creatures[i].brain.apply_physiology(total_reward);
 
                 if need_per_creature_timing {
                     let main_ns = creature_t0.elapsed().as_nanos() as u64;
@@ -1092,6 +1088,7 @@ impl World {
         {
             if self.action_reproduce(creature_idx, reproduce_threshold, reproduce_ratio, config) {
                 self.creatures[creature_idx].reproduce_cooldown_timer = config.reproduce_cooldown;
+                self.creatures[creature_idx].physio.pleasure += 0.5;
                 self.action_counts[3] += 1; // 繁殖
             }
         }
@@ -1127,6 +1124,7 @@ impl World {
                     if angle_diff.abs() <= half_arc {
                         let energy = self.energy_particles[particle_idx].consume();
                         self.creatures[idx].energy += energy;
+                        self.creatures[idx].physio.pleasure += energy / config.initial_energy;
                         self.action_counts[1] += 1;
                         break;
                     }
@@ -1150,6 +1148,7 @@ impl World {
                         if angle_diff.abs() <= half_arc {
                             let energy = self.trail_points[trail_idx].consume();
                             self.creatures[idx].energy += energy;
+                            self.creatures[idx].physio.pleasure += energy / config.initial_energy;
                             break;
                         }
                     }

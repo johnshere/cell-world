@@ -114,26 +114,22 @@ impl Default for LearningGene {
 /// 奖励基因（控制奖励信号如何产生和处理）
 // ============================================================================
 
+/// 生理基因（控制各生理信号通道的敏感度，可演化）
+/// 框架设计：每新增一种生理通道只需加一个 sensitivity 字段
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
-pub struct RewardGene {
-    /// 奖励信号缩放 [0.0~2.0]
-    pub reward_scale: f64,
-    /// TD折扣因子 [0.0~0.99]
-    pub td_discount: f64,
-    /// 能量敏感度 [0.0~1.0]
-    pub energy_sensitivity: f64,
-    /// 奖励延迟容忍 [0.0~1.0]
-    pub reward_delay_tolerance: f64,
+pub struct PhysioGene {
+    /// 快乐敏感度 [0.0~2.0]（多巴胺类：摄食、繁殖等正向事件）
+    pub pleasure_sensitivity: f64,
+    // 后续扩展：
+    // pub pain_sensitivity: f64,
+    // pub comfort_sensitivity: f64,
 }
 
-impl Default for RewardGene {
+impl Default for PhysioGene {
     fn default() -> Self {
         Self {
-            reward_scale: 1.0,
-            td_discount: 0.9,
-            energy_sensitivity: 1.0,
-            reward_delay_tolerance: 0.5,
+            pleasure_sensitivity: 1.0,
         }
     }
 }
@@ -180,8 +176,9 @@ pub struct Genome {
     pub conn_probs: HashMap<i8, ConnProbsGene>,
     /// 学习基因
     pub learning: LearningGene,
-    /// 奖励基因
-    pub reward: RewardGene,
+    /// 生理基因（各通道敏感度）
+    #[cfg_attr(feature = "persistence", serde(default))]
+    pub physio: PhysioGene,
 
     next_node_id: usize,
     /// 预排序的启用连接缓存（用于快速 similarity 比较，避免每次重复排序+分配）
@@ -331,7 +328,7 @@ impl Genome {
             connections,
             conn_probs: block_probs,
             learning: LearningGene::default(),
-            reward: RewardGene::default(),
+            physio: PhysioGene::default(),
             next_node_id: next_id,
             sorted_conns_cache: Vec::new(),
         };
@@ -440,8 +437,8 @@ impl Genome {
         // learning基因变异（使用 base_rate）
         child.mutate_learning_gene(base_rate);
 
-        // reward基因变异（使用 base_rate）
-        child.mutate_reward_gene(base_rate);
+        // 生理基因变异（使用 base_rate）
+        child.mutate_physio_gene(base_rate);
 
         child.rebuild_sorted_cache();
         child
@@ -553,26 +550,15 @@ impl Genome {
         }
     }
 
-    /// RewardGene变异
-    fn mutate_reward_gene(&mut self, rate: f64) {
+    /// PhysioGene变异
+    fn mutate_physio_gene(&mut self, rate: f64) {
         let mut rng = rand::thread_rng();
 
         if rng.gen::<f64>() < rate {
-            self.reward.reward_scale =
-                (self.reward.reward_scale + rng.gen_range(-0.1..0.1)).clamp(0.0, 2.0);
+            self.physio.pleasure_sensitivity =
+                (self.physio.pleasure_sensitivity + rng.gen_range(-0.1..0.1)).clamp(0.0, 2.0);
         }
-        if rng.gen::<f64>() < rate {
-            self.reward.td_discount =
-                (self.reward.td_discount + rng.gen_range(-0.05..0.05)).clamp(0.0, 0.99);
-        }
-        if rng.gen::<f64>() < rate {
-            self.reward.energy_sensitivity =
-                (self.reward.energy_sensitivity + rng.gen_range(-0.05..0.05)).clamp(0.0, 1.0);
-        }
-        if rng.gen::<f64>() < rate {
-            self.reward.reward_delay_tolerance =
-                (self.reward.reward_delay_tolerance + rng.gen_range(-0.05..0.05)).clamp(0.0, 1.0);
-        }
+        // 后续扩展新生理通道时在此添加对应变异
     }
 
     /// 单个分区概率基因变异（加性扰动 + 归一化）
@@ -942,7 +928,7 @@ impl Genome {
     /// - 每个共享节点（整个 NodeGene，含 SNN 参数和 layer）
     /// - 每个 block 的 ConnProbsGene（整块）
     /// - LearningGene（整块）
-    /// - RewardGene（整块）
+    /// - PhysioGene（整块）
     ///
     /// 独有连接/节点来自 fitter（标准 NEAT excess/disjoint），
     /// 保留 weaker 独有节点以防基因流失（和旧代码一致）。
@@ -1041,11 +1027,11 @@ impl Genome {
             weaker.learning.clone()
         };
 
-        // === RewardGene：整块原子 ===
-        let child_reward = if rng.gen_bool(0.5) {
-            fitter.reward.clone()
+        // === PhysioGene：整块原子 ===
+        let child_physio = if rng.gen_bool(0.5) {
+            fitter.physio.clone()
         } else {
-            weaker.reward.clone()
+            weaker.physio.clone()
         };
 
         let mut genome = Genome {
@@ -1053,7 +1039,7 @@ impl Genome {
             connections: child_connections,
             conn_probs: child_block_probs,
             learning: child_learning,
-            reward: child_reward,
+            physio: child_physio,
             next_node_id,
             sorted_conns_cache: Vec::new(),
         };
