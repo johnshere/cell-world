@@ -1,7 +1,7 @@
 # 初始模拟速度
 initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 30
+min_creatures = 50
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 480
 # 初始能量
@@ -19,9 +19,9 @@ volcano_interval = 30.0
 # 火山喷射半径
 volcano_radius = 2300.0
 # 每次喷发粒子数
-volcano_count = 60
+volcano_count = 65
 # 火山粒子能量
-volcano_particle_energy = 140.0
+volcano_particle_energy = 155.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -31,16 +31,16 @@ volcano_interval_amplitude = 0.2
 # 火山能量正弦周期（秒）
 volcano_energy_cycle = 1000.0
 # 火山能量振幅比（0~0.9）
-volcano_energy_amplitude = 0.1
+volcano_energy_amplitude = 0.15
 
 # 火山粒子衰减率（每秒）
 volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 20.0
+volcano_kill_radius = 30.0
 # 落地杀伤系数
-landing_damage_multiplier = 3.0
+landing_damage_multiplier = 1.0
 
 # === 温泉 ===
 # 温泉最大同时活跃数量
@@ -54,7 +54,7 @@ spring_emit_interval = 5.0
 # 温泉每次喷出粒子数
 spring_emit_count = 2
 # 温泉粒子能量
-spring_particle_energy = 140.0
+spring_particle_energy = 155.0
 # 温泉喷出半径（粒子散布范围 px）
 spring_radius = 175.0
 # 温泉粒子衰减率（/秒）
@@ -86,7 +86,7 @@ age_metabolism_factor = 0.026
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗（每单位距离）
-move_cost = 0.0015
+move_cost = 0.002
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.8
 # === 体温 ===
@@ -123,7 +123,7 @@ dominant_min_age = 200.0
 # 痕迹点能量衰减率（/秒）
 trail_decay_rate = 0.01
 # 痕迹抑制半径（px，范围内有痕迹则不产生）
-trail_suppress_radius = 20.0
+trail_suppress_radius = 30.0
 # 痕迹生成间隔（秒，每个生物独立计时）
 trail_emit_interval = 0.4
 
@@ -144,7 +144,7 @@ neural_backend = "auto"
 neural_tick_rate = 600.0
 # 变异率（全局常量，不再是基因组内可演化基因）
 # base/block 两类变异共享此触发概率
-mutation_rate = 0.1
+mutation_rate = 0.15
 base_metabolism = 0.025
 max_speed = 20.0
 meteorite_interval = 0.0
@@ -158,11 +158,11 @@ meteorite_energy_cycle = 0.0
 meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
-stop_on_extinction = true
-auto_spawn_interval = 55.0
+stop_on_extinction = false
+auto_spawn_interval = 100.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
-terrain_slope_cost = 4.0
+terrain_slope_cost = 6.5
 # 地形海拔阻力系数（远离舒适带的开销倍率，0=禁用）
-terrain_altitude_cost = 3.0
+terrain_altitude_cost = 4.5
