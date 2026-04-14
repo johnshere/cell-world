@@ -682,7 +682,7 @@ impl CellWorldApp {
                     "远离中间舒适带惩罚: move_cost*=1+|h-中位|/range*此值",
                     &mut c.terrain_altitude_cost,
                     0.05,
-                    0.0..=5.0,
+                    0.0..=20.0,
                 );
             });
 
@@ -1637,6 +1637,11 @@ impl eframe::App for CellWorldApp {
         // 处理保存快照
         if panel_action.save_snapshot {
             self.snapshot_confirm_save = true;
+        }
+
+        // 处理重置世界
+        if panel_action.reset_world {
+            self.sim.send(SimCommand::ResetWorld);
         }
 
         // 处理生成地形

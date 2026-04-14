@@ -84,6 +84,8 @@ pub enum SimCommand {
     RestoreSnapshot(WorldSnapshot),
     /// 生成地形（一次性，覆盖已有）
     GenerateTerrain(TerrainParams),
+    /// 重置世界：清空所有生物/粒子/痕迹，保留地形和配置，从头演化
+    ResetWorld,
     Shutdown,
 }
 
@@ -217,6 +219,24 @@ fn sim_loop(
                         }
                         world = new_world;
                         config = new_config;
+                    }
+                    SimCommand::ResetWorld => {
+                        let terrain = world.terrain.clone();
+                        let dominant = world.dominant_species.clone();
+                        let mut new_world = World::new(&config);
+                        new_world.terrain = terrain;
+                        new_world.dominant_species = dominant;
+                        if config.neural_backend != "legacy" {
+                            let bridge = crate::neural::thread::spawn_neural_thread(&config);
+                            new_world.set_neural_bridge(bridge);
+                        }
+                        world = new_world;
+                        sim_step_count = 0;
+                        speed_accumulator = 0.0;
+                        actual_speed_steps = 0;
+                        actual_speed = 0.0;
+                        actual_speed_timer = Instant::now();
+                        eprintln!("[sim] 世界已重置");
                     }
                     SimCommand::Shutdown => return,
                 },

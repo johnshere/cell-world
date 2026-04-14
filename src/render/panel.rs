@@ -20,6 +20,8 @@ pub struct PanelAction {
     pub generate_terrain: bool,
     /// 保存指定族的代表基因（clan_hash）
     pub save_clan: Option<u64>,
+    /// 重置世界（清空所有生物/粒子/痕迹，从头演化）
+    pub reset_world: bool,
 }
 
 /// 统计面板
@@ -35,6 +37,8 @@ pub struct StatsPanel {
     pub templates_open: bool,
     /// 能量历史 (world_time, total_energy, creature_energy, theoretical_energy, creature_count)
     pub energy_history: Vec<(f64, f64, f64, f64, usize)>,
+    /// 重置确认弹框
+    reset_confirm_open: bool,
 }
 
 #[derive(Default, Clone)]
@@ -90,6 +94,7 @@ impl StatsPanel {
             energy_settings_open: false,
             templates_open: false,
             energy_history: Vec::new(),
+            reset_confirm_open: false,
         }
     }
 
@@ -183,8 +188,38 @@ impl StatsPanel {
                 {
                     action.generate_terrain = true;
                 }
+                if ui
+                    .button("🔄")
+                    .on_hover_text("重置世界（清空所有生物/粒子/痕迹，从头演化；配置不变）")
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    self.reset_confirm_open = true;
+                }
             });
         });
+
+        // 重置确认弹框
+        if self.reset_confirm_open {
+            egui::Window::new("确认重置")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ui.ctx(), |ui| {
+                    ui.label("确定要清空所有生物、粒子和痕迹，从头开始演化吗？");
+                    ui.label("配置不变，此操作不可撤销。");
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("确认重置").clicked() {
+                            action.reset_world = true;
+                            self.reset_confirm_open = false;
+                        }
+                        if ui.button("取消").clicked() {
+                            self.reset_confirm_open = false;
+                        }
+                    });
+                });
+        }
         ui.separator();
 
         // FPS、缩放和时间
