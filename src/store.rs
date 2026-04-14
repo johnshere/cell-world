@@ -81,8 +81,12 @@ impl Store {
                 }
             }
         }
-        // 按名称排序
-        self.templates.sort_by(|a, b| a.name.cmp(&b.name));
+        // 按记录时间倒序（最新在前），无时间戳的排最后
+        self.templates.sort_by(|a, b| {
+            let ta = a.recorded_at.unwrap_or(f64::NEG_INFINITY);
+            let tb = b.recorded_at.unwrap_or(f64::NEG_INFINITY);
+            tb.partial_cmp(&ta).unwrap_or(std::cmp::Ordering::Equal)
+        });
     }
 
     /// 保存模板
@@ -100,7 +104,11 @@ impl Store {
             *existing = template;
         } else {
             self.templates.push(template);
-            self.templates.sort_by(|a, b| a.name.cmp(&b.name));
+            self.templates.sort_by(|a, b| {
+                let ta = a.recorded_at.unwrap_or(f64::NEG_INFINITY);
+                let tb = b.recorded_at.unwrap_or(f64::NEG_INFINITY);
+                tb.partial_cmp(&ta).unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
 
         Ok(())
