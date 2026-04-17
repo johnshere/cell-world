@@ -638,17 +638,15 @@ impl StatsPanel {
                             for abs in 1..=7 {
                                 render_pair(ui, -(abs as i8), abs as i8);
                             }
-                            // 0 单独居中一行
-                            if blocks.contains(&0) {
-                                egui::Frame::none()
-                                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
-                                    .rounding(3.0)
-                                    .inner_margin(4.0)
-                                    .show(ui, |ui| {
-                                        render_block(ui, 0, conn_probs.get(&0));
-                                    });
-                                ui.add_space(2.0);
-                            }
+                            // Block 0 体感区（单独一行）
+                            egui::Frame::none()
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
+                                .rounding(3.0)
+                                .inner_margin(4.0)
+                                .show(ui, |ui| {
+                                    render_block(ui, 0, conn_probs.get(&0));
+                                });
+                            ui.add_space(2.0);
 
                             // 联合区: Block -24~-8 / 8~24
                             ui.label(egui::RichText::new("── 联合区 Block -24 ~ -8 / 8 ~ 24 ──").small().color(egui::Color32::from_gray(130)));

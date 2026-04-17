@@ -317,9 +317,6 @@ impl Genome {
 
         let mut block_probs = HashMap::new();
         for blk in -24..=24 {
-            if blk == 0 {
-                continue;
-            }
             block_probs.insert(blk, ConnProbsGene::default());
         }
 
