@@ -633,12 +633,9 @@ impl StatsPanel {
                                 ui.add_space(2.0);
                             };
 
-                            // 感官区: Block -7 ~ 7（负-7~-1，正1~7，0单独处理）
+                            // 感官区: Block -7 ~ 7（0在最上方，然后按绝对值排列配对）
                             ui.label(egui::RichText::new("── 感官区 Block -7 ~ 7 ──").small().color(egui::Color32::from_gray(130)));
-                            for abs in 1..=7 {
-                                render_pair(ui, -(abs as i8), abs as i8);
-                            }
-                            // Block 0 体感区（单独一行）
+                            // Block 0 体感区（单独一行，排最前）
                             egui::Frame::none()
                                 .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
                                 .rounding(3.0)
@@ -647,6 +644,9 @@ impl StatsPanel {
                                     render_block(ui, 0, conn_probs.get(&0));
                                 });
                             ui.add_space(2.0);
+                            for abs in 1..=7 {
+                                render_pair(ui, -(abs as i8), abs as i8);
+                            }
 
                             // 联合区: Block -24~-8 / 8~24
                             ui.label(egui::RichText::new("── 联合区 Block -24 ~ -8 / 8 ~ 24 ──").small().color(egui::Color32::from_gray(130)));
