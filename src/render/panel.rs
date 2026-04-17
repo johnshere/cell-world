@@ -539,12 +539,14 @@ impl StatsPanel {
                 Some(TargetPrefSource::Creature(id)) => format!("生物ID: {}", id),
                 None => String::new(),
             };
+            let fixed_w = 520.0;
             egui::Window::new(format!("目标偏好: {}", label))
-                .resizable(true)
+                .resizable(false)
                 .title_bar(false)
-                .default_width(300.0)
+                .default_width(fixed_w)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ui.ctx(), |ui| {
+                    ui.set_width(fixed_w);
                     // 自定义标题栏
                     ui.horizontal(|ui| {
                         ui.add_space(4.0);
@@ -571,86 +573,61 @@ impl StatsPanel {
                         return;
                     }
 
-                    ui.set_min_width(320.0);
                     egui::ScrollArea::vertical()
                         .max_height(400.0)
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            ui.label(
+                            ui.add(egui::Label::new(
                                 egui::RichText::new("方向: [0]同区Proc [1]同区Out [2]跨区前馈同侧 [3]跨区前馈对侧 [4]跨区反馈")
                                     .small()
                                     .color(egui::Color32::from_gray(150)),
-                            );
+                            ).wrap());
                             ui.add_space(4.0);
 
                             let mut blocks: Vec<i8> = conn_probs.keys().copied().collect();
                             blocks.sort();
 
-                            // 辅助函数：渲染一个 pair 块（负值 | 正值）
+                            // 辅助：渲染单个 block 内容（P+Q 一行，偏好信息换行显示）
+                            let render_block = |ui: &mut egui::Ui, blk: i8, probs: Option<&crate::neural::ConnProbsGene>| {
+                                if let Some(p) = probs {
+                                    // Block 编号 + P + Q 同行
+                                    ui.label(egui::RichText::new(format!(
+                                        "{:>3}  P:[{:.2} {:.2} {:.2} {:.2} {:.2}]  Q:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
+                                        blk,
+                                        p.proc[0], p.proc[1], p.proc[2], p.proc[3], p.proc[4],
+                                        p.out[0], p.out[1], p.out[2], p.out[3], p.out[4],
+                                    )).small().color(egui::Color32::from_gray(160)));
+                                    // target_pref 目标偏好（文本换行）
+                                    if !p.target_pref.is_empty() {
+                                        let mut prefs: Vec<(&i8, &f32)> = p.target_pref.iter().collect();
+                                        prefs.sort_by_key(|pr| pr.0);
+                                        let line: String = prefs.iter().map(|(k, v)| {
+                                            let tag = if **v > 1.0 { "+" } else if **v < 1.0 { "-" } else { "~" };
+                                            format!("{}{}:{:.2}", tag, *k, v)
+                                        }).collect::<Vec<_>>().join(" ");
+                                        ui.add(egui::Label::new(
+                                            egui::RichText::new(line).small().color(egui::Color32::from_gray(200))
+                                        ).wrap());
+                                    }
+                                } else {
+                                    ui.label(egui::RichText::new(format!("{:>3}  ---", blk)).small().color(egui::Color32::from_gray(100)));
+                                }
+                            };
+
+                            // 辅助：渲染一个配对行（负值左 | 正值右，等宽等高）
                             let render_pair = |ui: &mut egui::Ui, neg_blk: i8, pos_blk: i8| {
                                 let neg_probs = conn_probs.get(&neg_blk);
                                 let pos_probs = conn_probs.get(&pos_blk);
-
                                 egui::Frame::none()
                                     .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
                                     .rounding(3.0)
+                                    .inner_margin(4.0)
                                     .show(ui, |ui| {
-                                        ui.horizontal(|ui| {
-                                            // 左侧：负值 block
-                                            ui.vertical(|ui| {
-                                                ui.add_space(2.0);
-                                                if let Some(p) = neg_probs {
-                                                    ui.label(egui::RichText::new(format!("{:>3}", neg_blk)).small().strong());
-                                                    ui.label(egui::RichText::new(format!("P:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
-                                                        p.proc[0], p.proc[1], p.proc[2], p.proc[3], p.proc[4])).small().color(egui::Color32::from_gray(160)));
-                                                    ui.label(egui::RichText::new(format!("O:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
-                                                        p.out[0], p.out[1], p.out[2], p.out[3], p.out[4])).small().color(egui::Color32::from_gray(160)));
-                                                    // target_pref 目标偏好
-                                                    if !p.target_pref.is_empty() {
-                                                        let mut prefs: Vec<(&i8, &f32)> = p.target_pref.iter().collect();
-                                                        prefs.sort_by_key(|pr| pr.0);
-                                                        let line: String = prefs.iter().map(|(k, v)| {
-                                                            let tag = if **v > 1.0 { "+" } else if **v < 1.0 { "-" } else { "~" };
-                                                            format!("{}{}:{:.2}", tag, *k, v)
-                                                        }).collect::<Vec<_>>().join(" ");
-                                                        ui.label(egui::RichText::new(line).small().color(egui::Color32::from_gray(200)));
-                                                    }
-                                                } else {
-                                                    ui.label(egui::RichText::new(format!("{:>3}", neg_blk)).small().color(egui::Color32::from_gray(100)));
-                                                    ui.label(egui::RichText::new("---").small().color(egui::Color32::from_gray(100)));
-                                                }
-                                                ui.add_space(2.0);
-                                            });
-
-                                            // 竖线分隔
-                                            ui.add_space(6.0);
-                                            ui.add(egui::Separator::default());
-                                            ui.add_space(6.0);
-
-                                            // 右侧：正值 block
-                                            ui.vertical(|ui| {
-                                                ui.add_space(2.0);
-                                                if let Some(p) = pos_probs {
-                                                    ui.label(egui::RichText::new(format!("{:>3}", pos_blk)).small().strong());
-                                                    ui.label(egui::RichText::new(format!("P:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
-                                                        p.proc[0], p.proc[1], p.proc[2], p.proc[3], p.proc[4])).small().color(egui::Color32::from_gray(160)));
-                                                    ui.label(egui::RichText::new(format!("O:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
-                                                        p.out[0], p.out[1], p.out[2], p.out[3], p.out[4])).small().color(egui::Color32::from_gray(160)));
-                                                    if !p.target_pref.is_empty() {
-                                                        let mut prefs: Vec<(&i8, &f32)> = p.target_pref.iter().collect();
-                                                        prefs.sort_by_key(|pr| pr.0);
-                                                        let line: String = prefs.iter().map(|(k, v)| {
-                                                            let tag = if **v > 1.0 { "+" } else if **v < 1.0 { "-" } else { "~" };
-                                                            format!("{}{}:{:.2}", tag, *k, v)
-                                                        }).collect::<Vec<_>>().join(" ");
-                                                        ui.label(egui::RichText::new(line).small().color(egui::Color32::from_gray(200)));
-                                                    }
-                                                } else {
-                                                    ui.label(egui::RichText::new(format!("{:>3}", pos_blk)).small().color(egui::Color32::from_gray(100)));
-                                                    ui.label(egui::RichText::new("---").small().color(egui::Color32::from_gray(100)));
-                                                }
-                                                ui.add_space(2.0);
-                                            });
+                                        ui.columns(2, |cols| {
+                                            // 左列：负值 block
+                                            render_block(&mut cols[0], neg_blk, neg_probs);
+                                            // 右列：正值 block
+                                            render_block(&mut cols[1], pos_blk, pos_probs);
                                         });
                                     });
                                 ui.add_space(2.0);
@@ -658,42 +635,23 @@ impl StatsPanel {
 
                             // 感官区: Block -7 ~ 7（负-7~-1，正1~7，0单独处理）
                             ui.label(egui::RichText::new("── 感官区 Block -7 ~ 7 ──").small().color(egui::Color32::from_gray(130)));
-                            // 先渲染 abs 1~7 的配对
                             for abs in 1..=7 {
                                 render_pair(ui, -(abs as i8), abs as i8);
                             }
-                            // 0 单独一行
+                            // 0 单独居中一行
                             if blocks.contains(&0) {
                                 egui::Frame::none()
                                     .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
                                     .rounding(3.0)
+                                    .inner_margin(4.0)
                                     .show(ui, |ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.add_space(4.0);
-                                            let p = conn_probs.get(&0).unwrap();
-                                            ui.label(egui::RichText::new("  0  ").small().strong());
-                                            ui.label(egui::RichText::new(format!("P:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
-                                                p.proc[0], p.proc[1], p.proc[2], p.proc[3], p.proc[4])).small().color(egui::Color32::from_gray(160)));
-                                            ui.label(egui::RichText::new(format!("O:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
-                                                p.out[0], p.out[1], p.out[2], p.out[3], p.out[4])).small().color(egui::Color32::from_gray(160)));
-                                            if !p.target_pref.is_empty() {
-                                                let mut prefs: Vec<(&i8, &f32)> = p.target_pref.iter().collect();
-                                                prefs.sort_by_key(|pr| pr.0);
-                                                let line: String = prefs.iter().map(|(k, v)| {
-                                                    let tag = if **v > 1.0 { "+" } else if **v < 1.0 { "-" } else { "~" };
-                                                    format!("{}{}:{:.2}", tag, *k, v)
-                                                }).collect::<Vec<_>>().join(" ");
-                                                ui.label(egui::RichText::new(line).small().color(egui::Color32::from_gray(200)));
-                                            }
-                                            ui.add_space(4.0);
-                                        });
+                                        render_block(ui, 0, conn_probs.get(&0));
                                     });
                                 ui.add_space(2.0);
                             }
 
                             // 联合区: Block -24~-8 / 8~24
                             ui.label(egui::RichText::new("── 联合区 Block -24 ~ -8 / 8 ~ 24 ──").small().color(egui::Color32::from_gray(130)));
-                            // abs 8~24 配对
                             for abs in 8..=24 {
                                 render_pair(ui, -(abs as i8), abs as i8);
                             }
