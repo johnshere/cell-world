@@ -42,9 +42,6 @@ pub struct WorldSnapshot {
     pub spring_spawn_timer: f64,
     #[serde(default)]
     pub next_spring_id: u64,
-    /// 灭绝停止标志
-    #[serde(default)]
-    pub stop_extinction_triggered: bool,
 }
 
 impl WorldSnapshot {
@@ -86,7 +83,6 @@ impl WorldSnapshot {
             hot_springs: world.hot_springs.clone(),
             spring_spawn_timer: world.spring_spawn_timer(),
             next_spring_id: world.next_spring_id(),
-            stop_extinction_triggered: world.stop_extinction_triggered,
         }
     }
 

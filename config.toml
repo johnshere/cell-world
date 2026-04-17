@@ -1,7 +1,7 @@
 # 初始模拟速度
 initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 50
+min_creatures = 30
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 480
 # 初始能量
@@ -25,11 +25,11 @@ volcano_particle_energy = 155.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
-volcano_interval_cycle = 1500.0
+volcano_interval_cycle = 1700.0
 # 火山间隔振幅比（0~0.9）
 volcano_interval_amplitude = 0.2
 # 火山能量正弦周期（秒）
-volcano_energy_cycle = 1000.0
+volcano_energy_cycle = 1350.0
 # 火山能量振幅比（0~0.9）
 volcano_energy_amplitude = 0.15
 
@@ -38,7 +38,7 @@ volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 30.0
+volcano_kill_radius = 50.0
 # 落地杀伤系数
 landing_damage_multiplier = 1.0
 
@@ -46,9 +46,9 @@ landing_damage_multiplier = 1.0
 # 温泉最大同时活跃数量
 spring_max_count = 9
 # 温泉产生间隔（秒）
-spring_spawn_interval = 25.0
+spring_spawn_interval = 70.0
 # 温泉寿命（秒）
-spring_lifetime = 963.0
+spring_lifetime = 1150.0
 # 温泉喷出粒子间隔（秒）
 spring_emit_interval = 5.0
 # 温泉每次喷出粒子数
@@ -68,7 +68,7 @@ spring_max_distance = 670.0
 # 眼睛冷却时间（秒）— 已废弃
 eye_cooldown = 0.075
 # 眼睛扫描速度（度/秒）
-eye_scan_speed = 400.0
+eye_scan_speed = 280.0
 # 嘴巴冷却时间（秒）
 mouth_cooldown = 0.5
 # 咬合能量转移率
@@ -104,9 +104,9 @@ contact_range = 15.0
 
 # === 进化 ===
 # 初始连接数最小值
-initial_connections_min = 6
+initial_connections_min = 10
 # 初始连接数最大值
-initial_connections_max = 12
+initial_connections_max = 20
 # 种族相似度阈值（高于此值视为同一种族）
 species_similarity_threshold = 0.95
 
@@ -114,7 +114,7 @@ species_similarity_threshold = 0.95
 # 战力公式：速度权重（越快越强）
 combat_speed_weight = 2.0
 # 战力公式：同族援助权重（附近同族越多越强）
-combat_ally_weight = 0.2
+combat_ally_weight = 0.3
 
 # 优势种检测：种群最老成员最低年龄
 dominant_min_age = 200.0
@@ -133,7 +133,7 @@ reproduce_cooldown = 20.0
 
 # === 算力能量 ===
 # 算力转能量系数（内部除以1亿，0 = 禁用）
-compute_energy_factor = 13.0
+compute_energy_factor = 18.0
 
 # === SNN ===
 # 每帧 SNN tick 数（同步模式）
@@ -159,10 +159,10 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = false
-auto_spawn_interval = 100.0
+auto_spawn_interval = 25.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
-terrain_slope_cost = 6.5
+terrain_slope_cost = 7.0
 # 地形海拔阻力系数（远离舒适带的开销倍率，0=禁用）
-terrain_altitude_cost = 4.5
+terrain_altitude_cost = 7.0

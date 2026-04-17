@@ -1229,11 +1229,22 @@ impl eframe::App for CellWorldApp {
             let mut chose_new = false;
 
             egui::Window::new("选择存档")
-                .collapsible(false)
                 .resizable(true)
+                .title_bar(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .default_width(400.0)
                 .show(ctx, |ui| {
+                    // 自定义标题栏
+                    ui.horizontal(|ui| {
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new("选择存档").strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(egui::Button::new(egui::RichText::new("x").size(12.0).color(egui::Color32::from_gray(200))).frame(false).fill(egui::Color32::from_gray(50)).small()).clicked() {
+                                self.show_archive_list = false;
+                            }
+                        });
+                    });
+                    ui.separator();
                     ui.label("请选择存档：");
                     ui.add_space(4.0);
 
@@ -1375,11 +1386,22 @@ impl eframe::App for CellWorldApp {
             let mut chose_reset = false;
             let already_generated = self.sim.snapshot().terrain.is_generated();
             egui::Window::new("生成地形")
-                .collapsible(false)
                 .resizable(false)
+                .title_bar(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .default_width(360.0)
                 .show(ctx, |ui| {
+                    // 自定义标题栏
+                    ui.horizontal(|ui| {
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new("生成地形").strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(egui::Button::new(egui::RichText::new("x").size(12.0).color(egui::Color32::from_gray(200))).frame(false).fill(egui::Color32::from_gray(50)).small()).clicked() {
+                                chose_no = true;
+                            }
+                        });
+                    });
+                    ui.separator();
                     if already_generated {
                         ui.colored_label(
                             egui::Color32::from_rgb(220, 180, 80),
@@ -1532,8 +1554,9 @@ impl eframe::App for CellWorldApp {
         // 从模拟线程读取最新快照
         let snap = self.sim.snapshot().clone();
 
-        // 检测灭绝停止标志，触发时自动暂停
-        if snap.stop_extinction_triggered && !self.paused {
+        // 检测低于最小数量且开启了 stop_on_extinction 时自动暂停（一次性事件）
+        let alive_count = snap.creatures.iter().filter(|c| c.alive).count();
+        if alive_count < self.config.min_creatures && self.config.stop_on_extinction && !self.paused {
             self.paused = true;
             self.sim.send(SimCommand::Pause);
         }

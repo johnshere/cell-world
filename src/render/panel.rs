@@ -39,6 +39,17 @@ pub struct StatsPanel {
     pub energy_history: Vec<(f64, f64, f64, f64, usize)>,
     /// 重置确认弹框
     reset_confirm_open: bool,
+    /// 查看目标偏好的来源（模板名或生物ID）
+    target_pref_view: Option<TargetPrefSource>,
+    /// 目标偏好窗口对应的基因组（克隆一份，避免生命周期问题）
+    target_pref_genome: Option<crate::neural::Genome>,
+}
+
+/// 目标偏好查看窗口的数据来源
+#[derive(Clone)]
+enum TargetPrefSource {
+    Template(String),
+    Creature(u64),
 }
 
 #[derive(Default, Clone)]
@@ -95,6 +106,8 @@ impl StatsPanel {
             templates_open: false,
             energy_history: Vec::new(),
             reset_confirm_open: false,
+            target_pref_view: None,
+            target_pref_genome: None,
         }
     }
 
@@ -442,6 +455,14 @@ impl StatsPanel {
                                     {
                                         action.spawn = Some(Some(template.name.clone()));
                                     }
+                                    if ui
+                                        .small_button("📊")
+                                        .on_hover_text("查看目标偏好")
+                                        .clicked()
+                                    {
+                                        self.target_pref_view = Some(TargetPrefSource::Template(template.name.clone()));
+                                        self.target_pref_genome = Some(template.genome.clone());
+                                    }
                                 },
                             );
                         });
@@ -507,6 +528,177 @@ impl StatsPanel {
                     }
                 });
             }
+        }
+
+        // 目标偏好查看窗口
+        if self.target_pref_view.is_some() {
+            let source = self.target_pref_view.clone();
+            let genome = self.target_pref_genome.clone();
+            let label = match &source {
+                Some(TargetPrefSource::Template(name)) => format!("模板: {}", name),
+                Some(TargetPrefSource::Creature(id)) => format!("生物ID: {}", id),
+                None => String::new(),
+            };
+            egui::Window::new(format!("目标偏好: {}", label))
+                .resizable(true)
+                .title_bar(false)
+                .default_width(300.0)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ui.ctx(), |ui| {
+                    // 自定义标题栏
+                    ui.horizontal(|ui| {
+                        ui.add_space(4.0);
+                        ui.label(egui::RichText::new(label).strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(egui::Button::new(egui::RichText::new("x").size(12.0).color(egui::Color32::from_gray(200))).frame(false).fill(egui::Color32::from_gray(50)).small()).clicked() {
+                                self.target_pref_view = None;
+                                self.target_pref_genome = None;
+                            }
+                        });
+                    });
+                    ui.separator();
+                    let genome = match genome.as_ref() {
+                        Some(g) => g,
+                        None => {
+                            ui.label("无基因组数据");
+                            return;
+                        }
+                    };
+                    let conn_probs = &genome.conn_probs;
+
+                    if conn_probs.is_empty() {
+                        ui.label("无分区连接概率数据");
+                        return;
+                    }
+
+                    ui.set_min_width(320.0);
+                    egui::ScrollArea::vertical()
+                        .max_height(400.0)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new("方向: [0]同区Proc [1]同区Out [2]跨区前馈同侧 [3]跨区前馈对侧 [4]跨区反馈")
+                                    .small()
+                                    .color(egui::Color32::from_gray(150)),
+                            );
+                            ui.add_space(4.0);
+
+                            let mut blocks: Vec<i8> = conn_probs.keys().copied().collect();
+                            blocks.sort();
+
+                            // 辅助函数：渲染一个 pair 块（负值 | 正值）
+                            let render_pair = |ui: &mut egui::Ui, neg_blk: i8, pos_blk: i8| {
+                                let neg_probs = conn_probs.get(&neg_blk);
+                                let pos_probs = conn_probs.get(&pos_blk);
+
+                                egui::Frame::none()
+                                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
+                                    .rounding(3.0)
+                                    .show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            // 左侧：负值 block
+                                            ui.vertical(|ui| {
+                                                ui.add_space(2.0);
+                                                if let Some(p) = neg_probs {
+                                                    ui.label(egui::RichText::new(format!("{:>3}", neg_blk)).small().strong());
+                                                    ui.label(egui::RichText::new(format!("P:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
+                                                        p.proc[0], p.proc[1], p.proc[2], p.proc[3], p.proc[4])).small().color(egui::Color32::from_gray(160)));
+                                                    ui.label(egui::RichText::new(format!("O:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
+                                                        p.out[0], p.out[1], p.out[2], p.out[3], p.out[4])).small().color(egui::Color32::from_gray(160)));
+                                                    // target_pref 目标偏好
+                                                    if !p.target_pref.is_empty() {
+                                                        let mut prefs: Vec<(&i8, &f32)> = p.target_pref.iter().collect();
+                                                        prefs.sort_by_key(|pr| pr.0);
+                                                        let line: String = prefs.iter().map(|(k, v)| {
+                                                            let tag = if **v > 1.0 { "+" } else if **v < 1.0 { "-" } else { "~" };
+                                                            format!("{}{}:{:.2}", tag, *k, v)
+                                                        }).collect::<Vec<_>>().join(" ");
+                                                        ui.label(egui::RichText::new(line).small().color(egui::Color32::from_gray(200)));
+                                                    }
+                                                } else {
+                                                    ui.label(egui::RichText::new(format!("{:>3}", neg_blk)).small().color(egui::Color32::from_gray(100)));
+                                                    ui.label(egui::RichText::new("---").small().color(egui::Color32::from_gray(100)));
+                                                }
+                                                ui.add_space(2.0);
+                                            });
+
+                                            // 竖线分隔
+                                            ui.add_space(6.0);
+                                            ui.add(egui::Separator::default());
+                                            ui.add_space(6.0);
+
+                                            // 右侧：正值 block
+                                            ui.vertical(|ui| {
+                                                ui.add_space(2.0);
+                                                if let Some(p) = pos_probs {
+                                                    ui.label(egui::RichText::new(format!("{:>3}", pos_blk)).small().strong());
+                                                    ui.label(egui::RichText::new(format!("P:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
+                                                        p.proc[0], p.proc[1], p.proc[2], p.proc[3], p.proc[4])).small().color(egui::Color32::from_gray(160)));
+                                                    ui.label(egui::RichText::new(format!("O:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
+                                                        p.out[0], p.out[1], p.out[2], p.out[3], p.out[4])).small().color(egui::Color32::from_gray(160)));
+                                                    if !p.target_pref.is_empty() {
+                                                        let mut prefs: Vec<(&i8, &f32)> = p.target_pref.iter().collect();
+                                                        prefs.sort_by_key(|pr| pr.0);
+                                                        let line: String = prefs.iter().map(|(k, v)| {
+                                                            let tag = if **v > 1.0 { "+" } else if **v < 1.0 { "-" } else { "~" };
+                                                            format!("{}{}:{:.2}", tag, *k, v)
+                                                        }).collect::<Vec<_>>().join(" ");
+                                                        ui.label(egui::RichText::new(line).small().color(egui::Color32::from_gray(200)));
+                                                    }
+                                                } else {
+                                                    ui.label(egui::RichText::new(format!("{:>3}", pos_blk)).small().color(egui::Color32::from_gray(100)));
+                                                    ui.label(egui::RichText::new("---").small().color(egui::Color32::from_gray(100)));
+                                                }
+                                                ui.add_space(2.0);
+                                            });
+                                        });
+                                    });
+                                ui.add_space(2.0);
+                            };
+
+                            // 感官区: Block -7 ~ 7（负-7~-1，正1~7，0单独处理）
+                            ui.label(egui::RichText::new("── 感官区 Block -7 ~ 7 ──").small().color(egui::Color32::from_gray(130)));
+                            // 先渲染 abs 1~7 的配对
+                            for abs in 1..=7 {
+                                render_pair(ui, -(abs as i8), abs as i8);
+                            }
+                            // 0 单独一行
+                            if blocks.contains(&0) {
+                                egui::Frame::none()
+                                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
+                                    .rounding(3.0)
+                                    .show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.add_space(4.0);
+                                            let p = conn_probs.get(&0).unwrap();
+                                            ui.label(egui::RichText::new("  0  ").small().strong());
+                                            ui.label(egui::RichText::new(format!("P:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
+                                                p.proc[0], p.proc[1], p.proc[2], p.proc[3], p.proc[4])).small().color(egui::Color32::from_gray(160)));
+                                            ui.label(egui::RichText::new(format!("O:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
+                                                p.out[0], p.out[1], p.out[2], p.out[3], p.out[4])).small().color(egui::Color32::from_gray(160)));
+                                            if !p.target_pref.is_empty() {
+                                                let mut prefs: Vec<(&i8, &f32)> = p.target_pref.iter().collect();
+                                                prefs.sort_by_key(|pr| pr.0);
+                                                let line: String = prefs.iter().map(|(k, v)| {
+                                                    let tag = if **v > 1.0 { "+" } else if **v < 1.0 { "-" } else { "~" };
+                                                    format!("{}{}:{:.2}", tag, *k, v)
+                                                }).collect::<Vec<_>>().join(" ");
+                                                ui.label(egui::RichText::new(line).small().color(egui::Color32::from_gray(200)));
+                                            }
+                                            ui.add_space(4.0);
+                                        });
+                                    });
+                                ui.add_space(2.0);
+                            }
+
+                            // 联合区: Block -24~-8 / 8~24
+                            ui.label(egui::RichText::new("── 联合区 Block -24 ~ -8 / 8 ~ 24 ──").small().color(egui::Color32::from_gray(130)));
+                            // abs 8~24 配对
+                            for abs in 8..=24 {
+                                render_pair(ui, -(abs as i8), abs as i8);
+                            }
+                        });
+                });
         }
 
         action
@@ -645,45 +837,17 @@ impl StatsPanel {
 
                     // 目标偏好基因（target_pref）
                     ui.separator();
-                    let mut total_pref_entries: usize = 0;
-                    let mut pref_rows: Vec<(i8, Vec<(i8, f32)>)> = Vec::new();
-                    let mut keys: Vec<i8> = creature.genome.conn_probs.keys().copied().collect();
-                    keys.sort();
-                    for from_blk in keys {
-                        let probs = &creature.genome.conn_probs[&from_blk];
-                        if probs.target_pref.is_empty() {
-                            continue;
-                        }
-                        let mut entries: Vec<(i8, f32)> =
-                            probs.target_pref.iter().map(|(&k, &v)| (k, v)).collect();
-                        // 按偏离 1.0 程度排序，最强的在前
-                        entries.sort_by(|a, b| {
-                            (b.1 - 1.0)
-                                .abs()
-                                .partial_cmp(&(a.1 - 1.0).abs())
-                                .unwrap_or(std::cmp::Ordering::Equal)
-                        });
-                        total_pref_entries += entries.len();
-                        pref_rows.push((from_blk, entries));
-                    }
+                    let total_pref_entries: usize = creature.genome.conn_probs.values()
+                        .map(|p| p.target_pref.len())
+                        .sum();
                     ui.label(format!("目标偏好基因  条目:{}", total_pref_entries));
-                    if total_pref_entries == 0 {
-                        ui.label("  (尚未演化出偏好)");
-                    } else {
-                        egui::ScrollArea::vertical()
-                            .max_height(140.0)
-                            .id_salt("target_pref_scroll")
-                            .show(ui, |ui| {
-                                for (from_blk, entries) in pref_rows {
-                                    let line: String = entries
-                                        .iter()
-                                        .take(6)
-                                        .map(|(t, w)| format!("{}={:.2}", t, w))
-                                        .collect::<Vec<_>>()
-                                        .join(" ");
-                                    ui.label(format!("  {:>3}→ {}", from_blk, line));
-                                }
-                            });
+                    if ui
+                        .button(format!("📊 查看偏好 ({})", total_pref_entries))
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                    {
+                        self.target_pref_view = Some(TargetPrefSource::Creature(creature.id));
+                        self.target_pref_genome = Some(creature.genome.clone());
                     }
                 }
             }

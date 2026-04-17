@@ -34,8 +34,6 @@ pub struct SimSnapshot {
     pub volcano_countdown: f64,
     /// 模拟线程累计步数（用于计算 SIM FPS）
     pub sim_step_count: u64,
-    /// 灭绝停止标志
-    pub stop_extinction_triggered: bool,
     /// 目标倍速
     pub target_speed: f64,
     /// 实际达到的倍速（世界实际每真实秒推进的模拟秒数）
@@ -58,7 +56,6 @@ impl Default for SimSnapshot {
             creature_species: FxHashMap::default(),
             volcano_countdown: 0.0,
             sim_step_count: 0,
-            stop_extinction_triggered: false,
             target_speed: 1.0,
             actual_speed: 0.0,
             terrain: TerrainMap::default(),
@@ -313,7 +310,6 @@ fn export_snapshot(
         creature_species,
         volcano_countdown,
         sim_step_count,
-        stop_extinction_triggered: world.stop_extinction_triggered,
         target_speed,
         actual_speed,
         terrain: world.terrain.clone(),

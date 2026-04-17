@@ -101,8 +101,6 @@ pub struct World {
     /// 优势种库
     pub dominant_species: Vec<DominantCandidate>,
 
-    /// 灭绝停止标志（触发后不再补充生物）
-    pub stop_extinction_triggered: bool,
     /// 自动投放定时器
     auto_spawn_timer: f64,
 
@@ -158,7 +156,6 @@ impl World {
             neural_bridge: None,
             clan_genomes: FxHashMap::default(),
             dominant_species: Vec::new(),
-            stop_extinction_triggered: false,
             auto_spawn_timer: 0.0,
             terrain: TerrainMap::default(),
         };
@@ -236,7 +233,7 @@ impl World {
         self.replenish_creatures(config);
 
         // 自动投放随机生物（定时，不从基因库取）
-        if config.auto_spawn_interval > 0.0 && !self.stop_extinction_triggered {
+        if config.auto_spawn_interval > 0.0 {
             self.auto_spawn_timer += dt;
             if self.auto_spawn_timer >= config.auto_spawn_interval {
                 self.auto_spawn_timer = 0.0;
@@ -374,7 +371,6 @@ impl World {
             neural_bridge: None,
             clan_genomes,
             dominant_species,
-            stop_extinction_triggered: false,
             auto_spawn_timer: 0.0,
             terrain: TerrainMap::default(),
         }
@@ -422,16 +418,10 @@ impl World {
     fn replenish_creatures(&mut self, config: &Config) {
         let alive_count = self.creatures.iter().filter(|c| c.alive).count();
 
-        // 如果已触发灭绝停止，不再补充
-        if self.stop_extinction_triggered {
-            return;
-        }
-
         // 低于最小数量时
         if alive_count < config.min_creatures {
-            // 如果开启了 stop_on_extinction，触发后不再补充
+            // 如果开启了 stop_on_extinction，触发暂停（一次性事件，由 app.rs 的 auto-pause 处理）
             if config.stop_on_extinction {
-                self.stop_extinction_triggered = true;
                 return;
             }
 
