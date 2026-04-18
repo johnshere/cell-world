@@ -223,6 +223,9 @@ pub struct Config {
     /// 地形海拔阻力系数（远离舒适带的开销倍率，0=禁用）
     #[serde(default = "default_terrain_altitude_cost")]
     pub terrain_altitude_cost: f64,
+    /// 舒适高度（海拔阻力的参考高度）
+    #[serde(default = "default_comfort_height")]
+    pub comfort_height: f64,
 }
 
 fn default_terrain_slope_cost() -> f64 {
@@ -230,6 +233,9 @@ fn default_terrain_slope_cost() -> f64 {
 }
 fn default_terrain_altitude_cost() -> f64 {
     0.5
+}
+fn default_comfort_height() -> f64 {
+    50.0
 }
 
 fn default_max_creatures() -> usize {

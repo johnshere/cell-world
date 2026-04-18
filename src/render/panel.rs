@@ -233,6 +233,10 @@ impl StatsPanel {
                     });
                 });
         }
+
+        // 目标偏好弹框（独立显示，不依赖任何 tab）
+        self.render_target_pref_window(ui);
+
         ui.separator();
 
         // FPS、缩放和时间
@@ -530,134 +534,175 @@ impl StatsPanel {
             }
         }
 
-        // 目标偏好查看窗口
-        if self.target_pref_view.is_some() {
-            let source = self.target_pref_view.clone();
-            let genome = self.target_pref_genome.clone();
-            let label = match &source {
-                Some(TargetPrefSource::Template(name)) => format!("模板: {}", name),
-                Some(TargetPrefSource::Creature(id)) => format!("生物ID: {}", id),
-                None => String::new(),
-            };
-            let fixed_w = 520.0;
-            egui::Window::new(format!("目标偏好: {}", label))
-                .resizable(false)
-                .title_bar(false)
-                .default_width(fixed_w)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .show(ui.ctx(), |ui| {
-                    ui.set_width(fixed_w);
-                    // 自定义标题栏
-                    ui.horizontal(|ui| {
-                        ui.add_space(4.0);
-                        ui.label(egui::RichText::new(label).strong());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(egui::Button::new(egui::RichText::new("x").size(12.0).color(egui::Color32::from_gray(200))).frame(false).fill(egui::Color32::from_gray(50)).small()).clicked() {
-                                self.target_pref_view = None;
-                                self.target_pref_genome = None;
-                            }
-                        });
-                    });
-                    ui.separator();
-                    let genome = match genome.as_ref() {
-                        Some(g) => g,
-                        None => {
-                            ui.label("无基因组数据");
-                            return;
-                        }
-                    };
-                    let conn_probs = &genome.conn_probs;
+        action
+    }
 
-                    if conn_probs.is_empty() {
-                        ui.label("无分区连接概率数据");
+    /// 渲染目标偏好查看窗口（独立弹框，不依赖任何 tab）
+    pub fn render_target_pref_window(&mut self, ui: &mut Ui) {
+        if self.target_pref_view.is_none() {
+            return;
+        }
+        let source = self.target_pref_view.clone();
+        let genome = self.target_pref_genome.clone();
+        let label = match &source {
+            Some(TargetPrefSource::Template(name)) => format!("模板: {}", name),
+            Some(TargetPrefSource::Creature(id)) => format!("生物ID: {}", id),
+            None => String::new(),
+        };
+        let fixed_w = 520.0;
+        egui::Window::new(format!("目标偏好: {}", label))
+            .resizable(false)
+            .title_bar(false)
+            .default_width(fixed_w)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ui.ctx(), |ui| {
+                ui.set_width(fixed_w);
+                // 自定义标题栏
+                ui.horizontal(|ui| {
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(label).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add(egui::Button::new(egui::RichText::new("x").size(12.0).color(egui::Color32::from_gray(200))).frame(false).fill(egui::Color32::from_gray(50)).small()).clicked() {
+                            self.target_pref_view = None;
+                            self.target_pref_genome = None;
+                        }
+                    });
+                });
+                ui.separator();
+                let genome = match genome.as_ref() {
+                    Some(g) => g,
+                    None => {
+                        ui.label("无基因组数据");
                         return;
                     }
+                };
+                let conn_probs = &genome.conn_probs;
 
-                    egui::ScrollArea::vertical()
-                        .max_height(400.0)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.add(egui::Label::new(
-                                egui::RichText::new("方向: [0]同区Proc [1]同区Out [2]跨区前馈同侧 [3]跨区前馈对侧 [4]跨区反馈")
-                                    .small()
-                                    .color(egui::Color32::from_gray(150)),
-                            ).wrap());
-                            ui.add_space(4.0);
+                if conn_probs.is_empty() {
+                    ui.label("无分区连接概率数据");
+                    return;
+                }
 
-                            let mut blocks: Vec<i8> = conn_probs.keys().copied().collect();
-                            blocks.sort();
+                egui::ScrollArea::vertical()
+                    .max_height(400.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add(egui::Label::new(
+                            egui::RichText::new("方向: [0]同区Proc [1]同区Out [2]跨区前馈同侧 [3]跨区前馈对侧 [4]跨区反馈")
+                                .small()
+                                .color(egui::Color32::from_gray(150)),
+                        ).wrap());
+                        ui.add_space(4.0);
 
-                            // 辅助：渲染单个 block 内容（P+Q 一行，偏好信息换行显示）
-                            let render_block = |ui: &mut egui::Ui, blk: i8, probs: Option<&crate::neural::ConnProbsGene>| {
-                                if let Some(p) = probs {
-                                    // Block 编号 + P + Q 同行
+                        let mut blocks: Vec<i8> = conn_probs.keys().copied().collect();
+                        blocks.sort();
+
+                        // 感官区 block → 器官名称
+                        let organ_name = |blk: i8| -> &'static str {
+                            match blk {
+                                0 => "体感",
+                                -1 => "左眼",
+                                1 => "右眼",
+                                -2 => "左感2",
+                                2 => "右感2",
+                                -3 => "左感3",
+                                3 => "右感3",
+                                -4 => "左感4",
+                                4 => "右感4",
+                                -5 => "左感5",
+                                5 => "右感5",
+                                -6 => "左感6",
+                                6 => "右感6",
+                                -7 => "左感7",
+                                7 => "右感7",
+                                _ => "",
+                            }
+                        };
+
+                        // 辅助：渲染单个 block 内容（器官名同行，PQ/偏好换行显示）
+                        let render_block = |ui: &mut egui::Ui, blk: i8, probs: Option<&crate::neural::ConnProbsGene>| {
+                            let organ = organ_name(blk);
+                            if let Some(p) = probs {
+                                // Block 编号 + 器官名 同行
+                                if organ.is_empty() {
                                     ui.label(egui::RichText::new(format!(
-                                        "{:>3}  P:[{:.2} {:.2} {:.2} {:.2} {:.2}]  Q:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
+                                        "{:>3}",
                                         blk,
-                                        p.proc[0], p.proc[1], p.proc[2], p.proc[3], p.proc[4],
-                                        p.out[0], p.out[1], p.out[2], p.out[3], p.out[4],
                                     )).small().color(egui::Color32::from_gray(160)));
-                                    // target_pref 目标偏好（文本换行）
-                                    if !p.target_pref.is_empty() {
-                                        let mut prefs: Vec<(&i8, &f32)> = p.target_pref.iter().collect();
-                                        prefs.sort_by_key(|pr| pr.0);
-                                        let line: String = prefs.iter().map(|(k, v)| {
-                                            let tag = if **v > 1.0 { "+" } else if **v < 1.0 { "-" } else { "~" };
-                                            format!("{}{}:{:.2}", tag, *k, v)
-                                        }).collect::<Vec<_>>().join(" ");
-                                        ui.add(egui::Label::new(
-                                            egui::RichText::new(line).small().color(egui::Color32::from_gray(200))
-                                        ).wrap());
-                                    }
                                 } else {
-                                    ui.label(egui::RichText::new(format!("{:>3}  ---", blk)).small().color(egui::Color32::from_gray(100)));
+                                    ui.label(egui::RichText::new(format!(
+                                        "{:>3} {}\n",
+                                        blk, organ,
+                                    )).small().color(egui::Color32::from_gray(160)));
                                 }
-                            };
+                                // PQ 一行
+                                ui.label(egui::RichText::new(format!(
+                                    "    P:[{:.2} {:.2} {:.2} {:.2} {:.2}]  Q:[{:.2} {:.2} {:.2} {:.2} {:.2}]",
+                                    p.proc[0], p.proc[1], p.proc[2], p.proc[3], p.proc[4],
+                                    p.out[0], p.out[1], p.out[2], p.out[3], p.out[4],
+                                )).small().color(egui::Color32::from_gray(150)));
+                                // target_pref 目标偏好（文本换行）
+                                if !p.target_pref.is_empty() {
+                                    let mut prefs: Vec<(&i8, &f32)> = p.target_pref.iter().collect();
+                                    prefs.sort_by_key(|pr| pr.0);
+                                    let line: String = prefs.iter().map(|(k, v)| {
+                                        let tag = if **v > 1.0 { "+" } else if **v < 1.0 { "-" } else { "~" };
+                                        format!("{}{}:{:.2}", tag, *k, v)
+                                    }).collect::<Vec<_>>().join(" ");
+                                    ui.add(egui::Label::new(
+                                        egui::RichText::new(line).small().color(egui::Color32::from_gray(200))
+                                    ).wrap());
+                                }
+                            } else {
+                                if organ.is_empty() {
+                                    ui.label(egui::RichText::new(format!("{:>3}  ---", blk)).small().color(egui::Color32::from_gray(100)));
+                                } else {
+                                    ui.label(egui::RichText::new(format!("{:>3} {}  ---", blk, organ)).small().color(egui::Color32::from_gray(100)));
+                                }
+                            }
+                        };
 
-                            // 辅助：渲染一个配对行（负值左 | 正值右，等宽等高）
-                            let render_pair = |ui: &mut egui::Ui, neg_blk: i8, pos_blk: i8| {
-                                let neg_probs = conn_probs.get(&neg_blk);
-                                let pos_probs = conn_probs.get(&pos_blk);
-                                egui::Frame::none()
-                                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
-                                    .rounding(3.0)
-                                    .inner_margin(4.0)
-                                    .show(ui, |ui| {
-                                        ui.columns(2, |cols| {
-                                            // 左列：负值 block
-                                            render_block(&mut cols[0], neg_blk, neg_probs);
-                                            // 右列：正值 block
-                                            render_block(&mut cols[1], pos_blk, pos_probs);
-                                        });
-                                    });
-                                ui.add_space(2.0);
-                            };
-
-                            // 感官区: Block -7 ~ 7（0在最上方，然后按绝对值排列配对）
-                            ui.label(egui::RichText::new("── 感官区 Block -7 ~ 7 ──").small().color(egui::Color32::from_gray(130)));
-                            // Block 0 体感区（单独一行，排最前）
+                        // 辅助：渲染一个配对行（负值左 | 正值右，等宽等高）
+                        let render_pair = |ui: &mut egui::Ui, neg_blk: i8, pos_blk: i8| {
+                            let neg_probs = conn_probs.get(&neg_blk);
+                            let pos_probs = conn_probs.get(&pos_blk);
                             egui::Frame::none()
                                 .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
                                 .rounding(3.0)
                                 .inner_margin(4.0)
                                 .show(ui, |ui| {
-                                    render_block(ui, 0, conn_probs.get(&0));
+                                    ui.columns(2, |cols| {
+                                        // 左列：负值 block
+                                        render_block(&mut cols[0], neg_blk, neg_probs);
+                                        // 右列：正值 block
+                                        render_block(&mut cols[1], pos_blk, pos_probs);
+                                    });
                                 });
                             ui.add_space(2.0);
-                            for abs in 1..=7 {
-                                render_pair(ui, -(abs as i8), abs as i8);
-                            }
+                        };
 
-                            // 联合区: Block -24~-8 / 8~24
-                            ui.label(egui::RichText::new("── 联合区 Block -24 ~ -8 / 8 ~ 24 ──").small().color(egui::Color32::from_gray(130)));
-                            for abs in 8..=24 {
-                                render_pair(ui, -(abs as i8), abs as i8);
-                            }
-                        });
-                });
-        }
+                        // 感官区: Block -7 ~ 7（0在最上方，然后按绝对值排列配对）
+                        ui.label(egui::RichText::new("── 感官区 Block -7 ~ 7 ──").small().color(egui::Color32::from_gray(130)));
+                        // Block 0 体感区（单独一行，排最前）
+                        egui::Frame::none()
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(80)))
+                            .rounding(3.0)
+                            .inner_margin(4.0)
+                            .show(ui, |ui| {
+                                render_block(ui, 0, conn_probs.get(&0));
+                            });
+                        ui.add_space(2.0);
+                        for abs in 1..=7 {
+                            render_pair(ui, -(abs as i8), abs as i8);
+                        }
 
-        action
+                        // 联合区: Block -24~-8 / 8~24
+                        ui.label(egui::RichText::new("── 联合区 Block -24 ~ -8 / 8 ~ 24 ──").small().color(egui::Color32::from_gray(130)));
+                        for abs in 8..=24 {
+                            render_pair(ui, -(abs as i8), abs as i8);
+                        }
+                    });
+            });
     }
 
     pub fn render_selection(

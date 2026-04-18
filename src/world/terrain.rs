@@ -143,8 +143,6 @@ pub struct TerrainMap {
     /// 高度归一化范围
     pub min_h: i32,
     pub max_h: i32,
-    /// 舒适高度（生成时预计算，取 min(volcano_radius, clamp_dist) 的 2/3 处线性高度）
-    pub comfort_h: f64,
     /// 生成时锁定的参数（用于重建）
     pub generated_params: TerrainParamsPersist,
 }
@@ -161,7 +159,6 @@ impl Serialize for TerrainMap {
         map.serialize_entry("generated_radius", &self.generated_radius)?;
         map.serialize_entry("min_h", &self.min_h)?;
         map.serialize_entry("max_h", &self.max_h)?;
-        map.serialize_entry("comfort_h", &self.comfort_h)?;
         map.serialize_entry("generated_params", &self.generated_params)?;
         // chunks: (i32,i32) key → "x,y" string
         let chunks: std::collections::HashMap<String, i32> = self
@@ -187,8 +184,6 @@ impl<'de> Deserialize<'de> for TerrainMap {
             min_h: i32,
             max_h: i32,
             #[serde(default)]
-            comfort_h: f64,
-            #[serde(default)]
             generated_params: TerrainParamsPersist,
             chunks: std::collections::HashMap<String, i32>,
         }
@@ -207,18 +202,12 @@ impl<'de> Deserialize<'de> for TerrainMap {
                 }
             })
             .collect();
-        let comfort_h = if h.comfort_h != 0.0 {
-            h.comfort_h
-        } else {
-            (h.min_h + h.max_h) as f64 * 0.5
-        };
         Ok(Self {
             chunks,
             generated: h.generated,
             generated_radius: h.generated_radius,
             min_h: h.min_h,
             max_h: h.max_h,
-            comfort_h,
             generated_params: h.generated_params,
         })
     }
@@ -232,7 +221,6 @@ impl Default for TerrainMap {
             generated_radius: 0.0,
             min_h: 8,
             max_h: 8,
-            comfort_h: 8.0,
             generated_params: TerrainParamsPersist::default(),
         }
     }
@@ -346,13 +334,6 @@ impl TerrainMap {
             self.min_h = min_h;
             self.max_h = max_h;
         }
-
-        let clamp_floor = 8.0_f64;
-        let clamp_dist = (params.base_height as f64 - clamp_floor) * params.base_falloff.max(1) as f64;
-        let d_ref = radius.min(clamp_dist);
-        let d_comfort = d_ref * 2.0 / 3.0;
-        self.comfort_h = (params.base_height as f64 - d_comfort / params.base_falloff.max(1) as f64)
-            .clamp(clamp_floor, params.base_height as f64);
 
         self.generated = true;
     }

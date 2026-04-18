@@ -384,7 +384,7 @@ impl World {
     /// 地形对移动消耗的乘子。地形未生成或所在位置无数据时返回 1.0。
     /// 公式：slope_factor × altitude_factor
     /// - slope_factor = 1 + max(dh/dist, 0) × terrain_slope_cost  （上坡加成，下坡不补贴）
-    /// - altitude_factor = 1 + |h - comfort_h| / range × terrain_altitude_cost
+    /// - altitude_factor = 1 + |h - comfort_height| / range × terrain_altitude_cost
     fn terrain_move_factor(
         &self,
         x0: f64,
@@ -408,7 +408,7 @@ impl World {
 
         let range = (self.terrain.max_h - self.terrain.min_h).max(1) as f64;
         let altitude_factor =
-            1.0 + ((h0 - self.terrain.comfort_h).abs() / range) * config.terrain_altitude_cost;
+            1.0 + ((h0 - config.comfort_height).abs() / range) * config.terrain_altitude_cost;
 
         slope_factor * altitude_factor
     }
@@ -480,7 +480,7 @@ impl World {
 
         let creature_id = self.next_creature_id;
         self.next_creature_id += 1;
-        let creature = Creature::new(creature_id, x, y, energy, genome.clone(), 0, None);
+        let creature = Creature::new(creature_id, x, y, energy, genome.clone(), 0, None, None);
         self.notify_born(&creature);
         self.creatures.push(creature);
     }
@@ -885,10 +885,13 @@ impl World {
                 self.creatures[i].physio.clear();
                 self.execute_actions(i, &outputs.to_vec(), dt, config);
 
-                let total_reward = self.creatures[i].physio.total_reward(
-                    &self.creatures[i].genome.physio,
-                );
-                self.creatures[i].brain.apply_physiology(total_reward);
+                let total_reward = self.creatures[i]
+                    .physio
+                    .total_reward(&self.creatures[i].genome.physio);
+                // TODO:100代以上屏蔽赫布学习（实验：观察后期行为多样性）
+                if self.creatures[i].generation < 100 {
+                    self.creatures[i].brain.apply_physiology(total_reward);
+                }
 
                 if need_per_creature_timing {
                     let main_ns = creature_t0.elapsed().as_nanos() as u64;
@@ -905,10 +908,13 @@ impl World {
                 self.creatures[i].physio.clear();
                 self.execute_actions(i, &outputs, dt, config);
 
-                let total_reward = self.creatures[i].physio.total_reward(
-                    &self.creatures[i].genome.physio,
-                );
-                self.creatures[i].brain.apply_physiology(total_reward);
+                let total_reward = self.creatures[i]
+                    .physio
+                    .total_reward(&self.creatures[i].genome.physio);
+                // TODO:100代以上屏蔽赫布学习（实验：观察后期行为多样性）
+                if self.creatures[i].generation < 100 {
+                    self.creatures[i].brain.apply_physiology(total_reward);
+                }
 
                 if need_per_creature_timing {
                     let main_ns = creature_t0.elapsed().as_nanos() as u64;
@@ -1128,7 +1134,11 @@ impl World {
             let nearby_trails = self.trail_grid.query(cx, cy, mouth_outer_r);
             for &trail_idx in &nearby_trails {
                 let trail = &self.trail_points[trail_idx];
-                if trail.alive && trail.age > 2.0 && trail.creator_id != my_id && trail.clan_hash == my_clan_hash {
+                if trail.alive
+                    && trail.age > 2.0
+                    && trail.creator_id != my_id
+                    && trail.clan_hash == my_clan_hash
+                {
                     let dx = trail.x - cx;
                     let dy = trail.y - cy;
                     if dx * dx + dy * dy <= mouth_outer_r_sq {
@@ -1249,15 +1259,17 @@ impl World {
         let offset_y = -heading.sin() * behind_dist + rng.gen_range(-3.0..3.0);
 
         // 尝试找同种配偶
-        let mate_genome = self.find_mate(idx, config);
+        let mate = self.find_mate(idx, config);
 
         let creature_id = self.next_creature_id;
         self.next_creature_id += 1;
 
-        let mut child = if let Some(mate_genome) = mate_genome {
+        let mut child = if let Some((mate_genome, mate_heading)) = mate {
             let crossover_genome =
                 Genome::crossover(&self.creatures[idx].genome, &mate_genome, true);
             let child_genome = crossover_genome.mutate(config);
+            // 父辈方向均值（弧度直接平均，已足够）
+            let child_heading = (heading + mate_heading) / 2.0;
             Creature::new(
                 creature_id,
                 self.creatures[idx].x + offset_x,
@@ -1266,6 +1278,7 @@ impl World {
                 child_genome,
                 self.creatures[idx].generation + 1,
                 Some(self.creatures[idx].id),
+                Some(child_heading),
             )
         } else {
             self.creatures[idx].reproduce(
@@ -1299,7 +1312,7 @@ impl World {
         true
     }
 
-    fn find_mate(&self, idx: usize, config: &Config) -> Option<Genome> {
+    fn find_mate(&self, idx: usize, config: &Config) -> Option<(Genome, f64)> {
         let creature = &self.creatures[idx];
         let nearby = self
             .creature_grid
@@ -1317,7 +1330,7 @@ impl World {
                 && creature.genome.similarity(&other.genome)
                     >= config.species_similarity_threshold * 0.9
             {
-                return Some(other.genome.clone());
+                return Some((other.genome.clone(), other.heading));
             }
         }
         None

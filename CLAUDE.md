@@ -152,9 +152,9 @@ cargo clippy          # 代码检查
   - 用户点击侧边栏 "⛰" 按钮（在保存按钮左边）触发，二次确认后按当前 `volcano_radius` 一次性生成
   - 覆盖范围 = 半径 + 一格 chunk 余量（避免边界突兀）
   - 生成后**永久冻结**，`generated_radius` 快照与 UI 半径解耦；新扩展区域 `terrain_factor = 1.0`
-  - 移动消耗 ×= `slope_factor × altitude_factor`：上坡费力（不补贴下坡）+ 远离舒适带费力
-  - 舒适高度（`comfort_h`）在地形生成时预计算：取 `min(volcano_radius, clamp_dist)` 的 2/3 处对应的线性圆锥高度，存入 TerrainMap
-  - 配置项：`terrain_slope_cost`（默认 2.0）、`terrain_altitude_cost`（默认 0.5）
+  - 移动消耗 ×= `slope_factor × altitude_factor`：上坡费力（不补贴下坡）+ 远离舒适高度费力
+  - `altitude_factor = 1 + |h - comfort_height| / range × terrain_altitude_cost`，舒适高度由 `config.comfort_height` 配置
+  - 配置项：`terrain_slope_cost`（默认 2.0）、`terrain_altitude_cost`（默认 0.5）、`comfort_height`（默认 50.0）
   - 持久化：地形独立 `terrain.json`（与 snapshot 解耦），⛰ 生成时立即写盘，启动无条件加载——无论"发现存档"对话框选恢复或新游戏，地形都保留
 
 ## 开发注意

@@ -125,10 +125,11 @@ impl Creature {
         genome: Genome,
         generation: usize,
         parent_id: Option<u64>,
+        heading: Option<f64>,
     ) -> Self {
         let brain = SpikingNetwork::from_genome(&genome);
         let genome_hash = genome.hash();
-        let heading = rand::thread_rng().gen_range(0.0..std::f64::consts::TAU);
+        let heading = heading.unwrap_or_else(|| rand::thread_rng().gen_range(0.0..std::f64::consts::TAU));
 
         Self {
             id,
@@ -168,7 +169,7 @@ impl Creature {
         max_connections: usize,
     ) -> Self {
         let genome = Genome::random_minimal(min_connections, max_connections);
-        Self::new(id, x, y, energy, genome, 0, None)
+        Self::new(id, x, y, energy, genome, 0, None, None)
     }
 
     /// 繁殖产生子代（代数+1，parent_id = 自己的 id）
@@ -182,6 +183,7 @@ impl Creature {
             child_genome,
             self.generation + 1,
             Some(self.id),
+            Some(self.heading),
         )
     }
 }

@@ -3,7 +3,7 @@ initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
 min_creatures = 30
 # 最大生物数量（超过时禁止繁殖，0=不限制）
-max_creatures = 480
+max_creatures = 450
 # 初始能量
 initial_energy = 160.0
 # 初始世界缩放比例
@@ -15,13 +15,13 @@ volcano_x = 0.0
 # 火山坐标 Y
 volcano_y = 0.0
 # 火山喷发间隔（秒）
-volcano_interval = 30.0
+volcano_interval = 25.0
 # 火山喷射半径
 volcano_radius = 2300.0
 # 每次喷发粒子数
-volcano_count = 65
+volcano_count = 70
 # 火山粒子能量
-volcano_particle_energy = 155.0
+volcano_particle_energy = 160.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -38,15 +38,15 @@ volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 50.0
+volcano_kill_radius = 40.0
 # 落地杀伤系数
-landing_damage_multiplier = 1.0
+landing_damage_multiplier = 1.5
 
 # === 温泉 ===
 # 温泉最大同时活跃数量
 spring_max_count = 9
 # 温泉产生间隔（秒）
-spring_spawn_interval = 70.0
+spring_spawn_interval = 100.0
 # 温泉寿命（秒）
 spring_lifetime = 1150.0
 # 温泉喷出粒子间隔（秒）
@@ -54,7 +54,7 @@ spring_emit_interval = 5.0
 # 温泉每次喷出粒子数
 spring_emit_count = 2
 # 温泉粒子能量
-spring_particle_energy = 155.0
+spring_particle_energy = 170.0
 # 温泉喷出半径（粒子散布范围 px）
 spring_radius = 175.0
 # 温泉粒子衰减率（/秒）
@@ -72,26 +72,26 @@ eye_scan_speed = 280.0
 # 嘴巴冷却时间（秒）
 mouth_cooldown = 0.5
 # 咬合能量转移率
-bite_transfer_rate = 0.4
+bite_transfer_rate = 0.5
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
-energy_denominator = 20.0
+energy_denominator = 15.0
 # 散热下限（指数衰减底板）
 heat_floor = 0.03
 
 # === 代谢 ===
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
-age_metabolism_factor = 0.026
+age_metabolism_factor = 0.01
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗（每单位距离）
-move_cost = 0.002
+move_cost = 0.001
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.8
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.02
+heat_dissipation_coefficient = 0.025
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -133,7 +133,7 @@ reproduce_cooldown = 20.0
 
 # === 算力能量 ===
 # 算力转能量系数（内部除以1亿，0 = 禁用）
-compute_energy_factor = 18.0
+compute_energy_factor = 75.0
 
 # === SNN ===
 # 每帧 SNN tick 数（同步模式）
@@ -144,7 +144,7 @@ neural_backend = "auto"
 neural_tick_rate = 600.0
 # 变异率（全局常量，不再是基因组内可演化基因）
 # base/block 两类变异共享此触发概率
-mutation_rate = 0.15
+mutation_rate = 0.1
 base_metabolism = 0.025
 max_speed = 20.0
 meteorite_interval = 0.0
@@ -159,10 +159,11 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = false
-auto_spawn_interval = 25.0
+auto_spawn_interval = 30.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
-terrain_slope_cost = 7.0
+terrain_slope_cost = 5.5
 # 地形海拔阻力系数（远离舒适带的开销倍率，0=禁用）
-terrain_altitude_cost = 7.0
+terrain_altitude_cost = 12.0
+comfort_height = 38.0

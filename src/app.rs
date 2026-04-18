@@ -679,10 +679,18 @@ impl CellWorldApp {
                 changed |= config_drag_f64(
                     ui,
                     "地形海拔阻力",
-                    "远离中间舒适带惩罚: move_cost*=1+|h-中位|/range*此值",
+                    "远离舒适高度惩罚: move_cost*=1+|h-舒适|/range*此值",
                     &mut c.terrain_altitude_cost,
                     0.05,
                     0.0..=20.0,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "舒适高度",
+                    "海拔阻力的参考高度",
+                    &mut c.comfort_height,
+                    1.0,
+                    0.0..=200.0,
                 );
             });
 
@@ -776,7 +784,7 @@ impl CellWorldApp {
                     })
                     .inner;
                 ui.label(
-                    egui::RichText::new("CPU算力转能量，0=禁用")
+                    egui::RichText::new("算力耗能，0=禁用")
                         .color(egui::Color32::from_gray(110))
                         .size(10.0),
                 );
@@ -959,7 +967,7 @@ impl CellWorldApp {
             }
 
             // 左Y轴标注
-            let label_color = egui::Color32::from_gray(160);
+            let label_color = egui::Color32::from_rgb(255, 255, 255);
             painter.text(
                 egui::pos2(rect.left() + 2.0, rect.top() + 2.0),
                 egui::Align2::LEFT_TOP,
