@@ -567,78 +567,107 @@ impl World {
         }
     }
 
-    /// 处理熔岩流链式扩散（每跳 40px 梯度下降 + chunk 容量检查，最多 5 跳）
+    /// 处理熔岩流链式扩散（距离种子 + 满溢判定 + 梯度下降）
     fn process_lava_spread(&mut self, config: &Config) {
         use super::terrain::GRID_WORLD_SIZE;
-        const STEP: f64 = 40.0;
 
         if self.lava_pending.is_empty() {
             return;
         }
         let pending: Vec<_> = std::mem::take(&mut self.lava_pending);
         let current_energy = config.current_volcano_energy(self.time);
-        let cap = config.lava_chunk_base_capacity;
+        let cap = config.lava_chunk_capacity;
+        let jump_limit = config.lava_jump_limit;
 
-        // 统计每个 chunk 当前的 lava 粒子数
-        let mut chunk_lava_count: FxHashMap<(i32, i32), usize> = FxHashMap::default();
+        // 统计每个 chunk 当前的所有粒子数（不区分类型）
+        let mut chunk_count: FxHashMap<(i32, i32), usize> = FxHashMap::default();
         for p in &self.energy_particles {
-            if p.alive && p.lava {
+            if p.alive {
                 let cx = (p.x / GRID_WORLD_SIZE).floor() as i32;
                 let cy = (p.y / GRID_WORLD_SIZE).floor() as i32;
-                *chunk_lava_count.entry((cx, cy)).or_insert(0) += 1;
+                *chunk_count.entry((cx, cy)).or_insert(0) += 1;
             }
         }
 
         let terrain = &self.terrain;
+        let mut rng = rand::thread_rng();
 
         for (px, py, depth) in pending {
             'spread: for _ in 0..config.lava_spread_count {
-                let mut pos_x = px;
-                let mut pos_y = py;
+                // 1. 生成距离种子（30~40px）
+                let seed_dist: f64 = rng.gen_range(30.0..=40.0);
+                // 随机初始方向
+                let theta: f64 = rng.gen_range(0.0..std::f64::consts::TAU);
+                let mut dir_x = theta.cos();
+                let mut dir_y = theta.sin();
 
-                for _ in 0..5 {
-                    // 从 pos 所在 chunk 找 8 邻居中地形最低的 chunk
-                    let cur_cx = (pos_x / GRID_WORLD_SIZE).floor() as i32;
-                    let cur_cy = (pos_y / GRID_WORLD_SIZE).floor() as i32;
-                    let mut best_cx = cur_cx;
-                    let mut best_cy = cur_cy;
-                    let mut lowest_h = i32::MAX;
-                    for &(ddx, ddy) in &[(-1i32,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)] {
-                        let ncx = cur_cx + ddx;
-                        let ncy = cur_cy + ddy;
-                        let wx = ncx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
-                        let wy = ncy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
-                        let h = terrain.height_at(wx, wy).unwrap_or(i32::MAX);
-                        if h < lowest_h {
-                            lowest_h = h;
-                            best_cx = ncx;
-                            best_cy = ncy;
+                let parent_cx = (px / GRID_WORLD_SIZE).floor() as i32;
+                let parent_cy = (py / GRID_WORLD_SIZE).floor() as i32;
+
+                for jump in 1..=(jump_limit as u32) {
+                    // 候选位置 = 父粒子 + 方向 × seed_dist × jump
+                    let nx = px + dir_x * seed_dist * jump as f64;
+                    let ny = py + dir_y * seed_dist * jump as f64;
+                    let mut dst_cx = (nx / GRID_WORLD_SIZE).floor() as i32;
+                    let mut dst_cy = (ny / GRID_WORLD_SIZE).floor() as i32;
+                    let mut final_x = nx;
+                    let mut final_y = ny;
+
+                    let crossed_chunk = dst_cx != parent_cx || dst_cy != parent_cy;
+
+                    if crossed_chunk {
+                        // 跨区块 → 直接梯度下降：从上一个位置所在区块找周边最低
+                        let prev_cx = if jump == 1 {
+                            parent_cx
+                        } else {
+                            ((px + dir_x * seed_dist * (jump - 1) as f64) / GRID_WORLD_SIZE).floor() as i32
+                        };
+                        let prev_cy = if jump == 1 {
+                            parent_cy
+                        } else {
+                            ((py + dir_y * seed_dist * (jump - 1) as f64) / GRID_WORLD_SIZE).floor() as i32
+                        };
+                        let (best_cx, best_cy) =
+                            Self::find_lowest_neighbor(terrain, prev_cx, prev_cy);
+                        dst_cx = best_cx;
+                        dst_cy = best_cy;
+                        // 最终位置 = 目标区块中心
+                        final_x = dst_cx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
+                        final_y = dst_cy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
+                        // 更新方向为梯度方向（后续跳沿此方向继续）
+                        let gdx = final_x - px;
+                        let gdy = final_y - py;
+                        let glen = (gdx * gdx + gdy * gdy).sqrt().max(1.0);
+                        dir_x = gdx / glen;
+                        dir_y = gdy / glen;
+                    } else {
+                        // 未跨区块 → 先满溢判定，满了再梯度下降
+                        let count = chunk_count.get(&(dst_cx, dst_cy)).copied().unwrap_or(0);
+                        if count >= cap {
+                            let (best_cx, best_cy) =
+                                Self::find_lowest_neighbor(terrain, dst_cx, dst_cy);
+                            dst_cx = best_cx;
+                            dst_cy = best_cy;
+                            final_x = dst_cx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
+                            final_y = dst_cy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
+                            let gdx = final_x - px;
+                            let gdy = final_y - py;
+                            let glen = (gdx * gdx + gdy * gdy).sqrt().max(1.0);
+                            dir_x = gdx / glen;
+                            dir_y = gdy / glen;
                         }
                     }
 
-                    // 方向 = pos → 最低邻居 chunk 中心，归一化后偏移 40px
-                    let target_wx = best_cx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
-                    let target_wy = best_cy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
-                    let ddx = target_wx - pos_x;
-                    let ddy = target_wy - pos_y;
-                    let dist = (ddx * ddx + ddy * ddy).sqrt().max(1.0);
-                    let nx = pos_x + STEP * ddx / dist;
-                    let ny = pos_y + STEP * ddy / dist;
-
-                    // 检查 new_pos 所在 chunk 容量
-                    let dst_cx = (nx / GRID_WORLD_SIZE).floor() as i32;
-                    let dst_cy = (ny / GRID_WORLD_SIZE).floor() as i32;
-                    let count = chunk_lava_count.get(&(dst_cx, dst_cy)).copied().unwrap_or(0);
+                    // 满溢判定（梯度下降后的目标区块也可能满）
+                    let count = chunk_count.get(&(dst_cx, dst_cy)).copied().unwrap_or(0);
                     if count >= cap {
-                        // 满了，从 new_pos 继续下一跳
-                        pos_x = nx;
-                        pos_y = ny;
+                        // 满了 → 继续下一跳
                         continue;
                     }
 
                     // 超出火山半径 → 放弃
-                    let vdx = nx - config.volcano_x;
-                    let vdy = ny - config.volcano_y;
+                    let vdx = final_x - config.volcano_x;
+                    let vdy = final_y - config.volcano_y;
                     let dist_to_volcano = (vdx * vdx + vdy * vdy).sqrt();
                     if dist_to_volcano > config.volcano_radius {
                         break;
@@ -648,24 +677,26 @@ impl World {
                     let eid = self.next_energy_id;
                     self.next_energy_id += 1;
                     self.energy_particles.push(EnergyParticle::new_lava(
-                        eid, nx, ny, current_energy, depth + 1,
+                        eid, final_x, final_y, current_energy, depth + 1,
                     ));
                     self.energy_grid_dirty = true;
-                    *chunk_lava_count.entry((dst_cx, dst_cy)).or_insert(0) += 1;
+                    *chunk_count.entry((dst_cx, dst_cy)).or_insert(0) += 1;
 
                     // 落地杀伤
-                    let kill_factor = (2.0 * (1.0 - dist_to_volcano / config.volcano_radius)).max(0.0);
+                    let kill_factor =
+                        (2.0 * (1.0 - dist_to_volcano / config.volcano_radius)).max(0.0);
                     let kill_r = config.volcano_kill_radius * kill_factor;
                     if kill_r > 0.0 {
                         let kill_r2 = kill_r * kill_r;
                         for c in &mut self.creatures {
                             if c.alive && c.energy > 0.0 {
-                                let dx = c.x - nx;
-                                let dy = c.y - ny;
+                                let dx = c.x - final_x;
+                                let dy = c.y - final_y;
                                 if dx * dx + dy * dy < kill_r2 {
                                     let damage = c.energy
                                         * (1.0
-                                            - (-current_energy * config.landing_damage_multiplier
+                                            - (-current_energy
+                                                * config.landing_damage_multiplier
                                                 / c.energy)
                                                 .exp());
                                     c.energy = (c.energy - damage).max(0.0);
@@ -678,9 +709,38 @@ impl World {
                     }
                     continue 'spread;
                 }
-                // 5 跳都满 → 放弃
+                // jump_limit 跳都满 → 放弃
             }
         }
+    }
+
+    /// 从 (cx, cy) 的 8 邻居中找地形最低的区块，返回 (best_cx, best_cy)
+    fn find_lowest_neighbor(
+        terrain: &TerrainMap,
+        cx: i32,
+        cy: i32,
+    ) -> (i32, i32) {
+        use super::terrain::GRID_WORLD_SIZE;
+        let mut best_cx = cx;
+        let mut best_cy = cy;
+        let mut lowest_h = i32::MAX;
+        for &(ddx, ddy) in &[
+            (-1i32, -1), (-1, 0), (-1, 1),
+            (0, -1),             (0, 1),
+            (1, -1),  (1, 0),  (1, 1),
+        ] {
+            let ncx = cx + ddx;
+            let ncy = cy + ddy;
+            let wx = ncx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
+            let wy = ncy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
+            let h = terrain.height_at(wx, wy).unwrap_or(i32::MAX);
+            if h < lowest_h {
+                lowest_h = h;
+                best_cx = ncx;
+                best_cy = ncy;
+            }
+        }
+        (best_cx, best_cy)
     }
 
     // ========== 空间索引 ==========

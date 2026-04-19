@@ -1163,14 +1163,19 @@ impl CellWorldApp {
                         changed = true;
                     }
                 }
-                changed |= config_drag_f64(
-                    ui,
-                    "地形偏好",
-                    "越大越走下坡(0=无偏好)",
-                    &mut c.lava_terrain_bias,
-                    0.1,
-                    0.0..=10.0,
-                );
+                {
+                    let mut jl = c.lava_jump_limit;
+                    if config_drag_usize(
+                        ui,
+                        "跳跃次数",
+                        "扩散满溢时最大跳跃次数",
+                        &mut jl,
+                        1..=20,
+                    ) {
+                        c.lava_jump_limit = jl;
+                        changed = true;
+                    }
+                }
                 changed |= config_drag_f64(
                     ui,
                     "杀伤基础间隔",
@@ -1196,15 +1201,15 @@ impl CellWorldApp {
                     0.0001..=0.1,
                 );
                 {
-                    let mut cap = c.lava_chunk_base_capacity;
+                    let mut cap = c.lava_chunk_capacity;
                     if config_drag_usize(
                         ui,
-                        "Chunk容量上限",
-                        "最低处chunk的lava容量上限",
+                        "区块容量上限",
+                        "每个区块最多粒子数(不区分类型)",
                         &mut cap,
                         1..=50,
                     ) {
-                        c.lava_chunk_base_capacity = cap;
+                        c.lava_chunk_capacity = cap;
                         changed = true;
                     }
                 }

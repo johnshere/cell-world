@@ -475,13 +475,13 @@ volcano_interval_amplitude = 0.2
 volcano_energy_cycle = 1000.0
 volcano_energy_amplitude = 0.1
 
-# 熔岩流（湖泊机制：chunk容量上限 + 梯度下降）
+# 熔岩流（距离种子 + 满溢判定 + 梯度下降）
 lava_count = 3                # 每次火山喷发附带的熔岩流粒子数
 lava_spread_count = 2         # 死亡时扩散子代数
 lava_max_chain_depth = 5      # 最大链式代数
-lava_terrain_bias = 2.0       # 地形偏好强度（越大越走下坡）
+lava_jump_limit = 5           # 扩散满溢时最大跳跃次数
 lava_decay_rate = 0.005       # 熔岩粒子独立衰减率（/秒）
-lava_chunk_base_capacity = 8  # 最低处chunk的lava容量上限
+lava_chunk_capacity = 8       # 区块粒子容量上限（不区分类型）
 
 # 感知 / 嘴 / 战斗
 eye_scan_speed = 400.0       # 度/秒，扫描眼角速度
