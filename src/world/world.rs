@@ -570,15 +570,18 @@ impl World {
         let current_energy = config.current_volcano_energy(self.time);
         let lpp = config.lava_level_per_particle;
 
-        // 统计每个 chunk 当前的所有粒子数（不区分类型）
-        let mut chunk_count: FxHashMap<(i32, i32), usize> = FxHashMap::default();
-        for p in &self.energy_particles {
-            if p.alive {
-                let cx = (p.x / GRID_WORLD_SIZE).floor() as i32;
-                let cy = (p.y / GRID_WORLD_SIZE).floor() as i32;
-                *chunk_count.entry((cx, cy)).or_insert(0) += 1;
+        // 冻结快照：统计当前所有 alive 粒子的 chunk 分布（批处理期间不更新）
+        let chunk_count: FxHashMap<(i32, i32), usize> = {
+            let mut m = FxHashMap::default();
+            for p in &self.energy_particles {
+                if p.alive {
+                    let cx = (p.x / GRID_WORLD_SIZE).floor() as i32;
+                    let cy = (p.y / GRID_WORLD_SIZE).floor() as i32;
+                    *m.entry((cx, cy)).or_insert(0) += 1;
+                }
             }
-        }
+            m
+        };
 
         let terrain = &self.terrain;
         let mut rng = rand::thread_rng();
@@ -614,7 +617,6 @@ impl World {
                     eid, nx, ny, current_energy, depth + 1,
                 ));
                 self.energy_grid_dirty = true;
-                *chunk_count.entry((best_cx, best_cy)).or_insert(0) += 1;
 
                 // 落地杀伤
                 let kill_factor =
@@ -645,9 +647,9 @@ impl World {
         }
     }
 
-    /// 从 (cx, cy) 的邻居中找熔岩应流向的区块。
-    /// - 斜面（有邻居地形严格低于自身）→ 纯地形梯度，自由流下
-    /// - 盆地（所有邻居地形 ≥ 自身）→ 液面模型（有效高度 = 地形 + 粒子数 × lpp），灌满再溢流
+    /// 从 (cx, cy) 自身 + 8 邻居中找有效高度最低的区块。
+    /// 有效高度 = 地形高度 + 粒子数 × level_per_particle
+    /// chunk_count 应为冻结快照（批处理期间不更新），避免批量子代互相推挤。
     fn find_lava_target(
         terrain: &TerrainMap,
         cx: i32,
@@ -657,61 +659,33 @@ impl World {
     ) -> (i32, i32) {
         use super::terrain::GRID_WORLD_SIZE;
 
-        let terrain_h = |ccx: i32, ccy: i32| -> f64 {
+        let effective_h = |ccx: i32, ccy: i32| -> f64 {
             let wx = ccx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
             let wy = ccy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
-            terrain.height_at(wx, wy).unwrap_or(i32::MAX) as f64
+            let th = terrain.height_at(wx, wy).unwrap_or(i32::MAX) as f64;
+            let count = chunk_count.get(&(ccx, ccy)).copied().unwrap_or(0) as f64;
+            th + count * level_per_particle
         };
 
-        const NEIGHBORS: [(i32, i32); 8] = [
-            (-1, -1), (-1, 0), (-1, 1),
-            (0, -1),           (0, 1),
+        let mut best_cx = cx;
+        let mut best_cy = cy;
+        let mut lowest = effective_h(cx, cy);
+
+        for &(ddx, ddy) in &[
+            (-1i32, -1), (-1, 0), (-1, 1),
+            (0, -1),             (0, 1),
             (1, -1),  (1, 0),  (1, 1),
-        ];
-
-        let self_h = terrain_h(cx, cy);
-
-        // 找邻居中地形最低的
-        let mut min_terrain_cx = cx;
-        let mut min_terrain_cy = cy;
-        let mut min_terrain = self_h;
-        for &(ddx, ddy) in &NEIGHBORS {
+        ] {
             let ncx = cx + ddx;
             let ncy = cy + ddy;
-            let h = terrain_h(ncx, ncy);
-            if h < min_terrain {
-                min_terrain = h;
-                min_terrain_cx = ncx;
-                min_terrain_cy = ncy;
+            let h = effective_h(ncx, ncy);
+            if h < lowest {
+                lowest = h;
+                best_cx = ncx;
+                best_cy = ncy;
             }
         }
-
-        if min_terrain < self_h {
-            // 斜面：有邻居地形更低 → 纯地形梯度，直接流下
-            (min_terrain_cx, min_terrain_cy)
-        } else {
-            // 盆地：所有邻居地形 ≥ 自身 → 液面模型
-            let effective_h = |ccx: i32, ccy: i32| -> f64 {
-                let th = terrain_h(ccx, ccy);
-                let count = chunk_count.get(&(ccx, ccy)).copied().unwrap_or(0) as f64;
-                th + count * level_per_particle
-            };
-
-            let mut best_cx = cx;
-            let mut best_cy = cy;
-            let mut lowest = effective_h(cx, cy);
-            for &(ddx, ddy) in &NEIGHBORS {
-                let ncx = cx + ddx;
-                let ncy = cy + ddy;
-                let h = effective_h(ncx, ncy);
-                if h < lowest {
-                    lowest = h;
-                    best_cx = ncx;
-                    best_cy = ncy;
-                }
-            }
-            (best_cx, best_cy)
-        }
+        (best_cx, best_cy)
     }
 
     // ========== 空间索引 ==========
