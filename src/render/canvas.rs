@@ -256,48 +256,7 @@ impl WorldCanvas {
             }
         }
 
-        // ===== 绘制温泉 =====
-        for spring in &snapshot.hot_springs {
-            if !spring.alive {
-                continue;
-            }
-            // 世界坐标裁剪（温泉范围较大，加大边距）
-            let spring_margin = config.spring_radius / self.scale as f64;
-            if spring.x < vis_min_x - spring_margin
-                || spring.x > vis_max_x + spring_margin
-                || spring.y < vis_min_y - spring_margin
-                || spring.y > vis_max_y + spring_margin
-            {
-                continue;
-            }
-            let pos = self.world_to_screen(Pos2::new(spring.x as f32, spring.y as f32), rect);
-            let radius = config.spring_radius as f32 * self.scale;
-            let factor = spring.output_factor() as f32;
 
-            // 范围圈（青色，透明度随生命周期变化）
-            let alpha = (40.0 * factor) as u8;
-            if radius > 3.0 {
-                painter.circle_stroke(
-                    pos,
-                    radius,
-                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(0, 200, 200, alpha)),
-                );
-            }
-
-            // 中心标记（青色圆点）
-            let center_alpha = (60.0 + 140.0 * factor) as u8;
-            let center_r = (4.0 * self.scale).max(2.0);
-            painter.circle_filled(
-                pos,
-                center_r * 1.5,
-                Color32::from_rgba_unmultiplied(0, 180, 200, (center_alpha as f32 * 0.4) as u8),
-            );
-            painter.circle_filled(
-                pos,
-                center_r,
-                Color32::from_rgba_unmultiplied(0, 220, 240, center_alpha),
-            );
-        }
 
         // ===== 绘制生物 =====
         // 极低缩放时用批量 Mesh 渲染点

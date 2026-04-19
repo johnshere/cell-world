@@ -1032,7 +1032,7 @@ impl CellWorldApp {
 }
 
 impl CellWorldApp {
-    fn render_energy_settings_inline(&mut self, ui: &mut egui::Ui, snapshot: &SimSnapshot) {
+    fn render_energy_settings_inline(&mut self, ui: &mut egui::Ui, _snapshot: &SimSnapshot) {
         ui.separator();
         ui.strong("🌋 能量源设置");
         {
@@ -1131,92 +1131,45 @@ impl CellWorldApp {
                 );
             });
 
-            // 温泉信息
-            let active_springs = snapshot.hot_springs.iter().filter(|s| s.alive).count();
+            // 熔岩流参数
             ui.separator();
-            ui.strong(format!(
-                "♨ 温泉 ({}/{})",
-                active_springs, c.spring_max_count
-            ));
+            ui.strong("🌋 熔岩流");
 
-            ui.collapsing("温泉参数", |ui| {
+            ui.collapsing("熔岩流参数", |ui| {
                 changed |= config_drag_usize(
                     ui,
-                    "最大数量",
-                    "同时活跃温泉数上限",
-                    &mut c.spring_max_count,
+                    "喷出数量",
+                    "每次火山喷发附带的熔岩流粒子数",
+                    &mut c.lava_count,
                     0..=20,
                 );
-                changed |= config_drag_f64(
-                    ui,
-                    "生成间隔",
-                    "新温泉出现间隔(秒)",
-                    &mut c.spring_spawn_interval,
-                    1.0,
-                    10.0..=1200.0,
-                );
-                changed |= config_drag_f64(
-                    ui,
-                    "寿命",
-                    "温泉存在时长(秒)",
-                    &mut c.spring_lifetime,
-                    1.0,
-                    60.0..=3600.0,
-                );
-                changed |= config_drag_f64(
-                    ui,
-                    "喷出间隔",
-                    "粒子喷出间隔(秒)",
-                    &mut c.spring_emit_interval,
-                    0.1,
-                    0.1..=10.0,
-                );
                 changed |= config_drag_usize(
                     ui,
-                    "喷出粒子数",
-                    "每次喷出粒子数",
-                    &mut c.spring_emit_count,
-                    1..=50,
+                    "扩散子代数",
+                    "死亡时扩散出的子粒子数",
+                    &mut c.lava_spread_count,
+                    1..=5,
                 );
+                {
+                    let mut depth = c.lava_max_chain_depth as usize;
+                    if config_drag_usize(
+                        ui,
+                        "最大链式代数",
+                        "链式扩散最大代数",
+                        &mut depth,
+                        1..=10,
+                    ) {
+                        c.lava_max_chain_depth = depth as u8;
+                        changed = true;
+                    }
+                }
                 changed |= config_drag_f64(
                     ui,
-                    "粒子能量",
-                    "温泉粒子能量",
-                    &mut c.spring_particle_energy,
+                    "地形偏好",
+                    "越大越走下坡(0=无偏好)",
+                    &mut c.lava_terrain_bias,
                     0.1,
-                    1.0..=500.0,
-                );
-                changed |= config_drag_f64(
-                    ui,
-                    "喷出半径",
-                    "粒子散布范围(px)",
-                    &mut c.spring_radius,
-                    1.0,
-                    10.0..=500.0,
-                );
-                changed |= config_drag_f64(
-                    ui,
-                    "粒子衰减率",
-                    "温泉粒子每秒衰减比例",
-                    &mut c.spring_decay_rate,
-                    0.001,
-                    0.001..=0.1,
-                );
-                changed |= config_drag_f64(
-                    ui,
-                    "最小间距",
-                    "温泉间最小距离(px)",
-                    &mut c.spring_min_distance,
-                    1.0,
-                    50.0..=1000.0,
-                );
-                changed |= config_drag_f64(
-                    ui,
-                    "最大距离",
-                    "链式扩散最大距离(px)",
-                    &mut c.spring_max_distance,
-                    1.0,
-                    100.0..=2000.0,
+                    0.0..=10.0,
                 );
             });
 

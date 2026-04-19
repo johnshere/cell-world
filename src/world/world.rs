@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::time::Instant;
 
 use super::{
-    Creature, EnergyParticle, HotSpring, ParticleSource, SpatialGrid, TerrainMap, TerrainParams,
+    Creature, EnergyParticle, ParticleSource, SpatialGrid, TerrainMap, TerrainParams,
     TrailPoint,
 };
 use crate::config::Config;
@@ -41,10 +41,8 @@ pub struct World {
     // 内部状态
     volcano_timer: f64,
 
-    // 温泉
-    pub hot_springs: Vec<HotSpring>,
-    spring_spawn_timer: f64,
-    next_spring_id: u64,
+    // 熔岩流待扩散队列（帧间延迟处理）
+    lava_pending: Vec<(f64, f64, u8)>, // (x, y, chain_depth)
 
     // ID 计数器
     next_creature_id: u64,
@@ -126,9 +124,7 @@ impl World {
             trail_grid: SpatialGrid::new(config.vision_range * 1.5),
             time: 0.0,
             volcano_timer: 0.0,
-            hot_springs: Vec::new(),
-            spring_spawn_timer: 0.0,
-            next_spring_id: 0,
+            lava_pending: Vec::new(),
             next_creature_id: 0,
             next_energy_id: 0,
             // 初始视窗居中于原点
@@ -274,16 +270,6 @@ impl World {
         self.volcano_timer
     }
 
-    /// 温泉生成计时器
-    pub fn spring_spawn_timer(&self) -> f64 {
-        self.spring_spawn_timer
-    }
-
-    /// 下一个温泉ID
-    pub fn next_spring_id(&self) -> u64 {
-        self.next_spring_id
-    }
-
     /// 下一个生物ID
     pub fn next_creature_id(&self) -> u64 {
         self.next_creature_id
@@ -320,9 +306,6 @@ impl World {
         trail_grid: SpatialGrid,
         time: f64,
         volcano_timer: f64,
-        hot_springs: Vec<HotSpring>,
-        spring_spawn_timer: f64,
-        next_spring_id: u64,
         next_creature_id: u64,
         next_energy_id: u64,
         action_counts: [usize; 4],
@@ -343,9 +326,7 @@ impl World {
             trail_grid,
             time,
             volcano_timer,
-            hot_springs,
-            spring_spawn_timer,
-            next_spring_id,
+            lava_pending: Vec::new(),
             next_creature_id,
             next_energy_id,
             viewport_min_x: -700.0,
@@ -493,7 +474,7 @@ impl World {
         }
     }
 
-    /// 生成能量粒子（火山喷发 + 温泉）
+    /// 生成能量粒子（火山喷发 + 熔岩流扩散）
     fn spawn_energy(&mut self, dt: f64, config: &Config) {
         self.volcano_timer += dt;
         let current_volcano_interval = config.current_volcano_interval(self.time);
@@ -502,9 +483,8 @@ impl World {
             self.volcano_erupt(config);
         }
 
-        // 温泉生成与更新
-        self.spawn_springs(dt, config);
-        self.update_springs(dt, config);
+        // 处理上一帧积累的熔岩流扩散
+        self.process_lava_spread(config);
     }
 
     fn volcano_erupt(&mut self, config: &Config) {
@@ -547,113 +527,132 @@ impl World {
                 }
             }
         }
+
+        // 熔岩流粒子：火山口附近小范围内喷出
+        let lava_spawn_radius = config.volcano_radius * 0.05;
+        for _ in 0..config.lava_count {
+            let angle = rng.gen_range(0.0..std::f64::consts::TAU);
+            let u: f64 = rng.gen_range(0.0..1.0);
+            let r = u * lava_spawn_radius;
+            let x = config.volcano_x + r * angle.cos();
+            let y = config.volcano_y + r * angle.sin();
+            let energy_id = self.next_energy_id;
+            self.next_energy_id += 1;
+            self.energy_particles
+                .push(EnergyParticle::new_lava(energy_id, x, y, current_energy, 0));
+            self.energy_grid_dirty = true;
+            // 熔岩流落地杀伤（火山口附近，系数=2）
+            let dist_to_volcano = r; // 已在火山口附近
+            let kill_factor = (2.0 * (1.0 - dist_to_volcano / config.volcano_radius)).max(0.0);
+            let kill_r = config.volcano_kill_radius * kill_factor;
+            let kill_r2 = kill_r * kill_r;
+            if kill_r > 0.0 {
+                for c in &mut self.creatures {
+                    if c.alive && c.energy > 0.0 {
+                        let dx = c.x - x;
+                        let dy = c.y - y;
+                        if dx * dx + dy * dy < kill_r2 {
+                            let damage = c.energy
+                                * (1.0
+                                    - (-current_energy * config.landing_damage_multiplier / c.energy)
+                                        .exp());
+                            c.energy = (c.energy - damage).max(0.0);
+                            if c.energy <= 0.0 {
+                                c.alive = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    /// 定期尝试生成新温泉（链式扩散）
-    fn spawn_springs(&mut self, dt: f64, config: &Config) {
-        self.spring_spawn_timer += dt;
-        if self.spring_spawn_timer < config.spring_spawn_interval {
+    /// 处理熔岩流链式扩散（帧间延迟）
+    fn process_lava_spread(&mut self, config: &Config) {
+        if self.lava_pending.is_empty() {
             return;
         }
-        let active_count = self.hot_springs.iter().filter(|s| s.alive).count();
-        if active_count >= config.spring_max_count {
-            return;
-        }
-        self.spring_spawn_timer = 0.0;
-
+        let pending: Vec<_> = std::mem::take(&mut self.lava_pending);
         let mut rng = rand::thread_rng();
+        let current_energy = config.current_volcano_energy(self.time);
 
-        // 选择锚点
-        let (anchor_x, anchor_y) = if self.hot_springs.is_empty() {
-            // 第一个从火山附近生成
-            (config.volcano_x, config.volcano_y)
-        } else {
-            // 链式扩散：从所有温泉（含已死亡的）中随机选一个
-            let idx = rng.gen_range(0..self.hot_springs.len());
-            (self.hot_springs[idx].x, self.hot_springs[idx].y)
-        };
-
-        // 随机方向 + 距离
-        let angle = rng.gen_range(0.0..std::f64::consts::TAU);
-        let dist_min = config.spring_min_distance.min(config.spring_max_distance);
-        let dist_max = config.spring_min_distance.max(config.spring_max_distance);
-        let dist = if dist_min >= dist_max {
-            dist_min
-        } else {
-            rng.gen_range(dist_min..dist_max)
-        };
-        let new_x = anchor_x + dist * angle.cos();
-        let new_y = anchor_y + dist * angle.sin();
-
-        // 温泉必须在火山喷发范围内生成
-        let vdx = new_x - config.volcano_x;
-        let vdy = new_y - config.volcano_y;
-        if vdx * vdx + vdy * vdy > config.volcano_radius * config.volcano_radius {
-            return;
-        }
-
-        // 最小间距检查
-        let min_d2 = config.spring_min_distance * config.spring_min_distance;
-        let too_close = self.hot_springs.iter().any(|s| {
-            if !s.alive {
-                return false;
+        for (px, py, depth) in pending {
+            // 采样 8 方向的地形高度，计算权重
+            let current_h = self.terrain.height_at(px, py).unwrap_or(0) as f64;
+            let mut directions: Vec<(f64, f64, f64)> = Vec::with_capacity(8);
+            for i in 0..8 {
+                let angle = std::f64::consts::TAU * i as f64 / 8.0;
+                let tx = px + 30.0 * angle.cos();
+                let ty = py + 30.0 * angle.sin();
+                let target_h = self.terrain.height_at(tx, ty).unwrap_or(0) as f64;
+                let dh = target_h - current_h;
+                let weight = (-dh * config.lava_terrain_bias).exp();
+                directions.push((angle, weight, 0.0));
             }
-            let dx = s.x - new_x;
-            let dy = s.y - new_y;
-            dx * dx + dy * dy < min_d2
-        });
-        if too_close {
-            return;
-        }
 
-        let id = self.next_spring_id;
-        self.next_spring_id += 1;
-        self.hot_springs
-            .push(HotSpring::new(id, new_x, new_y, config.spring_lifetime));
-    }
-
-    /// 更新温泉：年龄递增、喷出粒子
-    fn update_springs(&mut self, dt: f64, config: &Config) {
-        let mut rng = rand::thread_rng();
-
-        for i in 0..self.hot_springs.len() {
-            if !self.hot_springs[i].alive {
+            // 归一化权重
+            let total_weight: f64 = directions.iter().map(|(_, w, _)| *w).sum();
+            if total_weight <= 0.0 {
                 continue;
             }
-            self.hot_springs[i].update(dt);
-            if !self.hot_springs[i].alive {
-                continue;
+            // 累积分布
+            let mut cumulative = 0.0;
+            for d in &mut directions {
+                cumulative += d.1 / total_weight;
+                d.2 = cumulative;
             }
 
-            self.hot_springs[i].emit_timer += dt;
-            if self.hot_springs[i].emit_timer >= config.spring_emit_interval {
-                self.hot_springs[i].emit_timer -= config.spring_emit_interval;
-                let factor = self.hot_springs[i].output_factor();
-                let emit_count = (config.spring_emit_count as f64 * factor).round() as usize;
-                let sx = self.hot_springs[i].x;
-                let sy = self.hot_springs[i].y;
+            // 选 spread_count 个方向
+            for _ in 0..config.lava_spread_count {
+                let r: f64 = rng.gen_range(0.0..1.0);
+                let chosen_angle = directions
+                    .iter()
+                    .find(|(_, _, c)| *c >= r)
+                    .map(|(a, _, _)| *a)
+                    .unwrap_or(0.0);
 
-                for _ in 0..emit_count {
-                    let angle = rng.gen_range(0.0..std::f64::consts::TAU);
-                    // 线性分布：面密度从中心到外围自然递减
-                    let u: f64 = rng.gen_range(0.0_f64..1.0);
-                    let r = u * config.spring_radius;
-                    let x = sx + r * angle.cos();
-                    let y = sy + r * angle.sin();
-                    // 粒子能量随距离指数衰减：远处粒子能量低但可被感知
-                    let energy =
-                        config.spring_particle_energy * factor * (-r / config.spring_radius).exp();
-                    let energy_id = self.next_energy_id;
-                    self.next_energy_id += 1;
-                    self.energy_particles.push(EnergyParticle::new(
-                        energy_id,
-                        x,
-                        y,
-                        energy,
-                        f64::MAX,
-                        ParticleSource::Spring,
-                    ));
-                    self.energy_grid_dirty = true;
+                let new_x = px + 30.0 * chosen_angle.cos();
+                let new_y = py + 30.0 * chosen_angle.sin();
+
+                // 杀伤半径计算
+                let vdx = new_x - config.volcano_x;
+                let vdy = new_y - config.volcano_y;
+                let dist_to_volcano = (vdx * vdx + vdy * vdy).sqrt();
+                let kill_factor =
+                    (2.0 * (1.0 - dist_to_volcano / config.volcano_radius)).max(0.0);
+                let kill_r = config.volcano_kill_radius * kill_factor;
+                let kill_r2 = kill_r * kill_r;
+
+                let energy_id = self.next_energy_id;
+                self.next_energy_id += 1;
+                self.energy_particles.push(EnergyParticle::new_lava(
+                    energy_id,
+                    new_x,
+                    new_y,
+                    current_energy,
+                    depth + 1,
+                ));
+                self.energy_grid_dirty = true;
+
+                // 落地杀伤
+                if kill_r > 0.0 {
+                    for c in &mut self.creatures {
+                        if c.alive && c.energy > 0.0 {
+                            let dx = c.x - new_x;
+                            let dy = c.y - new_y;
+                            if dx * dx + dy * dy < kill_r2 {
+                                let damage = c.energy
+                                    * (1.0
+                                        - (-current_energy * config.landing_damage_multiplier
+                                            / c.energy)
+                                            .exp());
+                                c.energy = (c.energy - damage).max(0.0);
+                                if c.energy <= 0.0 {
+                                    c.alive = false;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1340,11 +1339,18 @@ impl World {
 
     fn update_energy_particles(&mut self, dt: f64, config: &Config) {
         for particle in &mut self.energy_particles {
-            let decay = match particle.source {
-                ParticleSource::Volcano => config.volcano_decay_rate,
-                ParticleSource::Spring => config.spring_decay_rate,
-            };
-            particle.update(dt, decay);
+            let was_alive = particle.alive;
+            particle.update(dt, config.volcano_decay_rate);
+            // 熔岩流粒子自然衰减死亡时入扩散队列
+            if was_alive
+                && !particle.alive
+                && particle.lava
+                && !particle.consumed
+                && particle.chain_depth < config.lava_max_chain_depth
+            {
+                self.lava_pending
+                    .push((particle.x, particle.y, particle.chain_depth));
+            }
         }
     }
 
@@ -1407,9 +1413,6 @@ impl World {
         if self.energy_particles.len() != old_energy_len {
             self.energy_grid_dirty = true;
         }
-        // 清理已死亡温泉（保留最近死亡的用于链式扩散锚点，超过寿命2倍的彻底移除）
-        self.hot_springs
-            .retain(|s| s.alive || s.age < s.lifetime * 2.0);
         if !self.trail_disabled {
             let old_trail_len = self.trail_points.len();
             self.trail_points.retain(|t| t.alive);
@@ -1458,29 +1461,16 @@ impl World {
             .filter(|e| e.alive)
             .map(|e| e.energy)
             .sum();
-        // 理论投放速率（能量/秒）：火山每秒投放 + 温泉每秒投放
+        // 理论投放速率（能量/秒）：火山每秒投放（含熔岩流）
         let volcano_interval = config.current_volcano_interval(self.time);
         let volcano_rate = if volcano_interval > 0.0 {
-            config.current_volcano_energy(self.time) * config.volcano_count as f64
+            let total_count = config.volcano_count + config.lava_count;
+            config.current_volcano_energy(self.time) * total_count as f64
                 / volcano_interval
         } else {
             0.0
         };
-        let spring_rate: f64 = if config.spring_emit_interval > 0.0 {
-            self.hot_springs
-                .iter()
-                .filter(|s| s.alive)
-                .map(|s| {
-                    config.spring_particle_energy
-                        * config.spring_emit_count as f64
-                        * s.output_factor()
-                        / config.spring_emit_interval
-                })
-                .sum()
-        } else {
-            0.0
-        };
-        let theoretical_energy = (volcano_rate + spring_rate) * 60.0; // 每分钟投放量
+        let theoretical_energy = volcano_rate * 60.0; // 每分钟投放量
         let trail_energy: f64 = self
             .trail_points
             .iter()

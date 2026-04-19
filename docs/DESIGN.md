@@ -475,17 +475,11 @@ volcano_interval_amplitude = 0.2
 volcano_energy_cycle = 1000.0
 volcano_energy_amplitude = 0.1
 
-# 温泉（动态出现/消失的次级能量源）
-spring_max_count = 9
-spring_spawn_interval = 25.0
-spring_lifetime = 901.0
-spring_emit_interval = 8.0
-spring_emit_count = 1
-spring_particle_energy = 200.0
-spring_radius = 175.0
-spring_decay_rate = 0.002
-spring_min_distance = 530.0
-spring_max_distance = 670.0
+# 熔岩流（火山附带的链式扩散粒子）
+lava_count = 3                # 每次火山喷发附带的熔岩流粒子数
+lava_spread_count = 2         # 死亡时扩散子代数
+lava_max_chain_depth = 5      # 最大链式代数
+lava_terrain_bias = 2.0       # 地形偏好强度（越大越走下坡）
 
 # 感知 / 嘴 / 战斗
 eye_scan_speed = 400.0       # 度/秒，扫描眼角速度
@@ -557,7 +551,7 @@ auto_spawn_interval = 45.0
 - [x] **7 维输出**：增加痕迹强度输出（输出 6）；喂食机制移除
 - [x] **散热模型重写**：旧 env_temp/group_heat 替换为 `heat_floor + (1-heat_floor)·exp(-nearby_energy/energy_denominator)`
 - [x] **变异率拆分**：`MutationGene { base, block }`，由生物自演化
-- [x] **温泉系统**：动态生成/消亡的次级能量源
+- [x] **熔岩流系统**：火山喷发附带链式扩散粒子，沿地形下坡扩散，杀伤半径随距火山中心距离衰减
 - [x] **算力换能量**：神经计算时长可转化为生物能量（compute_energy_factor）
 - [x] 多神经后端：CPU SNN / GPU SNN / legacy 直跑
 

@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 use crate::config::Config;
 use crate::neural::{Genome, SpikingNetwork};
 use crate::world::{
-    Creature, DeathAgeStats, DominantCandidate, EnergyParticle, HotSpring, SpatialGrid, TrailPoint,
+    Creature, DeathAgeStats, DominantCandidate, EnergyParticle, SpatialGrid, TrailPoint,
     World,
 };
 
@@ -35,13 +35,6 @@ pub struct WorldSnapshot {
     pub dominant_species: Vec<DominantCandidate>,
     /// 存档时的完整配置（恢复时使用，保证环境一致）
     pub config: Config,
-    // === 温泉 ===
-    #[serde(default)]
-    pub hot_springs: Vec<HotSpring>,
-    #[serde(default)]
-    pub spring_spawn_timer: f64,
-    #[serde(default)]
-    pub next_spring_id: u64,
 }
 
 impl WorldSnapshot {
@@ -80,9 +73,6 @@ impl WorldSnapshot {
             clan_genomes: world.clan_genomes().clone(),
             dominant_species: world.dominant_species.clone(),
             config: config.clone(),
-            hot_springs: world.hot_springs.clone(),
-            spring_spawn_timer: world.spring_spawn_timer(),
-            next_spring_id: world.next_spring_id(),
         }
     }
 
@@ -144,9 +134,6 @@ impl WorldSnapshot {
             trail_grid,
             self.world_time,
             self.volcano_timer,
-            self.hot_springs,
-            self.spring_spawn_timer,
-            self.next_spring_id,
             self.next_creature_id,
             self.next_energy_id,
             self.action_counts,

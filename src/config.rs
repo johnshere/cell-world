@@ -145,37 +145,19 @@ pub struct Config {
     #[serde(default)]
     pub meteorite_kill_radius: f64,
 
-    // === 温泉 ===
-    /// 温泉最大同时活跃数量
-    #[serde(default = "default_spring_max_count")]
-    pub spring_max_count: usize,
-    /// 温泉产生间隔（秒）
-    #[serde(default = "default_spring_spawn_interval")]
-    pub spring_spawn_interval: f64,
-    /// 温泉寿命（秒）
-    #[serde(default = "default_spring_lifetime")]
-    pub spring_lifetime: f64,
-    /// 温泉喷出粒子间隔（秒）
-    #[serde(default = "default_spring_emit_interval")]
-    pub spring_emit_interval: f64,
-    /// 温泉每次喷出粒子数
-    #[serde(default = "default_spring_emit_count")]
-    pub spring_emit_count: usize,
-    /// 温泉粒子能量
-    #[serde(default = "default_spring_particle_energy")]
-    pub spring_particle_energy: f64,
-    /// 温泉喷出半径（粒子散布范围）
-    #[serde(default = "default_spring_radius")]
-    pub spring_radius: f64,
-    /// 温泉粒子衰减率（/秒）
-    #[serde(default = "default_spring_decay_rate")]
-    pub spring_decay_rate: f64,
-    /// 新温泉与已有温泉最小间距
-    #[serde(default = "default_spring_min_distance")]
-    pub spring_min_distance: f64,
-    /// 新温泉出现的最大距离（从已有温泉/火山扩散）
-    #[serde(default = "default_spring_max_distance")]
-    pub spring_max_distance: f64,
+    // === 熔岩流 ===
+    /// 每次火山喷发附带的熔岩流粒子数
+    #[serde(default = "default_lava_count")]
+    pub lava_count: usize,
+    /// 熔岩粒子死亡时扩散子代数
+    #[serde(default = "default_lava_spread_count")]
+    pub lava_spread_count: usize,
+    /// 最大链式代数
+    #[serde(default = "default_lava_max_chain_depth")]
+    pub lava_max_chain_depth: u8,
+    /// 地形偏好强度（越大越走下坡）
+    #[serde(default = "default_lava_terrain_bias")]
+    pub lava_terrain_bias: f64,
     /// 落地最低伤害比例（已废弃，保留兼容旧config）
     #[serde(default)]
     pub min_landing_damage_ratio: f64,
@@ -260,35 +242,17 @@ fn default_follow_cost_discount() -> f64 {
     0.3
 }
 
-fn default_spring_max_count() -> usize {
-    5
-}
-fn default_spring_spawn_interval() -> f64 {
-    300.0
-}
-fn default_spring_lifetime() -> f64 {
-    600.0
-}
-fn default_spring_emit_interval() -> f64 {
-    1.0
-}
-fn default_spring_emit_count() -> usize {
+fn default_lava_count() -> usize {
     3
 }
-fn default_spring_particle_energy() -> f64 {
-    30.0
+fn default_lava_spread_count() -> usize {
+    2
 }
-fn default_spring_radius() -> f64 {
-    50.0
+fn default_lava_max_chain_depth() -> u8 {
+    5
 }
-fn default_spring_decay_rate() -> f64 {
-    0.01
-}
-fn default_spring_min_distance() -> f64 {
-    200.0
-}
-fn default_spring_max_distance() -> f64 {
-    600.0
+fn default_lava_terrain_bias() -> f64 {
+    2.0
 }
 
 fn default_snn_ticks_per_frame() -> usize {

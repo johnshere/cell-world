@@ -42,27 +42,15 @@ volcano_kill_radius = 35.0
 # 落地杀伤系数
 landing_damage_multiplier = 1.5
 
-# === 温泉 ===
-# 温泉最大同时活跃数量
-spring_max_count = 9
-# 温泉产生间隔（秒）
-spring_spawn_interval = 100.0
-# 温泉寿命（秒）
-spring_lifetime = 1150.0
-# 温泉喷出粒子间隔（秒）
-spring_emit_interval = 5.0
-# 温泉每次喷出粒子数
-spring_emit_count = 2
-# 温泉粒子能量
-spring_particle_energy = 170.0
-# 温泉喷出半径（粒子散布范围 px）
-spring_radius = 175.0
-# 温泉粒子衰减率（/秒）
-spring_decay_rate = 0.001
-# 新温泉与已有温泉最小间距（px）
-spring_min_distance = 530.0
-# 新温泉出现的最大距离（px）
-spring_max_distance = 670.0
+# === 熔岩流 ===
+# 每次火山喷发附带的熔岩流粒子数
+lava_count = 3
+# 熔岩粒子死亡时扩散子代数
+lava_spread_count = 2
+# 最大链式代数
+lava_max_chain_depth = 5
+# 地形偏好强度（越大越走下坡）
+lava_terrain_bias = 2.0
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃

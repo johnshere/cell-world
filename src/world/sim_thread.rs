@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use rustc_hash::FxHashMap;
 
-use super::{Creature, EnergyParticle, HotSpring, TerrainMap, TerrainParams, TrailPoint};
+use super::{Creature, EnergyParticle, TerrainMap, TerrainParams, TrailPoint};
 use crate::config::Config;
 use crate::neural::Genome;
 use crate::snapshot::WorldSnapshot;
@@ -23,7 +23,6 @@ pub struct SimSnapshot {
     pub creatures: Vec<Creature>,
     pub energy_particles: Vec<EnergyParticle>,
     pub trail_points: Vec<TrailPoint>,
-    pub hot_springs: Vec<HotSpring>,
     pub trail_disabled: bool,
 
     // 预计算统计
@@ -48,7 +47,6 @@ impl Default for SimSnapshot {
             creatures: Vec::new(),
             energy_particles: Vec::new(),
             trail_points: Vec::new(),
-            hot_springs: Vec::new(),
             trail_disabled: false,
             time: 0.0,
             perf_stats: PerfStats::default(),
@@ -302,7 +300,6 @@ fn export_snapshot(
         creatures: world.creatures.clone(),
         energy_particles: world.energy_particles.clone(),
         trail_points: world.trail_points.clone(),
-        hot_springs: world.hot_springs.clone(),
         trail_disabled: world.trail_disabled,
         time: world.time,
         perf_stats: world.perf_stats.clone(),
