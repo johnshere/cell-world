@@ -606,17 +606,23 @@ impl World {
 
                 for jump in 1..=(jump_limit as u32) {
                     // 候选位置 = 父粒子 + 方向 × seed_dist × jump
-                    let nx = px + dir_x * seed_dist * jump as f64;
-                    let ny = py + dir_y * seed_dist * jump as f64;
+                    let mut nx = px + dir_x * seed_dist * jump as f64;
+                    let mut ny = py + dir_y * seed_dist * jump as f64;
                     let mut dst_cx = (nx / GRID_WORLD_SIZE).floor() as i32;
                     let mut dst_cy = (ny / GRID_WORLD_SIZE).floor() as i32;
-                    let mut final_x = nx;
-                    let mut final_y = ny;
 
                     let crossed_chunk = dst_cx != parent_cx || dst_cy != parent_cy;
+                    let need_gradient = if crossed_chunk {
+                        // 跨区块 → 直接触发梯度下降
+                        true
+                    } else {
+                        // 未跨区块 → 满溢则触发梯度下降
+                        let count = chunk_count.get(&(dst_cx, dst_cy)).copied().unwrap_or(0);
+                        count >= cap
+                    };
 
-                    if crossed_chunk {
-                        // 跨区块 → 直接梯度下降：从上一个位置所在区块找周边最低
+                    if need_gradient {
+                        // 梯度下降：从上一跳位置所在区块找周边最低邻居
                         let prev_cx = if jump == 1 {
                             parent_cx
                         } else {
@@ -629,45 +635,30 @@ impl World {
                         };
                         let (best_cx, best_cy) =
                             Self::find_lowest_neighbor(terrain, prev_cx, prev_cy);
-                        dst_cx = best_cx;
-                        dst_cy = best_cy;
-                        // 最终位置 = 目标区块中心
-                        final_x = dst_cx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
-                        final_y = dst_cy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
-                        // 更新方向为梯度方向（后续跳沿此方向继续）
-                        let gdx = final_x - px;
-                        let gdy = final_y - py;
+                        // 更新方向 = 父粒子 → 最低邻居区块中心（仅取方向）
+                        let target_wx = best_cx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
+                        let target_wy = best_cy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
+                        let gdx = target_wx - px;
+                        let gdy = target_wy - py;
                         let glen = (gdx * gdx + gdy * gdy).sqrt().max(1.0);
                         dir_x = gdx / glen;
                         dir_y = gdy / glen;
-                    } else {
-                        // 未跨区块 → 先满溢判定，满了再梯度下降
-                        let count = chunk_count.get(&(dst_cx, dst_cy)).copied().unwrap_or(0);
-                        if count >= cap {
-                            let (best_cx, best_cy) =
-                                Self::find_lowest_neighbor(terrain, dst_cx, dst_cy);
-                            dst_cx = best_cx;
-                            dst_cy = best_cy;
-                            final_x = dst_cx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
-                            final_y = dst_cy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
-                            let gdx = final_x - px;
-                            let gdy = final_y - py;
-                            let glen = (gdx * gdx + gdy * gdy).sqrt().max(1.0);
-                            dir_x = gdx / glen;
-                            dir_y = gdy / glen;
-                        }
+                        // 沿新方向重新计算位置，保证距离 = seed_dist × jump
+                        nx = px + dir_x * seed_dist * jump as f64;
+                        ny = py + dir_y * seed_dist * jump as f64;
+                        dst_cx = (nx / GRID_WORLD_SIZE).floor() as i32;
+                        dst_cy = (ny / GRID_WORLD_SIZE).floor() as i32;
                     }
 
                     // 满溢判定（梯度下降后的目标区块也可能满）
                     let count = chunk_count.get(&(dst_cx, dst_cy)).copied().unwrap_or(0);
                     if count >= cap {
-                        // 满了 → 继续下一跳
                         continue;
                     }
 
                     // 超出火山半径 → 放弃
-                    let vdx = final_x - config.volcano_x;
-                    let vdy = final_y - config.volcano_y;
+                    let vdx = nx - config.volcano_x;
+                    let vdy = ny - config.volcano_y;
                     let dist_to_volcano = (vdx * vdx + vdy * vdy).sqrt();
                     if dist_to_volcano > config.volcano_radius {
                         break;
@@ -677,7 +668,7 @@ impl World {
                     let eid = self.next_energy_id;
                     self.next_energy_id += 1;
                     self.energy_particles.push(EnergyParticle::new_lava(
-                        eid, final_x, final_y, current_energy, depth + 1,
+                        eid, nx, ny, current_energy, depth + 1,
                     ));
                     self.energy_grid_dirty = true;
                     *chunk_count.entry((dst_cx, dst_cy)).or_insert(0) += 1;
@@ -690,8 +681,8 @@ impl World {
                         let kill_r2 = kill_r * kill_r;
                         for c in &mut self.creatures {
                             if c.alive && c.energy > 0.0 {
-                                let dx = c.x - final_x;
-                                let dy = c.y - final_y;
+                                let dx = c.x - nx;
+                                let dy = c.y - ny;
                                 if dx * dx + dy * dy < kill_r2 {
                                     let damage = c.energy
                                         * (1.0
