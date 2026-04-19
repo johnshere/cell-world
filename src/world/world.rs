@@ -567,8 +567,10 @@ impl World {
         }
     }
 
-    /// 处理熔岩流链式扩散（帧间延迟）
+    /// 处理熔岩流链式扩散（湖泊机制：chunk容量上限 + 梯度下降 + 两轮回退）
     fn process_lava_spread(&mut self, config: &Config) {
+        use super::terrain::GRID_WORLD_SIZE;
+
         if self.lava_pending.is_empty() {
             return;
         }
@@ -576,84 +578,116 @@ impl World {
         let mut rng = rand::thread_rng();
         let current_energy = config.current_volcano_energy(self.time);
 
+        // 1. 统计每个 chunk 当前的 lava 粒子数
+        let mut chunk_lava_count: FxHashMap<(i32, i32), usize> = FxHashMap::default();
+        for p in &self.energy_particles {
+            if p.alive && p.lava {
+                let cx = (p.x / GRID_WORLD_SIZE).floor() as i32;
+                let cy = (p.y / GRID_WORLD_SIZE).floor() as i32;
+                *chunk_lava_count.entry((cx, cy)).or_insert(0) += 1;
+            }
+        }
+
+        // 2. 计算 chunk 容量：基于地形高度
+        //    最低处 = base_capacity，最高处 = 1，线性插值
+        let (min_h, max_h) = if self.terrain.chunks.is_empty() {
+            (0i32, 1i32)
+        } else {
+            let mn = *self.terrain.chunks.values().min().unwrap_or(&0);
+            let mx = *self.terrain.chunks.values().max().unwrap_or(&1);
+            (mn, mx.max(mn + 1))
+        };
+        let range_h = (max_h - min_h) as f64;
+        let base_cap = config.lava_chunk_base_capacity;
+
+        let chunk_capacity = |cx: i32, cy: i32| -> usize {
+            let h = self.terrain.height_at(
+                cx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0,
+                cy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0,
+            ).unwrap_or(max_h) as f64;
+            let ratio = ((max_h as f64 - h) / range_h).clamp(0.0, 1.0);
+            (1.0 + ratio * (base_cap as f64 - 1.0)).round().max(1.0) as usize
+        };
+
         for (px, py, depth) in pending {
-            // 采样 8 方向的地形高度，计算权重
-            let current_h = self.terrain.height_at(px, py).unwrap_or(0) as f64;
-            let mut directions: Vec<(f64, f64, f64)> = Vec::with_capacity(8);
-            for i in 0..8 {
-                let angle = std::f64::consts::TAU * i as f64 / 8.0;
-                let tx = px + 30.0 * angle.cos();
-                let ty = py + 30.0 * angle.sin();
-                let target_h = self.terrain.height_at(tx, ty).unwrap_or(0) as f64;
-                let dh = target_h - current_h;
-                let weight = (-dh * config.lava_terrain_bias).exp();
-                directions.push((angle, weight, 0.0));
-            }
-
-            // 归一化权重
-            let total_weight: f64 = directions.iter().map(|(_, w, _)| *w).sum();
-            if total_weight <= 0.0 {
-                continue;
-            }
-            // 累积分布
-            let mut cumulative = 0.0;
-            for d in &mut directions {
-                cumulative += d.1 / total_weight;
-                d.2 = cumulative;
-            }
-
-            // 选 spread_count 个方向
             for _ in 0..config.lava_spread_count {
-                let r: f64 = rng.gen_range(0.0..1.0);
-                let chosen_angle = directions
-                    .iter()
-                    .find(|(_, _, c)| *c >= r)
-                    .map(|(a, _, _)| *a)
-                    .unwrap_or(0.0);
+                let mut placed = false;
 
-                let new_x = px + 30.0 * chosen_angle.cos();
-                let new_y = py + 30.0 * chosen_angle.sin();
+                // 两轮尝试：30px → 60px
+                for &step in &[30.0_f64, 60.0] {
+                    // 采样 8 方向，按地形权重排序（优先下坡）
+                    let current_h = self.terrain.height_at(px, py).unwrap_or(0) as f64;
+                    let mut candidates: Vec<(f64, f64, f64)> = Vec::with_capacity(8);
+                    for i in 0..8 {
+                        let angle = std::f64::consts::TAU * i as f64 / 8.0;
+                        let tx = px + step * angle.cos();
+                        let ty = py + step * angle.sin();
+                        let target_h = self.terrain.height_at(tx, ty).unwrap_or(0) as f64;
+                        let dh = target_h - current_h;
+                        let weight = (-dh * config.lava_terrain_bias).exp();
+                        candidates.push((tx, ty, weight));
+                    }
+                    // 按权重降序排列（最优先 = 最低处）
+                    candidates.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
-                // 杀伤半径计算
-                let vdx = new_x - config.volcano_x;
-                let vdy = new_y - config.volcano_y;
-                let dist_to_volcano = (vdx * vdx + vdy * vdy).sqrt();
-                let kill_factor =
-                    (2.0 * (1.0 - dist_to_volcano / config.volcano_radius)).max(0.0);
-                let kill_r = config.volcano_kill_radius * kill_factor;
-                let kill_r2 = kill_r * kill_r;
+                    for &(tx, ty, _) in &candidates {
+                        let tcx = (tx / GRID_WORLD_SIZE).floor() as i32;
+                        let tcy = (ty / GRID_WORLD_SIZE).floor() as i32;
+                        let cap = chunk_capacity(tcx, tcy);
+                        let count = chunk_lava_count.get(&(tcx, tcy)).copied().unwrap_or(0);
+                        if count >= cap {
+                            continue; // chunk 已满
+                        }
 
-                let energy_id = self.next_energy_id;
-                self.next_energy_id += 1;
-                self.energy_particles.push(EnergyParticle::new_lava(
-                    energy_id,
-                    new_x,
-                    new_y,
-                    current_energy,
-                    depth + 1,
-                ));
-                self.energy_grid_dirty = true;
+                        // 超出火山半径 → 不放
+                        let vdx = tx - config.volcano_x;
+                        let vdy = ty - config.volcano_y;
+                        let dist_to_volcano = (vdx * vdx + vdy * vdy).sqrt();
+                        if dist_to_volcano > config.volcano_radius {
+                            continue;
+                        }
 
-                // 落地杀伤
-                if kill_r > 0.0 {
-                    for c in &mut self.creatures {
-                        if c.alive && c.energy > 0.0 {
-                            let dx = c.x - new_x;
-                            let dy = c.y - new_y;
-                            if dx * dx + dy * dy < kill_r2 {
-                                let damage = c.energy
-                                    * (1.0
-                                        - (-current_energy * config.landing_damage_multiplier
-                                            / c.energy)
-                                            .exp());
-                                c.energy = (c.energy - damage).max(0.0);
-                                if c.energy <= 0.0 {
-                                    c.alive = false;
+                        // 放置粒子
+                        let energy_id = self.next_energy_id;
+                        self.next_energy_id += 1;
+                        self.energy_particles.push(EnergyParticle::new_lava(
+                            energy_id, tx, ty, current_energy, depth + 1,
+                        ));
+                        self.energy_grid_dirty = true;
+                        *chunk_lava_count.entry((tcx, tcy)).or_insert(0) += 1;
+
+                        // 落地杀伤
+                        let kill_factor = (2.0 * (1.0 - dist_to_volcano / config.volcano_radius)).max(0.0);
+                        let kill_r = config.volcano_kill_radius * kill_factor;
+                        if kill_r > 0.0 {
+                            let kill_r2 = kill_r * kill_r;
+                            for c in &mut self.creatures {
+                                if c.alive && c.energy > 0.0 {
+                                    let dx = c.x - tx;
+                                    let dy = c.y - ty;
+                                    if dx * dx + dy * dy < kill_r2 {
+                                        let damage = c.energy
+                                            * (1.0
+                                                - (-current_energy * config.landing_damage_multiplier
+                                                    / c.energy)
+                                                    .exp());
+                                        c.energy = (c.energy - damage).max(0.0);
+                                        if c.energy <= 0.0 {
+                                            c.alive = false;
+                                        }
+                                    }
                                 }
                             }
                         }
+
+                        placed = true;
+                        break;
+                    }
+                    if placed {
+                        break;
                     }
                 }
+                // 两轮都满 → 放弃此子粒子
             }
         }
     }
@@ -1343,7 +1377,8 @@ impl World {
 
         for particle in &mut self.energy_particles {
             let was_alive = particle.alive;
-            particle.update(dt, config.volcano_decay_rate);
+            let decay = if particle.lava { config.lava_decay_rate } else { config.volcano_decay_rate };
+            particle.update(dt, decay);
 
             // 熔岩粒子周期性杀伤
             if particle.alive && particle.lava {

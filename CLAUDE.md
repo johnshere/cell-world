@@ -98,7 +98,7 @@ cargo clippy          # 代码检查
   - 对比旧方案：从每 tick 1 次 readback + spin_loop → 每批 1 次 readback + Wait，CPU↔GPU 同步开销 10×
 - **面板速度**: 同步批处理模型下只有单一"FPS: X | 速度: Nx"显示。历史上的"神经/世界"双值已移除（反压已删除）
 - **无限世界**: 无边界，视窗可自由拖拽缩放
-- **火山 + 熔岩流**: 火山定期喷发；间隔和能量均受正弦周期调制（模拟季节）。每次喷发额外产生熔岩流粒子（lava_count），这些粒子自然衰减死亡时链式扩散出子代粒子（lava_spread_count），扩散方向受地形引导（下坡优先），最大 lava_max_chain_depth 代。被吃的熔岩粒子不扩散。杀伤半径 = volcano_kill_radius × max(0, 2×(1-dist/radius))，火山口2倍、边缘归零
+- **火山 + 熔岩流**: 火山定期喷发；间隔和能量均受正弦周期调制（模拟季节）。每次喷发额外产生熔岩流粒子（lava_count），使用独立衰减率（lava_decay_rate）。自然衰减死亡时链式扩散子代（lava_spread_count），被吃不扩散。扩散采用湖泊机制：梯度下降（下坡优先）+ chunk容量上限（低地容量大、高地容量小，base=lava_chunk_base_capacity），满则扩大搜索距离（30px→60px），全满则放弃。周期性杀伤：火山口 1s/次、边缘 30s/次（lava_kill_base_interval × (1 + dist_ratio × lava_kill_distance_scale)）。杀伤半径 = volcano_kill_radius × max(0, 2×(1-dist/radius))，火山口2倍、边缘归零
 - **感知系统（扫描眼）**:
   - 双眼窄波束逐帧扫描（280°/s），140° 全 FOV，探测距离=vision_range
   - 左眼从 heading+20° 逆时针扫，右眼从 heading-20° 顺时针扫

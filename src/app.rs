@@ -1187,6 +1187,27 @@ impl CellWorldApp {
                     1.0,
                     0.0..=50.0,
                 );
+                changed |= config_drag_f64(
+                    ui,
+                    "熔岩衰减率",
+                    "熔岩粒子独立衰减率(/秒)",
+                    &mut c.lava_decay_rate,
+                    0.001,
+                    0.0001..=0.1,
+                );
+                {
+                    let mut cap = c.lava_chunk_base_capacity;
+                    if config_drag_usize(
+                        ui,
+                        "Chunk容量上限",
+                        "最低处chunk的lava容量上限",
+                        &mut cap,
+                        1..=50,
+                    ) {
+                        c.lava_chunk_base_capacity = cap;
+                        changed = true;
+                    }
+                }
             });
 
             if changed {
