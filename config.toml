@@ -1,7 +1,7 @@
 # 初始模拟速度
 initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 30
+min_creatures = 20
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 450
 # 初始能量
@@ -38,7 +38,7 @@ volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 40.0
+volcano_kill_radius = 35.0
 # 落地杀伤系数
 landing_damage_multiplier = 1.5
 
@@ -163,7 +163,7 @@ auto_spawn_interval = 30.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
-terrain_slope_cost = 5.5
+terrain_slope_cost = 7.0
 # 地形海拔阻力系数（远离舒适带的开销倍率，0=禁用）
-terrain_altitude_cost = 12.0
-comfort_height = 38.0
+terrain_altitude_cost = 20.0
+comfort_height = 13.0
