@@ -172,7 +172,12 @@ impl WorldCanvas {
                 }
                 // 基础粒子 → 四边形加入批量 Mesh（微粒与圆无视觉差异）
                 let alpha = (particle.energy / particle.initial_energy).clamp(0.0, 1.0) as f32;
-                let color = Color32::from_rgba_unmultiplied(255, 220, 100, (alpha * 200.0) as u8);
+                let color = if particle.lava {
+                    // 熔岩流粒子：橙红色
+                    Color32::from_rgba_unmultiplied(255, 100, 30, (alpha * 220.0) as u8)
+                } else {
+                    Color32::from_rgba_unmultiplied(255, 220, 100, (alpha * 200.0) as u8)
+                };
                 let r = 1.064 * self.scale;
                 add_quad(&mut mesh, pos, r, color, white_uv);
 

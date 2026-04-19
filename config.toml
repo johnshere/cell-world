@@ -51,6 +51,8 @@ lava_spread_count = 2
 lava_max_chain_depth = 5
 # 地形偏好强度（越大越走下坡）
 lava_terrain_bias = 2.0
+# 熔岩粒子硬寿命（秒，到期强制死亡触发扩散）
+lava_lifetime = 45.0
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃

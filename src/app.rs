@@ -1171,6 +1171,14 @@ impl CellWorldApp {
                     0.1,
                     0.0..=10.0,
                 );
+                changed |= config_drag_f64(
+                    ui,
+                    "硬寿命",
+                    "到期强制死亡触发扩散(秒)",
+                    &mut c.lava_lifetime,
+                    1.0,
+                    5.0..=300.0,
+                );
             });
 
             if changed {

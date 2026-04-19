@@ -539,7 +539,7 @@ impl World {
             let energy_id = self.next_energy_id;
             self.next_energy_id += 1;
             self.energy_particles
-                .push(EnergyParticle::new_lava(energy_id, x, y, current_energy, 0));
+                .push(EnergyParticle::new_lava(energy_id, x, y, current_energy, 0, config.lava_lifetime));
             self.energy_grid_dirty = true;
             // 熔岩流落地杀伤（火山口附近，系数=2）
             let dist_to_volcano = r; // 已在火山口附近
@@ -631,6 +631,7 @@ impl World {
                     new_y,
                     current_energy,
                     depth + 1,
+                    config.lava_lifetime,
                 ));
                 self.energy_grid_dirty = true;
 

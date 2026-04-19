@@ -68,6 +68,7 @@ impl EnergyParticle {
         y: f64,
         energy: f64,
         chain_depth: u8,
+        lifetime: f64,
     ) -> Self {
         Self {
             id,
@@ -75,7 +76,7 @@ impl EnergyParticle {
             y,
             energy,
             initial_energy: energy,
-            lifetime: f64::MAX,
+            lifetime,
             age: 0.0,
             alive: true,
             source: ParticleSource::Volcano,
