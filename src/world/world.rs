@@ -567,7 +567,7 @@ impl World {
         }
     }
 
-    /// 处理熔岩流链式扩散（每步 40px，跨 chunk 时梯度下降 + 容量检查，满溢最多 5 跳）
+    /// 处理熔岩流链式扩散（每跳 40px 梯度下降 + chunk 容量检查，最多 5 跳）
     fn process_lava_spread(&mut self, config: &Config) {
         use super::terrain::GRID_WORLD_SIZE;
         const STEP: f64 = 40.0;
@@ -593,118 +593,92 @@ impl World {
 
         for (px, py, depth) in pending {
             'spread: for _ in 0..config.lava_spread_count {
-                // 采样 8 方向地形，选梯度下降方向（权重最大 = 最低处）
-                let cur_h = terrain.height_at(px, py).unwrap_or(0) as f64;
-                let mut best_angle = 0.0_f64;
-                let mut best_weight = f64::NEG_INFINITY;
-                for i in 0..8 {
-                    let angle = std::f64::consts::TAU * i as f64 / 8.0;
-                    let tx = px + STEP * angle.cos();
-                    let ty = py + STEP * angle.sin();
-                    let th = terrain.height_at(tx, ty).unwrap_or(0) as f64;
-                    let dh = th - cur_h;
-                    let w = (-dh * config.lava_terrain_bias).exp();
-                    if w > best_weight {
-                        best_weight = w;
-                        best_angle = angle;
-                    }
-                }
+                let mut pos_x = px;
+                let mut pos_y = py;
 
-                // 计算目标位置（父粒子 + 40px 偏移）
-                let mut nx = px + STEP * best_angle.cos();
-                let mut ny = py + STEP * best_angle.sin();
-
-                // 检查是否跨入新 chunk
-                let src_cx = (px / GRID_WORLD_SIZE).floor() as i32;
-                let src_cy = (py / GRID_WORLD_SIZE).floor() as i32;
-                let mut dst_cx = (nx / GRID_WORLD_SIZE).floor() as i32;
-                let mut dst_cy = (ny / GRID_WORLD_SIZE).floor() as i32;
-
-                if dst_cx != src_cx || dst_cy != src_cy {
-                    // 跨 chunk：检查容量，满则满溢
-                    let mut cur_cx = src_cx;
-                    let mut cur_cy = src_cy;
-
-                    for _ in 0..5 {
-                        let count = chunk_lava_count.get(&(dst_cx, dst_cy)).copied().unwrap_or(0);
-                        if count < cap {
-                            break; // 目标有容量，放置
+                for _ in 0..5 {
+                    // 从 pos 所在 chunk 找 8 邻居中地形最低的 chunk
+                    let cur_cx = (pos_x / GRID_WORLD_SIZE).floor() as i32;
+                    let cur_cy = (pos_y / GRID_WORLD_SIZE).floor() as i32;
+                    let mut best_cx = cur_cx;
+                    let mut best_cy = cur_cy;
+                    let mut lowest_h = i32::MAX;
+                    for &(ddx, ddy) in &[(-1i32,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)] {
+                        let ncx = cur_cx + ddx;
+                        let ncy = cur_cy + ddy;
+                        let wx = ncx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
+                        let wy = ncy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
+                        let h = terrain.height_at(wx, wy).unwrap_or(i32::MAX);
+                        if h < lowest_h {
+                            lowest_h = h;
+                            best_cx = ncx;
+                            best_cy = ncy;
                         }
-                        // 目标满 → 从目标 chunk 找其 8 邻居中最低的
-                        cur_cx = dst_cx;
-                        cur_cy = dst_cy;
-                        let mut best_ncx = cur_cx;
-                        let mut best_ncy = cur_cy;
-                        let mut lowest_h = i32::MAX;
-                        for &(ddx, ddy) in &[(-1i32,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)] {
-                            let ccx = cur_cx + ddx;
-                            let ccy = cur_cy + ddy;
-                            let wx = ccx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
-                            let wy = ccy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
-                            let h = terrain.height_at(wx, wy).unwrap_or(i32::MAX);
-                            if h < lowest_h {
-                                lowest_h = h;
-                                best_ncx = ccx;
-                                best_ncy = ccy;
-                            }
-                        }
-                        if best_ncx == cur_cx && best_ncy == cur_cy {
-                            break; // 无更低邻居
-                        }
-                        dst_cx = best_ncx;
-                        dst_cy = best_ncy;
-                        // 更新放置位置为新 chunk 中心偏移
-                        nx = dst_cx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
-                        ny = dst_cy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
                     }
 
-                    // 最终检查容量
+                    // 方向 = pos → 最低邻居 chunk 中心，归一化后偏移 40px
+                    let target_wx = best_cx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
+                    let target_wy = best_cy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
+                    let ddx = target_wx - pos_x;
+                    let ddy = target_wy - pos_y;
+                    let dist = (ddx * ddx + ddy * ddy).sqrt().max(1.0);
+                    let nx = pos_x + STEP * ddx / dist;
+                    let ny = pos_y + STEP * ddy / dist;
+
+                    // 检查 new_pos 所在 chunk 容量
+                    let dst_cx = (nx / GRID_WORLD_SIZE).floor() as i32;
+                    let dst_cy = (ny / GRID_WORLD_SIZE).floor() as i32;
                     let count = chunk_lava_count.get(&(dst_cx, dst_cy)).copied().unwrap_or(0);
                     if count >= cap {
-                        continue 'spread; // 全满，放弃
+                        // 满了，从 new_pos 继续下一跳
+                        pos_x = nx;
+                        pos_y = ny;
+                        continue;
                     }
-                }
 
-                // 超出火山半径 → 不放
-                let vdx = nx - config.volcano_x;
-                let vdy = ny - config.volcano_y;
-                let dist_to_volcano = (vdx * vdx + vdy * vdy).sqrt();
-                if dist_to_volcano > config.volcano_radius {
-                    continue 'spread;
-                }
+                    // 超出火山半径 → 放弃
+                    let vdx = nx - config.volcano_x;
+                    let vdy = ny - config.volcano_y;
+                    let dist_to_volcano = (vdx * vdx + vdy * vdy).sqrt();
+                    if dist_to_volcano > config.volcano_radius {
+                        break;
+                    }
 
-                // 放置粒子
-                let eid = self.next_energy_id;
-                self.next_energy_id += 1;
-                self.energy_particles.push(EnergyParticle::new_lava(
-                    eid, nx, ny, current_energy, depth + 1,
-                ));
-                self.energy_grid_dirty = true;
-                *chunk_lava_count.entry((dst_cx, dst_cy)).or_insert(0) += 1;
+                    // 放置粒子
+                    let eid = self.next_energy_id;
+                    self.next_energy_id += 1;
+                    self.energy_particles.push(EnergyParticle::new_lava(
+                        eid, nx, ny, current_energy, depth + 1,
+                    ));
+                    self.energy_grid_dirty = true;
+                    *chunk_lava_count.entry((dst_cx, dst_cy)).or_insert(0) += 1;
 
-                // 落地杀伤
-                let kill_factor = (2.0 * (1.0 - dist_to_volcano / config.volcano_radius)).max(0.0);
-                let kill_r = config.volcano_kill_radius * kill_factor;
-                if kill_r > 0.0 {
-                    let kill_r2 = kill_r * kill_r;
-                    for c in &mut self.creatures {
-                        if c.alive && c.energy > 0.0 {
-                            let dx = c.x - nx;
-                            let dy = c.y - ny;
-                            if dx * dx + dy * dy < kill_r2 {
-                                let damage = c.energy
-                                    * (1.0
-                                        - (-current_energy * config.landing_damage_multiplier
-                                            / c.energy)
-                                            .exp());
-                                c.energy = (c.energy - damage).max(0.0);
-                                if c.energy <= 0.0 {
-                                    c.alive = false;
+                    // 落地杀伤
+                    let kill_factor = (2.0 * (1.0 - dist_to_volcano / config.volcano_radius)).max(0.0);
+                    let kill_r = config.volcano_kill_radius * kill_factor;
+                    if kill_r > 0.0 {
+                        let kill_r2 = kill_r * kill_r;
+                        for c in &mut self.creatures {
+                            if c.alive && c.energy > 0.0 {
+                                let dx = c.x - nx;
+                                let dy = c.y - ny;
+                                if dx * dx + dy * dy < kill_r2 {
+                                    let damage = c.energy
+                                        * (1.0
+                                            - (-current_energy * config.landing_damage_multiplier
+                                                / c.energy)
+                                                .exp());
+                                    c.energy = (c.energy - damage).max(0.0);
+                                    if c.energy <= 0.0 {
+                                        c.alive = false;
+                                    }
                                 }
                             }
                         }
                     }
+                    continue 'spread;
                 }
+                // 5 跳都满 → 放弃
             }
         }
     }
