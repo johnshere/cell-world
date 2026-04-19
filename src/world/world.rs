@@ -567,7 +567,7 @@ impl World {
         }
     }
 
-    /// 处理熔岩流链式扩散（湖泊机制：chunk容量上限 + 梯度下降 + 两轮回退）
+    /// 处理熔岩流链式扩散（湖泊满溢机制：梯度下降 → 目标满则从目标继续找最低邻居）
     fn process_lava_spread(&mut self, config: &Config) {
         use super::terrain::GRID_WORLD_SIZE;
 
@@ -575,7 +575,6 @@ impl World {
             return;
         }
         let pending: Vec<_> = std::mem::take(&mut self.lava_pending);
-        let mut rng = rand::thread_rng();
         let current_energy = config.current_volcano_energy(self.time);
 
         // 1. 统计每个 chunk 当前的 lava 粒子数
@@ -588,8 +587,7 @@ impl World {
             }
         }
 
-        // 2. 计算 chunk 容量：基于地形高度
-        //    最低处 = base_capacity，最高处 = 1，线性插值
+        // 2. chunk 容量：基于地形高度（最低处 = base_capacity，最高处 = 1）
         let (min_h, max_h) = if self.terrain.chunks.is_empty() {
             (0i32, 1i32)
         } else {
@@ -600,6 +598,7 @@ impl World {
         let range_h = (max_h - min_h) as f64;
         let base_cap = config.lava_chunk_base_capacity;
 
+        // chunk 坐标 → 容量
         let chunk_capacity = |cx: i32, cy: i32| -> usize {
             let h = self.terrain.height_at(
                 cx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0,
@@ -609,85 +608,112 @@ impl World {
             (1.0 + ratio * (base_cap as f64 - 1.0)).round().max(1.0) as usize
         };
 
+        // 找 (cx,cy) 周围 8 邻居，按地形高度升序排列
+        let terrain = &self.terrain;
+        let neighbors_by_height = |cx: i32, cy: i32| -> Vec<(i32, i32, f64, f64, i32)> {
+            let mut nb = Vec::with_capacity(8);
+            for &(dx, dy) in &[(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)] {
+                let nx = cx + dx;
+                let ny = cy + dy;
+                let wx = nx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
+                let wy = ny as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
+                let h = terrain.height_at(wx, wy).unwrap_or(max_h);
+                nb.push((nx, ny, wx, wy, h));
+            }
+            nb.sort_by_key(|t| t.4); // 按高度升序
+            nb
+        };
+
         for (px, py, depth) in pending {
-            for _ in 0..config.lava_spread_count {
-                let mut placed = false;
+            'spread: for _ in 0..config.lava_spread_count {
+                let src_cx = (px / GRID_WORLD_SIZE).floor() as i32;
+                let src_cy = (py / GRID_WORLD_SIZE).floor() as i32;
+                let mut cur_cx = src_cx;
+                let mut cur_cy = src_cy;
 
-                // 两轮尝试：30px → 60px
-                for &step in &[30.0_f64, 60.0] {
-                    // 采样 8 方向，按地形权重排序（优先下坡）
-                    let current_h = self.terrain.height_at(px, py).unwrap_or(0) as f64;
-                    let mut candidates: Vec<(f64, f64, f64)> = Vec::with_capacity(8);
-                    for i in 0..8 {
-                        let angle = std::f64::consts::TAU * i as f64 / 8.0;
-                        let tx = px + step * angle.cos();
-                        let ty = py + step * angle.sin();
-                        let target_h = self.terrain.height_at(tx, ty).unwrap_or(0) as f64;
-                        let dh = target_h - current_h;
-                        let weight = (-dh * config.lava_terrain_bias).exp();
-                        candidates.push((tx, ty, weight));
-                    }
-                    // 按权重降序排列（最优先 = 最低处）
-                    candidates.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+                // 最多 5 跳满溢：每跳找当前 chunk 邻居中未满且最低的
+                for _ in 0..5 {
+                    let nbs = neighbors_by_height(cur_cx, cur_cy);
+                    let mut overflow_next: Option<(i32, i32)> = None;
 
-                    for &(tx, ty, _) in &candidates {
-                        let tcx = (tx / GRID_WORLD_SIZE).floor() as i32;
-                        let tcy = (ty / GRID_WORLD_SIZE).floor() as i32;
-                        let cap = chunk_capacity(tcx, tcy);
-                        let count = chunk_lava_count.get(&(tcx, tcy)).copied().unwrap_or(0);
-                        if count >= cap {
-                            continue; // chunk 已满
-                        }
-
-                        // 超出火山半径 → 不放
-                        let vdx = tx - config.volcano_x;
-                        let vdy = ty - config.volcano_y;
+                    for &(ncx, ncy, wx, wy, _h) in &nbs {
+                        let vdx = wx - config.volcano_x;
+                        let vdy = wy - config.volcano_y;
                         let dist_to_volcano = (vdx * vdx + vdy * vdy).sqrt();
                         if dist_to_volcano > config.volcano_radius {
                             continue;
                         }
-
-                        // 放置粒子
-                        let energy_id = self.next_energy_id;
-                        self.next_energy_id += 1;
-                        self.energy_particles.push(EnergyParticle::new_lava(
-                            energy_id, tx, ty, current_energy, depth + 1,
-                        ));
-                        self.energy_grid_dirty = true;
-                        *chunk_lava_count.entry((tcx, tcy)).or_insert(0) += 1;
-
-                        // 落地杀伤
-                        let kill_factor = (2.0 * (1.0 - dist_to_volcano / config.volcano_radius)).max(0.0);
-                        let kill_r = config.volcano_kill_radius * kill_factor;
-                        if kill_r > 0.0 {
-                            let kill_r2 = kill_r * kill_r;
-                            for c in &mut self.creatures {
-                                if c.alive && c.energy > 0.0 {
-                                    let dx = c.x - tx;
-                                    let dy = c.y - ty;
-                                    if dx * dx + dy * dy < kill_r2 {
-                                        let damage = c.energy
-                                            * (1.0
-                                                - (-current_energy * config.landing_damage_multiplier
-                                                    / c.energy)
-                                                    .exp());
-                                        c.energy = (c.energy - damage).max(0.0);
-                                        if c.energy <= 0.0 {
-                                            c.alive = false;
-                                        }
-                                    }
-                                }
+                        let cap = chunk_capacity(ncx, ncy);
+                        let count = chunk_lava_count.get(&(ncx, ncy)).copied().unwrap_or(0);
+                        if count >= cap {
+                            if overflow_next.is_none() {
+                                overflow_next = Some((ncx, ncy));
                             }
+                            continue;
                         }
-
-                        placed = true;
-                        break;
+                        // 找到未满的 → 放置
+                        Self::place_lava(
+                            &mut self.energy_particles, &mut self.next_energy_id,
+                            &mut self.creatures, &mut chunk_lava_count,
+                            &mut self.energy_grid_dirty,
+                            ncx, ncy, wx, wy, current_energy, depth,
+                            dist_to_volcano, config,
+                        );
+                        continue 'spread;
                     }
-                    if placed {
-                        break;
+
+                    // 本轮全满 → 从最低满 chunk 继续满溢
+                    match overflow_next {
+                        Some((ocx, ocy)) => {
+                            cur_cx = ocx;
+                            cur_cy = ocy;
+                        }
+                        None => break, // 所有邻居都超出火山半径
                     }
                 }
-                // 两轮都满 → 放弃此子粒子
+                // 5 跳都满 → 放弃
+            }
+        }
+    }
+
+    /// 放置一个熔岩粒子并执行落地杀伤
+    #[allow(clippy::too_many_arguments)]
+    fn place_lava(
+        particles: &mut Vec<EnergyParticle>,
+        next_id: &mut u64,
+        creatures: &mut [Creature],
+        chunk_lava_count: &mut FxHashMap<(i32, i32), usize>,
+        grid_dirty: &mut bool,
+        tcx: i32, tcy: i32, wx: f64, wy: f64,
+        energy: f64, depth: u8,
+        dist_to_volcano: f64, config: &Config,
+    ) {
+        let eid = *next_id;
+        *next_id += 1;
+        particles.push(EnergyParticle::new_lava(eid, wx, wy, energy, depth + 1));
+        *grid_dirty = true;
+        *chunk_lava_count.entry((tcx, tcy)).or_insert(0) += 1;
+
+        let kill_factor = (2.0 * (1.0 - dist_to_volcano / config.volcano_radius)).max(0.0);
+        let kill_r = config.volcano_kill_radius * kill_factor;
+        if kill_r > 0.0 {
+            let kill_r2 = kill_r * kill_r;
+            for c in creatures.iter_mut() {
+                if c.alive && c.energy > 0.0 {
+                    let dx = c.x - wx;
+                    let dy = c.y - wy;
+                    if dx * dx + dy * dy < kill_r2 {
+                        let damage = c.energy
+                            * (1.0
+                                - (-energy * config.landing_damage_multiplier
+                                    / c.energy)
+                                    .exp());
+                        c.energy = (c.energy - damage).max(0.0);
+                        if c.energy <= 0.0 {
+                            c.alive = false;
+                        }
+                    }
+                }
             }
         }
     }
