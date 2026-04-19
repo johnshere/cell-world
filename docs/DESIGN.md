@@ -65,10 +65,8 @@
 3. 死亡条件：能量 ≤ 0 → 死亡
 4. 能量守恒：移动消耗 → 痕迹点能量
 5. 落地杀伤：火山/陨石粒子下落时砸死附近生物
-6. 地形阻力（仅当地形已生成）：移动消耗 ×= slope_factor × altitude_factor
-   - slope_factor = 1 + max(dh/distance, 0) × terrain_slope_cost  （上坡加倍开销，下坡不补贴）
-   - altitude_factor = 1 + |h - comfort_height| / range × terrain_altitude_cost  （远离舒适高度加倍开销）
-   - comfort_height 由 config.comfort_height 配置（不再预计算）
+6. 地形阻力（仅当地形已生成）：移动消耗 ×= 1 + max(dh/distance, 0) × terrain_slope_cost
+   - 上坡加倍开销，下坡不补贴
    - 地形未生成或所在 chunk 无数据时因子 = 1.0
 ```
 
@@ -479,9 +477,8 @@ volcano_energy_amplitude = 0.1
 lava_count = 3                # 每次火山喷发附带的熔岩流粒子数
 lava_spread_count = 2         # 死亡时扩散子代数
 lava_max_chain_depth = 5      # 最大链式代数
-lava_jump_limit = 5           # 扩散满溢时最大跳跃次数
+lava_level_per_particle = 0.5 # 每个粒子贡献的等效液面高度
 lava_decay_rate = 0.005       # 熔岩粒子独立衰减率（/秒）
-lava_chunk_capacity = 8       # 区块粒子容量上限（不区分类型）
 
 # 感知 / 嘴 / 战斗
 eye_scan_speed = 400.0       # 度/秒，扫描眼角速度

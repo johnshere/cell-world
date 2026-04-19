@@ -676,22 +676,6 @@ impl CellWorldApp {
                     0.1,
                     0.0..=10.0,
                 );
-                changed |= config_drag_f64(
-                    ui,
-                    "地形海拔阻力",
-                    "远离舒适高度惩罚: move_cost*=1+|h-舒适|/range*此值",
-                    &mut c.terrain_altitude_cost,
-                    0.05,
-                    0.0..=20.0,
-                );
-                changed |= config_drag_f64(
-                    ui,
-                    "舒适高度",
-                    "海拔阻力的参考高度",
-                    &mut c.comfort_height,
-                    1.0,
-                    0.0..=200.0,
-                );
             });
 
             ui.collapsing("感知系统", |ui| {
@@ -1163,19 +1147,14 @@ impl CellWorldApp {
                         changed = true;
                     }
                 }
-                {
-                    let mut jl = c.lava_jump_limit;
-                    if config_drag_usize(
-                        ui,
-                        "跳跃次数",
-                        "扩散满溢时最大跳跃次数",
-                        &mut jl,
-                        1..=20,
-                    ) {
-                        c.lava_jump_limit = jl;
-                        changed = true;
-                    }
-                }
+                changed |= config_drag_f64(
+                    ui,
+                    "液面系数",
+                    "每个粒子贡献的等效液面高度",
+                    &mut c.lava_level_per_particle,
+                    0.01,
+                    0.01..=2.0,
+                );
                 changed |= config_drag_f64(
                     ui,
                     "杀伤基础间隔",
@@ -1200,19 +1179,6 @@ impl CellWorldApp {
                     0.001,
                     0.0001..=0.1,
                 );
-                {
-                    let mut cap = c.lava_chunk_capacity;
-                    if config_drag_usize(
-                        ui,
-                        "区块容量上限",
-                        "每个区块最多粒子数(不区分类型)",
-                        &mut cap,
-                        1..=50,
-                    ) {
-                        c.lava_chunk_capacity = cap;
-                        changed = true;
-                    }
-                }
             });
 
             if changed {

@@ -49,16 +49,14 @@ lava_count = 4
 lava_spread_count = 2
 # 最大链式代数
 lava_max_chain_depth = 35
-# 扩散满溢时最大跳跃次数
-lava_jump_limit = 8
+# 每个粒子贡献的等效液面高度
+lava_level_per_particle = 0.5
 # 熔岩粒子周期性杀伤基础间隔（秒，火山口处）
 lava_kill_base_interval = 1.5
 # 距离对杀伤周期的放大系数
 lava_kill_distance_scale = 15.0
 # 熔岩粒子独立衰减率（/秒）
 lava_decay_rate = 0.005
-# 区块粒子容量上限（不区分类型）
-lava_chunk_capacity = 4
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃
@@ -160,6 +158,3 @@ auto_spawn_interval = 10.0
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
 terrain_slope_cost = 7.0
-# 地形海拔阻力系数（远离舒适带的开销倍率，0=禁用）
-terrain_altitude_cost = 0.0
-comfort_height = 13.0

@@ -155,9 +155,9 @@ pub struct Config {
     /// 最大链式代数
     #[serde(default = "default_lava_max_chain_depth")]
     pub lava_max_chain_depth: u8,
-    /// 每次跳跃的最大次数（满溢时继续跳）
-    #[serde(default = "default_lava_jump_limit")]
-    pub lava_jump_limit: usize,
+    /// 每个粒子贡献的等效液面高度
+    #[serde(default = "default_lava_level_per_particle")]
+    pub lava_level_per_particle: f64,
     /// 熔岩粒子周期性杀伤基础间隔（秒，火山口处）
     #[serde(default = "default_lava_kill_base_interval")]
     pub lava_kill_base_interval: f64,
@@ -167,9 +167,6 @@ pub struct Config {
     /// 熔岩粒子独立衰减率（/秒）
     #[serde(default = "default_lava_decay_rate")]
     pub lava_decay_rate: f64,
-    /// 区块粒子容量上限（不区分类型）
-    #[serde(default = "default_lava_chunk_capacity")]
-    pub lava_chunk_capacity: usize,
     /// 落地最低伤害比例（已废弃，保留兼容旧config）
     #[serde(default)]
     pub min_landing_damage_ratio: f64,
@@ -214,22 +211,10 @@ pub struct Config {
     /// 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
     #[serde(default = "default_terrain_slope_cost")]
     pub terrain_slope_cost: f64,
-    /// 地形海拔阻力系数（远离舒适带的开销倍率，0=禁用）
-    #[serde(default = "default_terrain_altitude_cost")]
-    pub terrain_altitude_cost: f64,
-    /// 舒适高度（海拔阻力的参考高度）
-    #[serde(default = "default_comfort_height")]
-    pub comfort_height: f64,
 }
 
 fn default_terrain_slope_cost() -> f64 {
     2.0
-}
-fn default_terrain_altitude_cost() -> f64 {
-    0.5
-}
-fn default_comfort_height() -> f64 {
-    50.0
 }
 
 fn default_max_creatures() -> usize {
@@ -263,8 +248,8 @@ fn default_lava_spread_count() -> usize {
 fn default_lava_max_chain_depth() -> u8 {
     5
 }
-fn default_lava_jump_limit() -> usize {
-    5
+fn default_lava_level_per_particle() -> f64 {
+    0.5
 }
 fn default_lava_kill_base_interval() -> f64 {
     1.0
@@ -274,9 +259,6 @@ fn default_lava_kill_distance_scale() -> f64 {
 }
 fn default_lava_decay_rate() -> f64 {
     0.005
-}
-fn default_lava_chunk_capacity() -> usize {
-    8
 }
 
 fn default_snn_ticks_per_frame() -> usize {

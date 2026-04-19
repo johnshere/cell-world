@@ -98,7 +98,7 @@ cargo clippy          # 代码检查
   - 对比旧方案：从每 tick 1 次 readback + spin_loop → 每批 1 次 readback + Wait，CPU↔GPU 同步开销 10×
 - **面板速度**: 同步批处理模型下只有单一"FPS: X | 速度: Nx"显示。历史上的"神经/世界"双值已移除（反压已删除）
 - **无限世界**: 无边界，视窗可自由拖拽缩放
-- **火山 + 熔岩流**: 火山定期喷发；间隔和能量均受正弦周期调制（模拟季节）。每次喷发额外产生熔岩流粒子（lava_count），使用独立衰减率（lava_decay_rate）。自然衰减死亡时链式扩散子代（lava_spread_count），被吃不扩散。扩散机制：距离种子（30~40px随机）+ 满溢判定（区块粒子容量上限 lava_chunk_capacity，不区分类型）+ 梯度下降（跨区块时取周边最低区块）。跳跃次数上限=lava_jump_limit（默认5），每跳距离为距离种子整数倍。周期性杀伤：火山口 1s/次、边缘 30s/次（lava_kill_base_interval × (1 + dist_ratio × lava_kill_distance_scale)）。杀伤半径 = volcano_kill_radius × max(0, 2×(1-dist/radius))，火山口2倍、边缘归零
+- **火山 + 熔岩流**: 火山定期喷发；间隔和能量均受正弦周期调制（模拟季节）。每次喷发额外产生熔岩流粒子（lava_count），使用独立衰减率（lava_decay_rate）。自然衰减死亡时链式扩散子代（lava_spread_count），被吃不扩散。扩散采用**液面感知梯度**：有效高度=地形高度+粒子数×lava_level_per_particle，每次扩散找父粒子所在区块及8邻居中有效高度最低的区块，在其中随机位置放置。盆地自然灌满后从最低出口溢流。周期性杀伤：火山口 1s/次、边缘 30s/次（lava_kill_base_interval × (1 + dist_ratio × lava_kill_distance_scale)）。杀伤半径 = volcano_kill_radius × max(0, 2×(1-dist/radius))，火山口2倍、边缘归零
 - **感知系统（扫描眼）**:
   - 双眼窄波束逐帧扫描（280°/s），140° 全 FOV，探测距离=vision_range
   - 左眼从 heading+20° 逆时针扫，右眼从 heading-20° 顺时针扫
@@ -152,9 +152,8 @@ cargo clippy          # 代码检查
   - 用户点击侧边栏 "⛰" 按钮（在保存按钮左边）触发，二次确认后按当前 `volcano_radius` 一次性生成
   - 覆盖范围 = 半径 + 一格 chunk 余量（避免边界突兀）
   - 生成后**永久冻结**，`generated_radius` 快照与 UI 半径解耦；新扩展区域 `terrain_factor = 1.0`
-  - 移动消耗 ×= `slope_factor × altitude_factor`：上坡费力（不补贴下坡）+ 远离舒适高度费力
-  - `altitude_factor = 1 + |h - comfort_height| / range × terrain_altitude_cost`，舒适高度由 `config.comfort_height` 配置
-  - 配置项：`terrain_slope_cost`（默认 2.0）、`terrain_altitude_cost`（默认 0.5）、`comfort_height`（默认 50.0）
+  - 移动消耗 ×= `1 + max(dh/dist, 0) × terrain_slope_cost`：上坡费力，下坡不补贴
+  - 配置项：`terrain_slope_cost`（默认 2.0）
   - 持久化：地形独立 `terrain.json`（与 snapshot 解耦），⛰ 生成时立即写盘，启动无条件加载——无论"发现存档"对话框选恢复或新游戏，地形都保留
 
 ## 开发注意
