@@ -48,9 +48,9 @@ lava_count = 3
 # 熔岩粒子死亡时扩散子代数
 lava_spread_count = 2
 # 最大链式代数
-lava_max_chain_depth = 5
+lava_max_chain_depth = 51
 # 地形偏好强度（越大越走下坡）
-lava_terrain_bias = 2.0
+lava_terrain_bias = 3.5
 # 熔岩粒子周期性杀伤基础间隔（秒，火山口处）
 lava_kill_base_interval = 1.0
 # 距离对杀伤周期的放大系数
@@ -58,7 +58,7 @@ lava_kill_distance_scale = 29.0
 # 熔岩粒子独立衰减率（/秒）
 lava_decay_rate = 0.005
 # 最低处chunk的lava容量上限
-lava_chunk_base_capacity = 8
+lava_chunk_base_capacity = 12
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃

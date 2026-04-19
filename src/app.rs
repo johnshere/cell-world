@@ -1157,7 +1157,7 @@ impl CellWorldApp {
                         "最大链式代数",
                         "链式扩散最大代数",
                         &mut depth,
-                        1..=10,
+                        1..=100,
                     ) {
                         c.lava_max_chain_depth = depth as u8;
                         changed = true;
