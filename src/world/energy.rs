@@ -31,6 +31,9 @@ pub struct EnergyParticle {
     /// 被生物吃掉标记（吃掉不扩散）
     #[serde(default)]
     pub consumed: bool,
+    /// 熔岩粒子周期性杀伤计时器
+    #[serde(default)]
+    pub lava_kill_timer: f64,
 }
 
 /// 最小能量
@@ -58,6 +61,7 @@ impl EnergyParticle {
             lava: false,
             chain_depth: 0,
             consumed: false,
+            lava_kill_timer: 0.0,
         }
     }
 
@@ -68,7 +72,6 @@ impl EnergyParticle {
         y: f64,
         energy: f64,
         chain_depth: u8,
-        lifetime: f64,
     ) -> Self {
         Self {
             id,
@@ -76,13 +79,14 @@ impl EnergyParticle {
             y,
             energy,
             initial_energy: energy,
-            lifetime,
+            lifetime: f64::MAX,
             age: 0.0,
             alive: true,
             source: ParticleSource::Volcano,
             lava: true,
             chain_depth,
             consumed: false,
+            lava_kill_timer: 0.0,
         }
     }
 

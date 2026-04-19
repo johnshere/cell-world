@@ -158,9 +158,12 @@ pub struct Config {
     /// 地形偏好强度（越大越走下坡）
     #[serde(default = "default_lava_terrain_bias")]
     pub lava_terrain_bias: f64,
-    /// 熔岩粒子硬寿命（秒，到期强制死亡触发扩散）
-    #[serde(default = "default_lava_lifetime")]
-    pub lava_lifetime: f64,
+    /// 熔岩粒子周期性杀伤基础间隔（秒，火山口处）
+    #[serde(default = "default_lava_kill_base_interval")]
+    pub lava_kill_base_interval: f64,
+    /// 距离对杀伤周期的放大系数
+    #[serde(default = "default_lava_kill_distance_scale")]
+    pub lava_kill_distance_scale: f64,
     /// 落地最低伤害比例（已废弃，保留兼容旧config）
     #[serde(default)]
     pub min_landing_damage_ratio: f64,
@@ -257,8 +260,11 @@ fn default_lava_max_chain_depth() -> u8 {
 fn default_lava_terrain_bias() -> f64 {
     2.0
 }
-fn default_lava_lifetime() -> f64 {
-    45.0
+fn default_lava_kill_base_interval() -> f64 {
+    1.0
+}
+fn default_lava_kill_distance_scale() -> f64 {
+    29.0
 }
 
 fn default_snn_ticks_per_frame() -> usize {

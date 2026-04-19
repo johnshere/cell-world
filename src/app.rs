@@ -1173,11 +1173,19 @@ impl CellWorldApp {
                 );
                 changed |= config_drag_f64(
                     ui,
-                    "硬寿命",
-                    "到期强制死亡触发扩散(秒)",
-                    &mut c.lava_lifetime,
+                    "杀伤基础间隔",
+                    "火山口处杀伤周期(秒)",
+                    &mut c.lava_kill_base_interval,
+                    0.1,
+                    0.1..=10.0,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "杀伤距离系数",
+                    "距离对周期的放大倍数",
+                    &mut c.lava_kill_distance_scale,
                     1.0,
-                    5.0..=300.0,
+                    0.0..=50.0,
                 );
             });
 

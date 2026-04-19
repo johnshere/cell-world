@@ -539,7 +539,7 @@ impl World {
             let energy_id = self.next_energy_id;
             self.next_energy_id += 1;
             self.energy_particles
-                .push(EnergyParticle::new_lava(energy_id, x, y, current_energy, 0, config.lava_lifetime));
+                .push(EnergyParticle::new_lava(energy_id, x, y, current_energy, 0));
             self.energy_grid_dirty = true;
             // 熔岩流落地杀伤（火山口附近，系数=2）
             let dist_to_volcano = r; // 已在火山口附近
@@ -631,7 +631,6 @@ impl World {
                     new_y,
                     current_energy,
                     depth + 1,
-                    config.lava_lifetime,
                 ));
                 self.energy_grid_dirty = true;
 
@@ -1339,9 +1338,32 @@ impl World {
     // ========== 更新/清理 ==========
 
     fn update_energy_particles(&mut self, dt: f64, config: &Config) {
+        // 收集周期性杀伤事件：(x, y, kill_radius, particle_energy)
+        let mut kill_events: Vec<(f64, f64, f64, f64)> = Vec::new();
+
         for particle in &mut self.energy_particles {
             let was_alive = particle.alive;
             particle.update(dt, config.volcano_decay_rate);
+
+            // 熔岩粒子周期性杀伤
+            if particle.alive && particle.lava {
+                particle.lava_kill_timer += dt;
+                let vdx = particle.x - config.volcano_x;
+                let vdy = particle.y - config.volcano_y;
+                let dist_ratio =
+                    (vdx * vdx + vdy * vdy).sqrt() / config.volcano_radius.max(1.0);
+                let interval = config.lava_kill_base_interval
+                    * (1.0 + dist_ratio * config.lava_kill_distance_scale);
+                if particle.lava_kill_timer >= interval {
+                    particle.lava_kill_timer -= interval;
+                    let kill_factor = (2.0 * (1.0 - dist_ratio)).max(0.0);
+                    let kill_r = config.volcano_kill_radius * kill_factor;
+                    if kill_r > 0.0 {
+                        kill_events.push((particle.x, particle.y, kill_r, particle.energy));
+                    }
+                }
+            }
+
             // 熔岩流粒子自然衰减死亡时入扩散队列
             if was_alive
                 && !particle.alive
@@ -1351,6 +1373,26 @@ impl World {
             {
                 self.lava_pending
                     .push((particle.x, particle.y, particle.chain_depth));
+            }
+        }
+
+        // 执行周期性杀伤
+        for (kx, ky, kill_r, p_energy) in kill_events {
+            let kill_r2 = kill_r * kill_r;
+            for c in &mut self.creatures {
+                if c.alive && c.energy > 0.0 {
+                    let dx = c.x - kx;
+                    let dy = c.y - ky;
+                    if dx * dx + dy * dy < kill_r2 {
+                        let damage = c.energy
+                            * (1.0
+                                - (-p_energy * config.landing_damage_multiplier / c.energy).exp());
+                        c.energy = (c.energy - damage).max(0.0);
+                        if c.energy <= 0.0 {
+                            c.alive = false;
+                        }
+                    }
+                }
             }
         }
     }
