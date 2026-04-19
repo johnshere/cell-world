@@ -588,8 +588,8 @@ impl World {
                 let parent_cx = (px / GRID_WORLD_SIZE).floor() as i32;
                 let parent_cy = (py / GRID_WORLD_SIZE).floor() as i32;
 
-                // 找自身+8邻居中有效高度最低的区块
-                let (best_cx, best_cy) = Self::find_lowest_effective_neighbor(
+                // 斜面→纯地形梯度流下；盆地→液面模型灌满溢流
+                let (best_cx, best_cy) = Self::find_lava_target(
                     terrain, parent_cx, parent_cy, &chunk_count, lpp,
                 );
 
@@ -645,9 +645,10 @@ impl World {
         }
     }
 
-    /// 从 (cx, cy) 自身 + 8 邻居中找有效高度最低的区块
-    /// 有效高度 = 地形高度 + 粒子数 × level_per_particle
-    fn find_lowest_effective_neighbor(
+    /// 从 (cx, cy) 的邻居中找熔岩应流向的区块。
+    /// - 斜面（有邻居地形严格低于自身）→ 纯地形梯度，自由流下
+    /// - 盆地（所有邻居地形 ≥ 自身）→ 液面模型（有效高度 = 地形 + 粒子数 × lpp），灌满再溢流
+    fn find_lava_target(
         terrain: &TerrainMap,
         cx: i32,
         cy: i32,
@@ -656,33 +657,61 @@ impl World {
     ) -> (i32, i32) {
         use super::terrain::GRID_WORLD_SIZE;
 
-        let effective_h = |ccx: i32, ccy: i32| -> f64 {
+        let terrain_h = |ccx: i32, ccy: i32| -> f64 {
             let wx = ccx as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
             let wy = ccy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
-            let terrain_h = terrain.height_at(wx, wy).unwrap_or(i32::MAX) as f64;
-            let count = chunk_count.get(&(ccx, ccy)).copied().unwrap_or(0) as f64;
-            terrain_h + count * level_per_particle
+            terrain.height_at(wx, wy).unwrap_or(i32::MAX) as f64
         };
 
-        let mut best_cx = cx;
-        let mut best_cy = cy;
-        let mut lowest = effective_h(cx, cy);
-
-        for &(ddx, ddy) in &[
-            (-1i32, -1), (-1, 0), (-1, 1),
-            (0, -1),             (0, 1),
+        const NEIGHBORS: [(i32, i32); 8] = [
+            (-1, -1), (-1, 0), (-1, 1),
+            (0, -1),           (0, 1),
             (1, -1),  (1, 0),  (1, 1),
-        ] {
+        ];
+
+        let self_h = terrain_h(cx, cy);
+
+        // 找邻居中地形最低的
+        let mut min_terrain_cx = cx;
+        let mut min_terrain_cy = cy;
+        let mut min_terrain = self_h;
+        for &(ddx, ddy) in &NEIGHBORS {
             let ncx = cx + ddx;
             let ncy = cy + ddy;
-            let h = effective_h(ncx, ncy);
-            if h < lowest {
-                lowest = h;
-                best_cx = ncx;
-                best_cy = ncy;
+            let h = terrain_h(ncx, ncy);
+            if h < min_terrain {
+                min_terrain = h;
+                min_terrain_cx = ncx;
+                min_terrain_cy = ncy;
             }
         }
-        (best_cx, best_cy)
+
+        if min_terrain < self_h {
+            // 斜面：有邻居地形更低 → 纯地形梯度，直接流下
+            (min_terrain_cx, min_terrain_cy)
+        } else {
+            // 盆地：所有邻居地形 ≥ 自身 → 液面模型
+            let effective_h = |ccx: i32, ccy: i32| -> f64 {
+                let th = terrain_h(ccx, ccy);
+                let count = chunk_count.get(&(ccx, ccy)).copied().unwrap_or(0) as f64;
+                th + count * level_per_particle
+            };
+
+            let mut best_cx = cx;
+            let mut best_cy = cy;
+            let mut lowest = effective_h(cx, cy);
+            for &(ddx, ddy) in &NEIGHBORS {
+                let ncx = cx + ddx;
+                let ncy = cy + ddy;
+                let h = effective_h(ncx, ncy);
+                if h < lowest {
+                    lowest = h;
+                    best_cx = ncx;
+                    best_cy = ncy;
+                }
+            }
+            (best_cx, best_cy)
+        }
     }
 
     // ========== 空间索引 ==========
