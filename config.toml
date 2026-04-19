@@ -1,7 +1,7 @@
 # 初始模拟速度
 initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 20
+min_creatures = 35
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 450
 # 初始能量
@@ -40,25 +40,25 @@ volcano_decay_rate = 0.001
 # 火山落地杀伤半径
 volcano_kill_radius = 35.0
 # 落地杀伤系数
-landing_damage_multiplier = 1.5
+landing_damage_multiplier = 1.0
 
 # === 熔岩流 ===
 # 每次火山喷发附带的熔岩流粒子数
-lava_count = 3
+lava_count = 4
 # 熔岩粒子死亡时扩散子代数
 lava_spread_count = 2
 # 最大链式代数
-lava_max_chain_depth = 51
+lava_max_chain_depth = 35
 # 扩散满溢时最大跳跃次数
-lava_jump_limit = 5
+lava_jump_limit = 8
 # 熔岩粒子周期性杀伤基础间隔（秒，火山口处）
-lava_kill_base_interval = 1.0
+lava_kill_base_interval = 1.5
 # 距离对杀伤周期的放大系数
-lava_kill_distance_scale = 29.0
+lava_kill_distance_scale = 15.0
 # 熔岩粒子独立衰减率（/秒）
 lava_decay_rate = 0.005
 # 区块粒子容量上限（不区分类型）
-lava_chunk_capacity = 8
+lava_chunk_capacity = 4
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃
@@ -155,11 +155,11 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = false
-auto_spawn_interval = 30.0
+auto_spawn_interval = 10.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
 terrain_slope_cost = 7.0
 # 地形海拔阻力系数（远离舒适带的开销倍率，0=禁用）
-terrain_altitude_cost = 20.0
+terrain_altitude_cost = 0.0
 comfort_height = 13.0
