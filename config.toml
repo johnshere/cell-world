@@ -3,7 +3,7 @@ initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
 min_creatures = 90
 # 最大生物数量（超过时禁止繁殖，0=不限制）
-max_creatures = 450
+max_creatures = 400
 # 初始能量
 initial_energy = 160.0
 # 初始世界缩放比例
@@ -56,9 +56,9 @@ lava_kill_base_interval = 1.0
 # 距离对杀伤周期的放大系数
 lava_kill_distance_scale = 1.0
 # 熔岩粒子独立衰减率（/秒）
-lava_decay_rate = 0.009
+lava_decay_rate = 0.005
 # 溢流最大区块跳跃数
-lava_max_overflow_depth = 25
+lava_max_overflow_depth = 20
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃
