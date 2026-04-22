@@ -167,6 +167,9 @@ pub struct Config {
     /// 熔岩粒子独立衰减率（/秒）
     #[serde(default = "default_lava_decay_rate")]
     pub lava_decay_rate: f64,
+    /// 溢流最大区块跳跃数（超过则丢弃粒子）
+    #[serde(default = "default_lava_max_overflow_depth")]
+    pub lava_max_overflow_depth: usize,
     /// 落地最低伤害比例（已废弃，保留兼容旧config）
     #[serde(default)]
     pub min_landing_damage_ratio: f64,
@@ -259,6 +262,9 @@ fn default_lava_kill_distance_scale() -> f64 {
 }
 fn default_lava_decay_rate() -> f64 {
     0.005
+}
+fn default_lava_max_overflow_depth() -> usize {
+    10
 }
 
 fn default_snn_ticks_per_frame() -> usize {

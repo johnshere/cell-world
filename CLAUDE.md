@@ -98,7 +98,7 @@ cargo clippy          # 代码检查
   - 对比旧方案：从每 tick 1 次 readback + spin_loop → 每批 1 次 readback + Wait，CPU↔GPU 同步开销 10×
 - **面板速度**: 同步批处理模型下只有单一"FPS: X | 速度: Nx"显示。历史上的"神经/世界"双值已移除（反压已删除）
 - **无限世界**: 无边界，视窗可自由拖拽缩放
-- **火山 + 熔岩流**: 火山定期喷发；间隔和能量均受正弦周期调制（模拟季节）。每次喷发额外产生熔岩流粒子（lava_count），使用独立衰减率（lava_decay_rate）。自然衰减死亡时链式扩散子代（lava_spread_count），被吃不扩散。扩散采用**液面感知梯度**：有效高度=地形高度+粒子数×lava_level_per_particle，每次扩散找父粒子所在区块及8邻居中有效高度最低的区块，在其中随机位置放置。盆地自然灌满后从最低出口溢流。周期性杀伤：火山口 1s/次、边缘 30s/次（lava_kill_base_interval × (1 + dist_ratio × lava_kill_distance_scale)）。杀伤半径 = volcano_kill_radius × max(0, 2×(1-dist/radius))，火山口2倍、边缘归零
+- **火山 + 熔岩流**: 火山定期喷发；间隔和能量均受正弦周期调制（模拟季节）。每次喷发额外产生熔岩流粒子（lava_count），使用独立衰减率（lava_decay_rate）。自然衰减死亡时链式扩散子代（lava_spread_count），被吃不扩散。扩散采用**溢流机制**：子粒子初始落入父粒子所在区块，然后沿等效液面梯度溢流。等效高度=地形高度+lava_level_per_particle×(2^n-1)，n=区块内所有存活粒子数（含普通粒子和熔岩粒子）。溢流时当前区块模拟+1粒子高度，若高于8邻居中最低者则流向最低（多个最低随机选一），标记已访问区块防回弹，最大跳跃数=lava_max_overflow_depth，超限或超出火山半径则丢弃粒子。同一帧多个父粒子死亡按id排序处理，逐个子粒子顺序放置并实时更新区块计数。周期性杀伤关联扩散代数（depth_ratio=chain_depth/max_chain_depth）：间隔=lava_kill_base_interval×(1+depth_ratio×lava_kill_distance_scale)，半径=volcano_kill_radius×max(0,2×(1-depth_ratio))，chain_depth=0杀伤最强，max_chain_depth时半径归零
 - **感知系统（扫描眼）**:
   - 双眼窄波束逐帧扫描（280°/s），140° 全 FOV，探测距离=vision_range
   - 左眼从 heading+20° 逆时针扫，右眼从 heading-20° 顺时针扫
@@ -118,7 +118,7 @@ cargo clippy          # 代码检查
   - heat_cost = heat_dissipation_coefficient × 周长 × heat_factor × dt
   - 荒野(nearby_energy=0)时 heat_factor=1.0，散热最大但有上界；能量丰富区散热降至 heat_floor
 - **痕迹系统**: 基础痕迹=移动消耗（无额外开销）+ 神经网络控制额外投放（输出 6，正半轴映射 0~30%自身能量），自己的痕迹不可吃、其他生物均可吃；衰减率 0.12/s；抑制半径 10px，生成间隔 0.25s
-- **落地杀伤**: 火山粒子落地时砸死半径内生物（volcano_kill_radius）；熔岩流杀伤半径按距火山距离线性衰减
+- **落地杀伤**: 火山喷发粒子落地时砸死半径内生物（volcano_kill_radius）
 - **火山粒子分布**: 线性分布（r=u×radius）
 - **咬合系统**: 咬合力=|mouth|（mouth<-0.1 触发），伤害=战力比 ×bite_transfer_rate(0.8)，无额外咬消耗，冷却 1s；喂食机制已移除，能量分享通过痕迹实现
 - **战力系统**: 战力 = f(能量, 速度, 同族援助)，咬时攻方乘咬合力；同族援助范围=vision_range

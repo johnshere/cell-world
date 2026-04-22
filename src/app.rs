@@ -1179,6 +1179,13 @@ impl CellWorldApp {
                     0.001,
                     0.0001..=0.1,
                 );
+                changed |= config_drag_usize(
+                    ui,
+                    "溢流深度",
+                    "溢流最大区块跳跃数",
+                    &mut c.lava_max_overflow_depth,
+                    1..=50,
+                );
             });
 
             if changed {

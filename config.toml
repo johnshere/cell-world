@@ -57,6 +57,8 @@ lava_kill_base_interval = 1.5
 lava_kill_distance_scale = 15.0
 # 熔岩粒子独立衰减率（/秒）
 lava_decay_rate = 0.005
+# 溢流最大区块跳跃数
+lava_max_overflow_depth = 10
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃
