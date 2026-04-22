@@ -1158,15 +1158,15 @@ impl CellWorldApp {
                 changed |= config_drag_f64(
                     ui,
                     "杀伤基础间隔",
-                    "火山口处杀伤周期(秒)",
+                    "chain_depth=0时杀伤周期(秒)",
                     &mut c.lava_kill_base_interval,
                     0.1,
                     0.1..=10.0,
                 );
                 changed |= config_drag_f64(
                     ui,
-                    "杀伤距离系数",
-                    "距离对周期的放大倍数",
+                    "杀伤代数系数",
+                    "扩散代数对杀伤周期的放大倍数",
                     &mut c.lava_kill_distance_scale,
                     1.0,
                     0.0..=50.0,
