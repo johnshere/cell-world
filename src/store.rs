@@ -1,9 +1,31 @@
 use std::fs;
 use std::path::PathBuf;
 
+use chrono::NaiveDateTime;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::neural::Genome;
+
+/// 从文件名中解析时间戳
+/// 匹配格式: v版本_月日_时分 (如 v2.3.0_0422_1721)
+/// 返回当年的时间（用于排序，不用于显示）
+fn parse_file_time(name: &str) -> Option<NaiveDateTime> {
+    // 匹配模式: _月日_时分 或 -月日_时分
+    let re = Regex::new(r"_(\d{2})(\d{2})_(\d{2})(\d{2})\.json$").ok()?;
+    let caps = re.captures(name)?;
+
+    let month: u32 = caps.get(1)?.as_str().parse().ok()?;
+    let day: u32 = caps.get(2)?.as_str().parse().ok()?;
+    let hour: u32 = caps.get(3)?.as_str().parse().ok()?;
+    let minute: u32 = caps.get(4)?.as_str().parse().ok()?;
+
+    // 使用当前年份（用于排序）
+    let year = chrono::Local::now().format("%Y").to_string();
+    let date_str = format!("{}-{:02}-{:02} {:02}:{:02}", year, month, day, hour, minute);
+
+    NaiveDateTime::parse_from_str(&date_str, "%Y-%m-%d %H:%M").ok()
+}
 
 /// 保存的生物模板
 #[derive(Clone, Serialize, Deserialize)]
@@ -38,6 +60,9 @@ pub struct CreatureTemplate {
     /// true=自动检测记录, None/false=手动保存
     #[serde(default)]
     pub auto_recorded: Option<bool>,
+    /// 文件名中的时间（从文件名解析，不持久化）
+    #[serde(skip)]
+    pub file_time: Option<NaiveDateTime>,
 }
 
 /// 生物模板存储
@@ -70,29 +95,45 @@ impl Store {
         if let Ok(entries) = fs::read_dir(&self.dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
+                let filename = match path.file_name().and_then(|n| n.to_str()) {
+                    Some(f) => f.to_string(),
+                    None => continue,
+                };
                 if path.extension().map(|e| e == "json").unwrap_or(false) {
                     if let Ok(content) = fs::read_to_string(&path) {
                         if let Ok(mut template) = serde_json::from_str::<CreatureTemplate>(&content)
                         {
                             template.genome.ensure_sorted_cache();
+                            // 从文件名解析时间
+                            template.file_time = parse_file_time(&filename);
                             self.templates.push(template);
                         }
                     }
                 }
             }
         }
-        // 按记录时间倒序（最新在前），无时间戳的排最后
+        // 按文件名时间倒序（最新在前），无时间戳的排最后
         self.templates.sort_by(|a, b| {
-            let ta = a.recorded_at.unwrap_or(f64::NEG_INFINITY);
-            let tb = b.recorded_at.unwrap_or(f64::NEG_INFINITY);
-            tb.partial_cmp(&ta).unwrap_or(std::cmp::Ordering::Equal)
+            let ta = a.file_time;
+            let tb = b.file_time;
+            match (ta, tb) {
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => b.recorded_at.unwrap_or(f64::NEG_INFINITY)
+                    .partial_cmp(&a.recorded_at.unwrap_or(f64::NEG_INFINITY))
+                    .unwrap_or(std::cmp::Ordering::Equal),
+                (Some(a_time), Some(b_time)) => b_time.cmp(&a_time),
+            }
         });
     }
 
     /// 保存模板
-    pub fn save(&mut self, template: CreatureTemplate) -> Result<(), String> {
+    pub fn save(&mut self, mut template: CreatureTemplate) -> Result<(), String> {
         let filename = format!("{}.json", sanitize_filename(&template.name));
         let path = self.dir.join(&filename);
+
+        // 从文件名解析时间
+        template.file_time = parse_file_time(&filename);
 
         let content =
             serde_json::to_string_pretty(&template).map_err(|e| format!("序列化失败: {}", e))?;
@@ -105,9 +146,16 @@ impl Store {
         } else {
             self.templates.push(template);
             self.templates.sort_by(|a, b| {
-                let ta = a.recorded_at.unwrap_or(f64::NEG_INFINITY);
-                let tb = b.recorded_at.unwrap_or(f64::NEG_INFINITY);
-                tb.partial_cmp(&ta).unwrap_or(std::cmp::Ordering::Equal)
+                let ta = a.file_time;
+                let tb = b.file_time;
+                match (ta, tb) {
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => b.recorded_at.unwrap_or(f64::NEG_INFINITY)
+                        .partial_cmp(&a.recorded_at.unwrap_or(f64::NEG_INFINITY))
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                    (Some(a_time), Some(b_time)) => b_time.cmp(&a_time),
+                }
             });
         }
 

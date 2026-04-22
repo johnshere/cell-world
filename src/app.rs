@@ -419,6 +419,7 @@ impl CellWorldApp {
                 max_generation: Some(candidate.max_generation),
                 recorded_at: Some(time),
                 auto_recorded: Some(true),
+                file_time: None,
             }
         };
 
@@ -1692,6 +1693,7 @@ impl eframe::App for CellWorldApp {
                         max_generation: None,
                         recorded_at: None,
                         auto_recorded: None,
+                        file_time: None,
                     };
                     if let Err(e) = self.store.save(template) {
                         eprintln!("保存失败: {}", e);
@@ -1734,6 +1736,7 @@ impl eframe::App for CellWorldApp {
                     max_generation: None,
                     recorded_at: None,
                     auto_recorded: None,
+                    file_time: None,
                 };
                 if let Err(e) = self.store.save(template) {
                     eprintln!("保存族失败: {}", e);
