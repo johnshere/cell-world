@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "world_time": 19060.333333224266,
+  "creature_count": 179,
+  "energy_count": 872,
+  "trail_count": 4135,
+  "config_energy_denominator": 15.0,
+  "config_heat_floor": 0.03,
+  "config_heat_dissipation": 0.025,
+  "original_file_size": 0,
+  "converted_at": "",
+  "saved_at": "2026-04-22 23:13:08"
+}

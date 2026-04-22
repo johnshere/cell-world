@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::render::{
     PanelAction, RenderContext, Selection, StatsPanel, VisibleWorldBounds, WorldCanvas,
 };
-use crate::snapshot::{WorldSnapshot, list_archives, delete_archive, ArchiveSummary};
+use crate::snapshot::{delete_archive, list_archives, ArchiveSummary, WorldSnapshot};
 use crate::store::{CreatureTemplate, Store};
 use crate::world::sim_thread::{spawn_sim_thread, SimCommand, SimHandle, SimSnapshot};
 use crate::world::World;
@@ -1169,7 +1169,7 @@ impl CellWorldApp {
                     "杀伤代数系数",
                     "扩散代数对杀伤周期的放大倍数",
                     &mut c.lava_kill_distance_scale,
-                    1.0,
+                    0.1,
                     0.0..=50.0,
                 );
                 changed |= config_drag_f64(
@@ -1216,7 +1216,19 @@ impl eframe::App for CellWorldApp {
                         ui.add_space(4.0);
                         ui.label(egui::RichText::new("选择存档").strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(egui::Button::new(egui::RichText::new("x").size(12.0).color(egui::Color32::from_gray(200))).frame(false).fill(egui::Color32::from_gray(50)).small()).clicked() {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("x")
+                                            .size(12.0)
+                                            .color(egui::Color32::from_gray(200)),
+                                    )
+                                    .frame(false)
+                                    .fill(egui::Color32::from_gray(50))
+                                    .small(),
+                                )
+                                .clicked()
+                            {
                                 self.show_archive_list = false;
                             }
                         });
@@ -1231,14 +1243,20 @@ impl eframe::App for CellWorldApp {
                             for (i, archive) in self.archive_list.iter().enumerate() {
                                 ui.horizontal(|ui| {
                                     let selected = self.archive_selected == Some(i);
-                                    if ui.selectable_label(selected, format!(
-                                                                "[{}] {} - 生物:{} 能量:{} 时间:{:.0}",
-                                                                archive.meta.saved_at,
-                                                                archive.name,
-                                                                archive.meta.creature_count,
-                                                                archive.meta.energy_count,
-                                                                archive.meta.world_time
-                                                            )).clicked() {
+                                    if ui
+                                        .selectable_label(
+                                            selected,
+                                            format!(
+                                                "[{}] {} - 生物:{} 能量:{} 时间:{:.0}",
+                                                archive.meta.saved_at,
+                                                archive.name,
+                                                archive.meta.creature_count,
+                                                archive.meta.energy_count,
+                                                archive.meta.world_time
+                                            ),
+                                        )
+                                        .clicked()
+                                    {
                                         self.archive_selected = Some(i);
                                     }
                                     if ui.button("删除").clicked() {
@@ -1326,7 +1344,9 @@ impl eframe::App for CellWorldApp {
         if self.snapshot_confirm_save {
             let mut chose_save = false;
             let mut chose_cancel = false;
-            let save_name = chrono::Local::now().format("archive_%Y%m%d_%H%M%S").to_string();
+            let save_name = chrono::Local::now()
+                .format("archive_%Y%m%d_%H%M%S")
+                .to_string();
             egui::Window::new("保存存档")
                 .collapsible(false)
                 .resizable(false)
@@ -1373,7 +1393,19 @@ impl eframe::App for CellWorldApp {
                         ui.add_space(4.0);
                         ui.label(egui::RichText::new("生成地形").strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(egui::Button::new(egui::RichText::new("x").size(12.0).color(egui::Color32::from_gray(200))).frame(false).fill(egui::Color32::from_gray(50)).small()).clicked() {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("x")
+                                            .size(12.0)
+                                            .color(egui::Color32::from_gray(200)),
+                                    )
+                                    .frame(false)
+                                    .fill(egui::Color32::from_gray(50))
+                                    .small(),
+                                )
+                                .clicked()
+                            {
                                 chose_no = true;
                             }
                         });
@@ -1533,7 +1565,8 @@ impl eframe::App for CellWorldApp {
 
         // 检测低于最小数量且开启了 stop_on_extinction 时自动暂停（一次性事件）
         let alive_count = snap.creatures.iter().filter(|c| c.alive).count();
-        if alive_count < self.config.min_creatures && self.config.stop_on_extinction && !self.paused {
+        if alive_count < self.config.min_creatures && self.config.stop_on_extinction && !self.paused
+        {
             self.paused = true;
             self.sim.send(SimCommand::Pause);
         }

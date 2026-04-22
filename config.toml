@@ -17,11 +17,11 @@ volcano_y = 0.0
 # 火山喷发间隔（秒）
 volcano_interval = 25.0
 # 火山喷射半径
-volcano_radius = 2300.0
+volcano_radius = 2500.0
 # 每次喷发粒子数
 volcano_count = 70
 # 火山粒子能量
-volcano_particle_energy = 160.0
+volcano_particle_energy = 155.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -38,7 +38,7 @@ volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 35.0
+volcano_kill_radius = 30.0
 # 落地杀伤系数
 landing_damage_multiplier = 1.0
 
@@ -48,9 +48,9 @@ lava_count = 4
 # 熔岩粒子死亡时扩散子代数
 lava_spread_count = 2
 # 最大链式代数
-lava_max_chain_depth = 41
+lava_max_chain_depth = 40
 # 每个粒子贡献的等效液面高度
-lava_level_per_particle = 0.42
+lava_level_per_particle = 0.4
 # 熔岩粒子周期性杀伤基础间隔（秒，火山口处）
 lava_kill_base_interval = 1.0
 # 距离对杀伤周期的放大系数
@@ -78,11 +78,11 @@ heat_floor = 0.03
 
 # === 代谢 ===
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
-age_metabolism_factor = 0.01
+age_metabolism_factor = 0.012
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗（每单位距离）
-move_cost = 0.001
+move_cost = 0.0015
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.8
 # === 体温 ===
@@ -155,7 +155,7 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = false
-auto_spawn_interval = 40.0
+auto_spawn_interval = 10.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
