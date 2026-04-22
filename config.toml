@@ -1,7 +1,7 @@
 # 初始模拟速度
 initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 30
+min_creatures = 90
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 450
 # 初始能量
@@ -50,15 +50,15 @@ lava_spread_count = 2
 # 最大链式代数
 lava_max_chain_depth = 40
 # 每个粒子贡献的等效液面高度
-lava_level_per_particle = 0.4
+lava_level_per_particle = 0.6
 # 熔岩粒子周期性杀伤基础间隔（秒，火山口处）
 lava_kill_base_interval = 1.0
 # 距离对杀伤周期的放大系数
 lava_kill_distance_scale = 1.0
 # 熔岩粒子独立衰减率（/秒）
-lava_decay_rate = 0.005
+lava_decay_rate = 0.009
 # 溢流最大区块跳跃数
-lava_max_overflow_depth = 20
+lava_max_overflow_depth = 25
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃
