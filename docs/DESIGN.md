@@ -284,13 +284,26 @@ struct Genome {
 变异率由 `config.mutation_rate` 全局控制（默认 0.15），**不再是基因组内可演化基因**。
 历史上的 `MutationGene { base, block }` 双速率自适应机制已删除——稳定环境下它必然塌到下界，反而成为演化停滞的放大器。base/block 两类变异目前共享同一个全局 rate。
 
-### 变异类型（触发概率均为 `config.mutation_rate`）
+### 发育时间基因（maturation_time）
+
+控制结构变异（新增连接/新增节点）的活跃窗口，模拟生物发育期神经可塑性。
+
+- **存储**：`Genome.maturation_time: f64`（模拟秒），初代生物 = 5000.0
+- **遗传**：繁殖时 `child.maturation_time = (parent.age + parent.maturation_time) / 2`
+  - 早繁殖（age 小）→ 子代发育期短 → r 策略倾向
+  - 晚繁殖（age 大）→ 子代发育期长 → K 策略倾向
+- **调制公式**：结构变异有效概率 = `base_rate × 2 × exp(-parent_age / maturation_time)`
+  - age=0 → ×2.0（幼年可塑性高），age=maturation_time → ×0.74，age=3×maturation_time → ×0.10
+- **影响范围**：仅 add_connection、add_node；权重微调、SNN 参数等不受影响
+- **crossover**：原子孟德尔遗传（50/50 选父/母之一），繁殖后再用上述公式覆写
+
+### 变异类型（触发概率均为 `config.mutation_rate`，结构变异受发育期调制）
 
 | 变异 | 类别 | 说明 |
 |------|------|------|
 | 权重变异 | base（每条连接） | 90% 微调 ±0.5，10% 重置 [-1,1] |
-| 新增连接 | base | 随机连接两个节点（受 conn_probs 加权） |
-| 新增节点 | base | 拆分现有连接，插入隐藏节点 |
+| 新增连接 | base（发育期调制） | 随机连接两个节点（受 conn_probs 加权） |
+| 新增节点 | base（发育期调制） | 拆分现有连接，插入隐藏节点 |
 | 开关连接 | base | 启用/禁用随机连接 |
 | SNN 参数 | base | decay / threshold / refractory_period 抖动 |
 | Layer 切换 | base | Block 节点 Processing ↔ Output |
@@ -310,6 +323,7 @@ struct Genome {
 | 每个 block 的 `ConnProbsGene` | 整块（proc/out/target_pref 一体） | 50/50 从一方继承 |
 | `LearningGene` | 整个 struct | 50/50 从一方继承 |
 | `PhysioGene` | 整个 struct | 50/50 从一方继承 |
+| `maturation_time` | 单个 f64 | 50/50 从一方继承，繁殖后用 (parent.age + parent.maturation_time)/2 覆写 |
 | fitter 独有连接/节点 | — | 标准 NEAT excess/disjoint，继承 fitter |
 | weaker 独有节点 | — | 保留（避免基因流失） |
 
@@ -477,7 +491,7 @@ volcano_energy_amplitude = 0.1
 lava_count = 3                    # 每次火山喷发附带的熔岩流粒子数
 lava_spread_count = 2             # 死亡时扩散子代数
 lava_max_chain_depth = 5          # 最大链式代数
-lava_level_per_particle = 0.5     # 等效液面系数（等效高度=地形+系数×(2^n-1)，n=区块粒子数）
+lava_level_per_particle = 0.5     # 等效液面系数（等效高度=地形+系数×n，n=区块粒子数）
 lava_decay_rate = 0.005           # 熔岩粒子独立衰减率（/秒）
 lava_max_overflow_depth = 10      # 溢流最大区块跳跃数
 

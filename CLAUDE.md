@@ -98,7 +98,7 @@ cargo clippy          # 代码检查
   - 对比旧方案：从每 tick 1 次 readback + spin_loop → 每批 1 次 readback + Wait，CPU↔GPU 同步开销 10×
 - **面板速度**: 同步批处理模型下只有单一"FPS: X | 速度: Nx"显示。历史上的"神经/世界"双值已移除（反压已删除）
 - **无限世界**: 无边界，视窗可自由拖拽缩放
-- **火山 + 熔岩流**: 火山定期喷发；间隔和能量均受正弦周期调制（模拟季节）。每次喷发额外产生熔岩流粒子（lava_count），使用独立衰减率（lava_decay_rate）。自然衰减死亡时链式扩散子代（lava_spread_count），被吃不扩散。扩散采用**溢流机制**：子粒子初始落入父粒子所在区块，然后沿等效液面梯度溢流。等效高度=地形高度+lava_level_per_particle×(2^n-1)，n=区块内所有存活粒子数（含普通粒子和熔岩粒子）。溢流时当前区块模拟+1粒子高度，若高于8邻居中最低者则流向最低（多个最低随机选一），标记已访问区块防回弹，最大跳跃数=lava_max_overflow_depth，超限或超出火山半径则丢弃粒子。同一帧多个父粒子死亡按id排序处理，逐个子粒子顺序放置并实时更新区块计数。周期性杀伤关联扩散代数（depth_ratio=chain_depth/max_chain_depth）：间隔=lava_kill_base_interval×(1+depth_ratio×lava_kill_distance_scale)，半径=volcano_kill_radius×max(0,2×(1-depth_ratio))，chain_depth=0杀伤最强，max_chain_depth时半径归零
+- **火山 + 熔岩流**: 火山定期喷发；间隔和能量均受正弦周期调制（模拟季节）。每次喷发额外产生熔岩流粒子（lava_count），使用独立衰减率（lava_decay_rate）。自然衰减死亡时链式扩散子代（lava_spread_count），被吃不扩散。扩散采用**溢流机制**：子粒子初始落入父粒子所在区块，然后沿等效液面梯度溢流。等效高度=地形高度+lava_level_per_particle×n，n=区块内所有存活粒子数（含普通粒子和熔岩粒子）。溢流时当前区块模拟+1粒子高度，若高于8邻居中最低者则流向最低（多个最低随机选一），标记已访问区块防回弹，最大跳跃数=lava_max_overflow_depth，超限或超出火山半径则丢弃粒子。同一帧多个父粒子死亡按id排序处理，逐个子粒子顺序放置并实时更新区块计数。周期性杀伤关联扩散代数（depth_ratio=chain_depth/max_chain_depth）：间隔=lava_kill_base_interval×(1+depth_ratio×lava_kill_distance_scale)，半径=volcano_kill_radius×max(0,2×(1-depth_ratio))，chain_depth=0杀伤最强，max_chain_depth时半径归零
 - **感知系统（扫描眼）**:
   - 双眼窄波束逐帧扫描（280°/s），140° 全 FOV，探测距离=vision_range
   - 左眼从 heading+20° 逆时针扫，右眼从 heading-20° 顺时针扫
@@ -134,8 +134,17 @@ cargo clippy          # 代码检查
   - **不再是基因组内可演化基因**（`MutationGene` 已删除）
   - 原因：自适应变异率在稳定环境下必然塌到下界，拖累演化
   - 想调节探索强度直接改 config
+- **发育时间基因（maturation_time）**: 控制结构变异（add_connection/add_node）的活跃窗口
+  - 存储在 `Genome.maturation_time`（f64，单位=模拟秒），初代=5000.0
+  - 繁殖遗传：`child.maturation_time = (parent.age + parent.maturation_time) / 2`（取发起繁殖方）
+  - 结构变异调制：`effective_rate = base_rate × 2 × exp(-parent_age / maturation_time)`
+    - 幼年父代（age≈0）：结构变异概率 ×2（神经可塑性高）
+    - 发育完成（age=maturation_time）：×0.74（略低于基准）
+    - 老年（age=3×maturation_time）：×0.10（结构几乎冻结）
+  - 仅影响结构变异，权重微调不受影响（权重=持续学习，结构=发育期可塑性）
+  - crossover 中原子孟德尔遗传（50/50 选父/母之一）
 - **Crossover（v2.5 改为全原子孟德尔）**: 所有连续参数按"原子"整取，不做算术平均
-  - 原子粒度：每条共享连接 / 每个共享节点 / 每个 block 的 ConnProbsGene / LearningGene 整块 / PhysioGene 整块
+  - 原子粒度：每条共享连接 / 每个共享节点 / 每个 block 的 ConnProbsGene / LearningGene 整块 / PhysioGene 整块 / maturation_time
   - crossover 不创造新值，只重组；创造新值是 mutation 的职责
   - 结果：crossover 不再主动收缩群体方差，多样性保持完全依赖 mutation 注入
 - **交配阈值（v2.5）**: `find_mate` 使用 `species_similarity_threshold × 0.9` 作为交配相似度下限

@@ -560,8 +560,7 @@ impl World {
     }
 
     /// 计算区块等效液面高度。
-    /// 等效高度 = 地形高度 + lava_level_per_particle × (2^n - 1)，n = 区块内存活粒子数 + extra。
-    /// n=0 时粒子等效高度为 0。
+    /// 等效高度 = 地形高度 + lava_level_per_particle × n，n = 区块内存活粒子数 + extra。
     fn effective_chunk_height(
         terrain: &TerrainMap,
         cx: i32,
@@ -575,11 +574,7 @@ impl World {
         let wy = cy as f64 * GRID_WORLD_SIZE + GRID_WORLD_SIZE / 2.0;
         let th = terrain.height_at(wx, wy).unwrap_or(i32::MAX) as f64;
         let n = chunk_count.get(&(cx, cy)).copied().unwrap_or(0) + extra;
-        if n == 0 {
-            th
-        } else {
-            th + lpp * (2.0_f64.powi(n as i32) - 1.0)
-        }
+        th + lpp * n as f64
     }
 
     /// 构建区块粒子计数快照（所有存活粒子，含普通粒子和熔岩粒子）
@@ -910,7 +905,6 @@ impl World {
             // 冷却递减
             self.creatures[i].eye_cooldown_timer -= dt;
             self.creatures[i].mouth_cooldown_timer -= dt;
-            self.creatures[i].reproduce_cooldown_timer -= dt;
 
             if !result.alive {
                 self.creatures[i].alive = false;
@@ -1157,13 +1151,11 @@ impl World {
         // 嘴：接触食物自动吸收 + 对生物咬
         self.action_mouth(creature_idx, mouth, config);
 
-        // 繁殖（受冷却限制 + 数量上限）
+        // 繁殖（数量上限，无冷却——完全由神经网络控制节奏）
         let alive_count = self.creatures.iter().filter(|c| c.alive).count();
         let pop_ok = config.max_creatures == 0 || alive_count < config.max_creatures;
-        if reproduce > 0.2 && pop_ok && self.creatures[creature_idx].reproduce_cooldown_timer <= 0.0
-        {
+        if reproduce > 0.2 && pop_ok {
             if self.action_reproduce(creature_idx, reproduce_threshold, reproduce_ratio, config) {
-                self.creatures[creature_idx].reproduce_cooldown_timer = config.reproduce_cooldown;
                 self.creatures[creature_idx].physio.pleasure += 0.5;
                 self.action_counts[3] += 1; // 繁殖
             }
@@ -1344,10 +1336,15 @@ impl World {
         let creature_id = self.next_creature_id;
         self.next_creature_id += 1;
 
+        let parent_age = self.creatures[idx].age;
+        let parent_maturation = self.creatures[idx].genome.maturation_time;
+
         let mut child = if let Some((mate_genome, mate_heading)) = mate {
             let crossover_genome =
                 Genome::crossover(&self.creatures[idx].genome, &mate_genome, true);
-            let child_genome = crossover_genome.mutate(config);
+            let mut child_genome = crossover_genome.mutate(config, parent_age);
+            // 子代发育时间 = (母方年龄 + 母方发育时间) / 2
+            child_genome.maturation_time = (parent_age + parent_maturation) / 2.0;
             // 父辈方向均值（弧度直接平均，已足够）
             let child_heading = (heading + mate_heading) / 2.0;
             Creature::new(

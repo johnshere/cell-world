@@ -791,9 +791,8 @@ impl StatsPanel {
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.label(format!(
-                            "嘴:{:.1}s  繁殖:{:.1}s  痕迹:{:.1}s",
+                            "嘴:{:.1}s  痕迹:{:.1}s",
                             creature.mouth_cooldown_timer.max(0.0),
-                            creature.reproduce_cooldown_timer.max(0.0),
                             creature.trail_emit_timer.max(0.0),
                         ));
                     });

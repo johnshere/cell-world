@@ -44,13 +44,13 @@ landing_damage_multiplier = 1.0
 
 # === 熔岩流 ===
 # 每次火山喷发附带的熔岩流粒子数
-lava_count = 4
+lava_count = 3
 # 熔岩粒子死亡时扩散子代数
 lava_spread_count = 2
 # 最大链式代数
-lava_max_chain_depth = 40
+lava_max_chain_depth = 20
 # 每个粒子贡献的等效液面高度
-lava_level_per_particle = 0.6
+lava_level_per_particle = 1.0
 # 熔岩粒子周期性杀伤基础间隔（秒，火山口处）
 lava_kill_base_interval = 1.0
 # 距离对杀伤周期的放大系数
@@ -58,7 +58,7 @@ lava_kill_distance_scale = 1.0
 # 熔岩粒子独立衰减率（/秒）
 lava_decay_rate = 0.005
 # 溢流最大区块跳跃数
-lava_max_overflow_depth = 20
+lava_max_overflow_depth = 15
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃
@@ -123,10 +123,6 @@ trail_suppress_radius = 30.0
 # 痕迹生成间隔（秒，每个生物独立计时）
 trail_emit_interval = 0.4
 
-# === 繁殖 ===
-# 繁殖冷却时间（秒）
-reproduce_cooldown = 20.0
-
 # === 算力能量 ===
 # 算力转能量系数（内部除以1亿，0 = 禁用）
 compute_energy_factor = 75.0
@@ -160,3 +156,4 @@ auto_spawn_interval = 10.0
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
 terrain_slope_cost = 7.0
+reproduce_cooldown = 0.0

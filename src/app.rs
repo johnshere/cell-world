@@ -572,14 +572,6 @@ impl CellWorldApp {
                 );
                 changed |= config_drag_f64(
                     ui,
-                    "繁殖冷却",
-                    "两次繁殖间最短间隔(秒)",
-                    &mut c.reproduce_cooldown,
-                    0.5,
-                    1.0..=60.0,
-                );
-                changed |= config_drag_f64(
-                    ui,
                     "速度战力权重",
                     "移速对战力的加成系数",
                     &mut c.combat_speed_weight,

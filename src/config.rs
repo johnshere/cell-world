@@ -186,7 +186,8 @@ pub struct Config {
     pub trail_emit_interval: f64,
 
     // === 繁殖 ===
-    /// 繁殖冷却时间（秒）
+    /// 繁殖冷却时间（已废弃，完全由神经网络控制，保留兼容旧config）
+    #[serde(default)]
     pub reproduce_cooldown: f64,
 
     // === 算力能量 ===

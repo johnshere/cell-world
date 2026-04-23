@@ -9,6 +9,12 @@ use crate::config::Config;
 #[cfg(feature = "persistence")]
 use serde::{Deserialize, Serialize};
 
+/// 发育时间默认值（用于反序列化旧存档兼容）
+#[cfg(feature = "persistence")]
+fn default_maturation_time() -> f64 {
+    5000.0
+}
+
 /// 层类型：Block 节点在区内的角色
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
@@ -180,6 +186,10 @@ pub struct Genome {
     #[cfg_attr(feature = "persistence", serde(default))]
     pub physio: PhysioGene,
 
+    /// 发育时间基因（模拟秒），控制结构变异的活跃窗口
+    #[cfg_attr(feature = "persistence", serde(default = "default_maturation_time"))]
+    pub maturation_time: f64,
+
     next_node_id: usize,
     /// 预排序的启用连接缓存（用于快速 similarity 比较，避免每次重复排序+分配）
     #[cfg_attr(feature = "persistence", serde(skip))]
@@ -326,6 +336,7 @@ impl Genome {
             conn_probs: block_probs,
             learning: LearningGene::default(),
             physio: PhysioGene::default(),
+            maturation_time: 5000.0,
             next_node_id: next_id,
             sorted_conns_cache: Vec::new(),
         };
@@ -353,13 +364,23 @@ impl Genome {
     }
 
     /// 变异（base/block 两类共享 config.mutation_rate）
-    pub fn mutate(&self, conf: &Config) -> Self {
+    /// parent_age: 父代繁殖时的年龄，用于发育期调制结构变异概率
+    pub fn mutate(&self, conf: &Config, parent_age: f64) -> Self {
         let base_rate = conf.mutation_rate;
         let block_rate = conf.mutation_rate;
         let mut rng = rand::thread_rng();
         let mut child = self.clone();
 
-        // 权重变异
+        // 发育进度：parent_age / maturation_time
+        let p = if self.maturation_time > 0.0 {
+            parent_age / self.maturation_time
+        } else {
+            1.0
+        };
+        // 结构变异调制因子：幼年活跃(2x)，成年后衰减
+        let structure_factor = 2.0 * (-p).exp();
+
+        // 权重变异（不受发育期影响）
         for conn in &mut child.connections {
             if rng.gen::<f64>() < base_rate {
                 if rng.gen::<f64>() < 0.9 {
@@ -373,13 +394,13 @@ impl Genome {
             }
         }
 
-        // 添加连接变异
-        if rng.gen::<f64>() < base_rate {
+        // 添加连接变异（受发育期调制）
+        if rng.gen::<f64>() < base_rate * structure_factor {
             child.mutate_add_connection(conf);
         }
 
-        // 添加节点变异（使用 base_rate）
-        if rng.gen::<f64>() < base_rate {
+        // 添加节点变异（受发育期调制）
+        if rng.gen::<f64>() < base_rate * structure_factor {
             child.mutate_add_node(base_rate);
         }
 
@@ -1031,12 +1052,20 @@ impl Genome {
             weaker.physio.clone()
         };
 
+        // === maturation_time：原子选取 ===
+        let child_maturation = if rng.gen_bool(0.5) {
+            fitter.maturation_time
+        } else {
+            weaker.maturation_time
+        };
+
         let mut genome = Genome {
             nodes: child_nodes,
             connections: child_connections,
             conn_probs: child_block_probs,
             learning: child_learning,
             physio: child_physio,
+            maturation_time: child_maturation,
             next_node_id,
             sorted_conns_cache: Vec::new(),
         };

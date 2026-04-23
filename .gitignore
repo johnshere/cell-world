@@ -9,6 +9,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+docs/target_pref.log
+docs/LOG.md
 
 node_modules
 dist
@@ -28,6 +30,5 @@ dist-ssr
 .claude/temp/*.png
 nul
 src/config.rs
-docs/LOG.md
 store/
 .claude/temp/

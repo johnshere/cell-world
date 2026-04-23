@@ -105,7 +105,8 @@ pub struct Creature {
     // 痕迹生成计时器（<=0 可生成）
     pub trail_emit_timer: f64,
 
-    // 繁殖冷却计时器（<=0 可繁殖）
+    // 繁殖冷却计时器（已废弃，保留兼容旧存档）
+    #[serde(default)]
     pub reproduce_cooldown_timer: f64,
 
     // 本帧 CPU 计算耗时（纳秒）
@@ -174,7 +175,9 @@ impl Creature {
 
     /// 繁殖产生子代（代数+1，parent_id = 自己的 id）
     pub fn reproduce(&self, id: u64, x: f64, y: f64, energy: f64, conf: &Config) -> Self {
-        let child_genome = self.genome.mutate(conf);
+        let mut child_genome = self.genome.mutate(conf, self.age);
+        // 子代发育时间 = (父代年龄 + 父代发育时间) / 2
+        child_genome.maturation_time = (self.age + self.genome.maturation_time) / 2.0;
         Self::new(
             id,
             x,
