@@ -1,7 +1,7 @@
 # 初始模拟速度
 initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 90
+min_creatures = 200
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 400
 # 初始能量
@@ -21,7 +21,7 @@ volcano_radius = 2500.0
 # 每次喷发粒子数
 volcano_count = 70
 # 火山粒子能量
-volcano_particle_energy = 155.0
+volcano_particle_energy = 160.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -50,11 +50,11 @@ lava_spread_count = 2
 # 最大链式代数
 lava_max_chain_depth = 20
 # 每个粒子贡献的等效液面高度
-lava_level_per_particle = 1.0
+lava_level_per_particle = 1.1
 # 熔岩粒子周期性杀伤基础间隔（秒，火山口处）
 lava_kill_base_interval = 1.0
 # 距离对杀伤周期的放大系数
-lava_kill_distance_scale = 1.0
+lava_kill_distance_scale = 0.5
 # 熔岩粒子独立衰减率（/秒）
 lava_decay_rate = 0.005
 # 溢流最大区块跳跃数
@@ -100,9 +100,9 @@ contact_range = 15.0
 
 # === 进化 ===
 # 初始连接数最小值
-initial_connections_min = 10
+initial_connections_min = 15
 # 初始连接数最大值
-initial_connections_max = 20
+initial_connections_max = 25
 # 种族相似度阈值（高于此值视为同一种族）
 species_similarity_threshold = 0.95
 
@@ -136,7 +136,7 @@ neural_backend = "auto"
 neural_tick_rate = 600.0
 # 变异率（全局常量，不再是基因组内可演化基因）
 # base/block 两类变异共享此触发概率
-mutation_rate = 0.1
+mutation_rate = 0.05
 base_metabolism = 0.025
 max_speed = 20.0
 meteorite_interval = 0.0
@@ -151,7 +151,7 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = false
-auto_spawn_interval = 10.0
+auto_spawn_interval = 1.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）

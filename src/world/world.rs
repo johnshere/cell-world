@@ -5,8 +5,7 @@ use std::cell::RefCell;
 use std::time::Instant;
 
 use super::{
-    Creature, EnergyParticle, ParticleSource, SpatialGrid, TerrainMap, TerrainParams,
-    TrailPoint,
+    Creature, EnergyParticle, ParticleSource, SpatialGrid, TerrainMap, TerrainParams, TrailPoint,
 };
 use crate::config::Config;
 use crate::neural::bridge::{CreatureEvent, CreatureInput, NeuralBridge};
@@ -530,8 +529,13 @@ impl World {
             let y = config.volcano_y + r * angle.sin();
             let energy_id = self.next_energy_id;
             self.next_energy_id += 1;
-            self.energy_particles
-                .push(EnergyParticle::new_lava(energy_id, x, y, current_energy, 0));
+            self.energy_particles.push(EnergyParticle::new_lava(
+                energy_id,
+                x,
+                y,
+                current_energy,
+                0,
+            ));
             self.energy_grid_dirty = true;
             // 熔岩流落地杀伤（火山口附近，系数=2）
             let dist_to_volcano = r; // 已在火山口附近
@@ -546,7 +550,8 @@ impl World {
                         if dx * dx + dy * dy < kill_r2 {
                             let damage = c.energy
                                 * (1.0
-                                    - (-current_energy * config.landing_damage_multiplier / c.energy)
+                                    - (-current_energy * config.landing_damage_multiplier
+                                        / c.energy)
                                         .exp());
                             c.energy = (c.energy - damage).max(0.0);
                             if c.energy <= 0.0 {
@@ -607,9 +612,14 @@ impl World {
         use super::terrain::GRID_WORLD_SIZE;
 
         const NEIGHBORS: [(i32, i32); 8] = [
-            (-1, -1), (-1, 0), (-1, 1),
-            (0, -1),           (0, 1),
-            (1, -1),  (1, 0),  (1, 1),
+            (-1, -1),
+            (-1, 0),
+            (-1, 1),
+            (0, -1),
+            (0, 1),
+            (1, -1),
+            (1, 0),
+            (1, 1),
         ];
 
         let mut rng = rand::thread_rng();
@@ -715,16 +725,18 @@ impl World {
                 };
 
                 // 在目标区块内随机落点
-                let nx = target_cx as f64 * GRID_WORLD_SIZE
-                    + rng.gen_range(0.0..GRID_WORLD_SIZE);
-                let ny = target_cy as f64 * GRID_WORLD_SIZE
-                    + rng.gen_range(0.0..GRID_WORLD_SIZE);
+                let nx = target_cx as f64 * GRID_WORLD_SIZE + rng.gen_range(0.0..GRID_WORLD_SIZE);
+                let ny = target_cy as f64 * GRID_WORLD_SIZE + rng.gen_range(0.0..GRID_WORLD_SIZE);
 
                 // 放置粒子
                 let eid = self.next_energy_id;
                 self.next_energy_id += 1;
                 self.energy_particles.push(EnergyParticle::new_lava(
-                    eid, nx, ny, current_energy, depth + 1,
+                    eid,
+                    nx,
+                    ny,
+                    current_energy,
+                    depth + 1,
                 ));
                 self.energy_grid_dirty = true;
 
@@ -845,7 +857,8 @@ impl World {
                 let alive = energy > 0.0 && !energy.is_nan() && !energy.is_infinite();
 
                 // 感知计算（仅存活时）
-                let (perception_cache, eye_scan_offset, follow_degree, light_scan_offset) = if alive {
+                let (perception_cache, eye_scan_offset, follow_degree, light_scan_offset) = if alive
+                {
                     compute_perception_pure(
                         i,
                         creature,
@@ -864,7 +877,12 @@ impl World {
                         &mut trail_buf,
                     )
                 } else {
-                    (creature.perception_cache, creature.eye_scan_offset, 0.0, creature.light_scan_offset)
+                    (
+                        creature.perception_cache,
+                        creature.eye_scan_offset,
+                        0.0,
+                        creature.light_scan_offset,
+                    )
                 };
 
                 PerceptionResult {
@@ -1166,7 +1184,7 @@ impl World {
                 if self.action_reproduce(creature_idx, reproduce_threshold, reproduce_ratio, config)
                 {
                     self.creatures[creature_idx].physio.pleasure += 0.5;
-                    self.creatures[creature_idx].reproduce_cooldown_frames = 20;
+                    self.creatures[creature_idx].reproduce_cooldown_frames = 30;
                     self.action_counts[3] += 1; // 繁殖
                 }
             }
@@ -1432,14 +1450,18 @@ impl World {
 
         for particle in &mut self.energy_particles {
             let was_alive = particle.alive;
-            let decay = if particle.lava { config.lava_decay_rate } else { config.volcano_decay_rate };
+            let decay = if particle.lava {
+                config.lava_decay_rate
+            } else {
+                config.volcano_decay_rate
+            };
             particle.update(dt, decay);
 
             // 熔岩粒子周期性杀伤（关联扩散代数，非距离）
             if particle.alive && particle.lava {
                 particle.lava_kill_timer += dt;
-                let depth_ratio = particle.chain_depth as f64
-                    / config.lava_max_chain_depth.max(1) as f64;
+                let depth_ratio =
+                    particle.chain_depth as f64 / config.lava_max_chain_depth.max(1) as f64;
                 let interval = config.lava_kill_base_interval
                     * (1.0 + depth_ratio * config.lava_kill_distance_scale);
                 if particle.lava_kill_timer >= interval {
@@ -1596,8 +1618,7 @@ impl World {
         let volcano_interval = config.current_volcano_interval(self.time);
         let volcano_rate = if volcano_interval > 0.0 {
             let total_count = config.volcano_count + config.lava_count;
-            config.current_volcano_energy(self.time) * total_count as f64
-                / volcano_interval
+            config.current_volcano_energy(self.time) * total_count as f64 / volcano_interval
         } else {
             0.0
         };
@@ -2255,7 +2276,12 @@ fn compute_perception_pure(
         follow_degree = follow_degree.max(eye_follow);
     }
 
-    (perception, scan_offsets, follow_degree, light_scan_offset_out)
+    (
+        perception,
+        scan_offsets,
+        follow_degree,
+        light_scan_offset_out,
+    )
 }
 
 // ========== 数据结构 ==========
