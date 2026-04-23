@@ -165,8 +165,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // 输出节点：写入 spike_counts / first_outputs
     if is_output(prev.flags) {
         let output_idx = node_local - creature_meta_data.input_count;
-        if output_idx < 7u {
-            let out_global = creature_slot * 7u + output_idx;
+        if output_idx < 8u {
+            let out_global = creature_slot * 8u + output_idx;
 
             if is_direct_read(next_node.flags) {
                 // 直读输出：tick 0 时保存 tanh 值（CPU 末尾读回）
