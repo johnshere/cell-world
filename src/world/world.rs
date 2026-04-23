@@ -1174,19 +1174,13 @@ impl World {
         // 嘴：接触食物自动吸收 + 对生物咬
         self.action_mouth(creature_idx, mouth, config);
 
-        // 繁殖（数量上限 + 最少20帧间隔）
-        if self.creatures[creature_idx].reproduce_cooldown_frames > 0 {
-            self.creatures[creature_idx].reproduce_cooldown_frames -= 1;
-        } else {
-            let alive_count = self.creatures.iter().filter(|c| c.alive).count();
-            let pop_ok = config.max_creatures == 0 || alive_count < config.max_creatures;
-            if reproduce > 0.2 && pop_ok {
-                if self.action_reproduce(creature_idx, reproduce_threshold, reproduce_ratio, config)
-                {
-                    self.creatures[creature_idx].physio.pleasure += 0.5;
-                    self.creatures[creature_idx].reproduce_cooldown_frames = 30;
-                    self.action_counts[3] += 1; // 繁殖
-                }
+        // 繁殖（数量上限，无冷却——完全由神经网络控制节奏）
+        let alive_count = self.creatures.iter().filter(|c| c.alive).count();
+        let pop_ok = config.max_creatures == 0 || alive_count < config.max_creatures;
+        if reproduce > 0.2 && pop_ok {
+            if self.action_reproduce(creature_idx, reproduce_threshold, reproduce_ratio, config) {
+                self.creatures[creature_idx].physio.pleasure += 0.5;
+                self.action_counts[3] += 1; // 繁殖
             }
         }
     }

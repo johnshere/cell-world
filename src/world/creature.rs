@@ -81,9 +81,6 @@ pub struct Creature {
     pub eye_scan_offset: [f64; 2],
     pub mouth_cooldown_timer: f64,
 
-    // 繁殖冷却帧计数（每次繁殖后重置为30，每帧递减）
-    pub reproduce_cooldown_frames: u32,
-
     // 痕迹生成计时器（<=0 可生成）
     pub trail_emit_timer: f64,
 
@@ -137,7 +134,6 @@ impl Creature {
             last_outputs: [0.0; 8],
             eye_scan_offset: [0.0; 2],
             mouth_cooldown_timer: 0.0,
-            reproduce_cooldown_frames: 0,
             trail_emit_timer: 0.0,
             frame_compute_ns: 0,
             physio: PhysioState::default(),
