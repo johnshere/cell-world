@@ -4,7 +4,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
-use crate::neural::{PhysioGene, Genome, SpikingNetwork};
+use crate::neural::{Genome, PhysioGene, SpikingNetwork};
 
 /// 生理状态缓冲（世界注入，帧内累积，apply 后清零）
 /// 框架设计：每新增一种生理通道只需加一个字段
@@ -81,7 +81,7 @@ pub struct Creature {
     pub eye_scan_offset: [f64; 2],
     pub mouth_cooldown_timer: f64,
 
-    // 繁殖冷却帧计数（每次繁殖后重置为20，每帧递减）
+    // 繁殖冷却帧计数（每次繁殖后重置为30，每帧递减）
     pub reproduce_cooldown_frames: u32,
 
     // 痕迹生成计时器（<=0 可生成）
@@ -114,7 +114,8 @@ impl Creature {
     ) -> Self {
         let brain = SpikingNetwork::from_genome(&genome);
         let genome_hash = genome.hash();
-        let heading = heading.unwrap_or_else(|| rand::thread_rng().gen_range(0.0..std::f64::consts::TAU));
+        let heading =
+            heading.unwrap_or_else(|| rand::thread_rng().gen_range(0.0..std::f64::consts::TAU));
 
         Self {
             id,
