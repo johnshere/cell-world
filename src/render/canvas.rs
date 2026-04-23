@@ -355,6 +355,20 @@ impl WorldCanvas {
                     }
                 }
 
+                // 发光器官（身体正中小方块，强度>0时绘制）
+                if creature.light_intensity > 0.0 {
+                    let light_alpha = (creature.light_intensity as f32 * 255.0) as u8;
+                    let light_r = 1.064 * self.scale;
+                    let light_color = Color32::from_rgba_unmultiplied(255, 255, 255, light_alpha);
+                    // 直接用 painter 画小矩形（数量有限，不需要 mesh 批量）
+                    let half = light_r;
+                    painter.rect_filled(
+                        egui::Rect::from_center_size(pos, egui::Vec2::splat(half * 2.0)),
+                        0.0,
+                        light_color,
+                    );
+                }
+
                 // 选中：半径大2px的白色圆
                 if is_selected {
                     painter.circle_stroke(pos, radius + 2.0, Stroke::new(1.0, Color32::WHITE));

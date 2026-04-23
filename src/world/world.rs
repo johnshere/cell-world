@@ -845,7 +845,7 @@ impl World {
                 let alive = energy > 0.0 && !energy.is_nan() && !energy.is_infinite();
 
                 // 感知计算（仅存活时）
-                let (perception_cache, eye_scan_offset, follow_degree) = if alive {
+                let (perception_cache, eye_scan_offset, follow_degree, light_scan_offset) = if alive {
                     compute_perception_pure(
                         i,
                         creature,
@@ -864,13 +864,14 @@ impl World {
                         &mut trail_buf,
                     )
                 } else {
-                    (creature.perception_cache, creature.eye_scan_offset, 0.0)
+                    (creature.perception_cache, creature.eye_scan_offset, 0.0, creature.light_scan_offset)
                 };
 
                 PerceptionResult {
                     creature_idx: i,
                     perception_cache,
                     eye_scan_offset,
+                    light_scan_offset,
                     energy_after_metabolism: energy,
                     alive,
                     follow_degree,
@@ -894,6 +895,7 @@ impl World {
             self.creatures[i].energy = result.energy_after_metabolism;
             self.creatures[i].perception_cache = result.perception_cache;
             self.creatures[i].eye_scan_offset = result.eye_scan_offset;
+            self.creatures[i].light_scan_offset = result.light_scan_offset;
             self.creatures[i].age += dt;
 
             // 指数平滑 follow_level
@@ -903,7 +905,6 @@ impl World {
             self.creatures[i].follow_level += (target - current) * (rate * dt).min(1.0);
 
             // 冷却递减
-            self.creatures[i].eye_cooldown_timer -= dt;
             self.creatures[i].mouth_cooldown_timer -= dt;
 
             if !result.alive {
@@ -922,7 +923,7 @@ impl World {
         // ========== 阶段2b: 同步执行神经批 ==========
         // 每次 update 固定 snn_ticks 个 tick，加速仅增加 update 频率，保证结果与倍速无关
         let snn_ticks = (config.neural_tick_rate * dt).round().max(1.0) as usize;
-        let output_map: FxHashMap<u64, ([f64; 7], u64)> = if has_bridge {
+        let output_map: FxHashMap<u64, ([f64; 8], u64)> = if has_bridge {
             let outputs = self
                 .neural_bridge
                 .as_ref()
@@ -975,7 +976,7 @@ impl World {
                 // legacy 纯 CPU 同步路径
                 let perception = self.creatures[i].perception_cache;
                 let outputs = self.creatures[i].brain.tick_multi(&perception, snn_ticks);
-                for (j, &v) in outputs.iter().enumerate().take(7) {
+                for (j, &v) in outputs.iter().enumerate().take(8) {
                     self.creatures[i].last_outputs[j] = v;
                 }
 
@@ -1039,27 +1040,31 @@ impl World {
         }
     }
 
-    // ========== 动作系统（7输出） ==========
+    // ========== 动作系统（8输出） ==========
 
-    /// 执行动作：转向(0), 速度(1), 嘴(2), 繁殖(3), 繁殖阈值(4), 子代能量比例(5), 痕迹强度(6)
+    /// 执行动作：转向(0), 速度(1), 嘴(2), 繁殖(3), 繁殖阈值(4), 子代能量比例(5), 痕迹强度(6), 发光(7)
     fn execute_actions(&mut self, creature_idx: usize, outputs: &[f64], dt: f64, config: &Config) {
-        // 输出0: 转向
+        // 输出0: 转向 (block 25)
         let turn = outputs.get(0).copied().unwrap_or(0.0);
-        // 输出1: 速度
+        // 输出1: 速度 (block 25)
         let speed = outputs.get(1).copied().unwrap_or(0.0);
-        // 输出2: 嘴（负=咬，接触食物自动吸收）
+        // 输出2: 嘴（负=咬，接触食物自动吸收）(block 25)
         let mouth = outputs.get(2).copied().unwrap_or(0.0);
-        // 输出3: 繁殖意愿
+        // 输出3: 繁殖意愿 (block -25)
         let reproduce = outputs.get(3).copied().unwrap_or(0.0);
-        // 输出4: 繁殖阈值 tanh(-1~1) → sigmoid → 20~200
+        // 输出4: 繁殖阈值 tanh(-1~1) → sigmoid → 20~200 (block -25)
         let raw4 = outputs.get(4).copied().unwrap_or(0.0);
         let reproduce_threshold = 20.0 + (raw4 * 0.5 + 0.5).clamp(0.0, 1.0) * 180.0;
-        // 输出5: 子代能量比例 tanh(-1~1) → sigmoid → 0.1~0.5
+        // 输出5: 子代能量比例 tanh(-1~1) → sigmoid → 0.1~0.5 (block -25)
         let raw5 = outputs.get(5).copied().unwrap_or(0.0);
         let reproduce_ratio = 0.1 + (raw5 * 0.5 + 0.5).clamp(0.0, 1.0) * 0.4;
-        // 输出6: 痕迹强度 tanh(-1~1) → 正半轴 0~0.3（中立=0，正值=主动投放）
+        // 输出6: 痕迹强度 tanh(-1~1) → 正半轴 0~0.3 (block 25)
         let raw6 = outputs.get(6).copied().unwrap_or(0.0);
         let trail_strength = raw6.max(0.0) * 0.3;
+        // 输出7: 发光强度 tanh(-1~1) → (v+1)/2 → 0~1, 量化一位小数 (block 26)
+        let raw7 = outputs.get(7).copied().unwrap_or(0.0);
+        let light = ((raw7 + 1.0) * 0.5).clamp(0.0, 1.0);
+        self.creatures[creature_idx].light_intensity = (light * 10.0).round() / 10.0;
 
         // 转向 + 移动
         let turn_rate = std::f64::consts::PI * 2.0; // 最大每秒一圈
@@ -1876,8 +1881,9 @@ fn angle_diff(a: f64, b: f64) -> f64 {
 /// 感知阶段每只生物的计算结果（由并行阶段产出，串行阶段消费）
 struct PerceptionResult {
     creature_idx: usize,
-    perception_cache: [f64; 18],
+    perception_cache: [f64; 20],
     eye_scan_offset: [f64; 2],
+    light_scan_offset: f64,
     energy_after_metabolism: f64,
     alive: bool,
     follow_degree: f64,
@@ -1946,7 +1952,7 @@ fn compute_nearby_energy_pure(
     total
 }
 
-/// 纯函数：扫描眼感知核心（只读，返回 17 通道感知结果和更新后的扫描偏移量）
+/// 纯函数：扫描眼感知核心（只读，返回 20 通道感知结果和更新后的扫描偏移量）
 fn compute_perception_pure(
     creature_idx: usize,
     creature: &Creature,
@@ -1963,9 +1969,10 @@ fn compute_perception_pure(
     energy_buf: &mut Vec<usize>,
     creature_buf: &mut Vec<usize>,
     trail_buf: &mut Vec<usize>,
-) -> ([f64; 18], [f64; 2], f64) {
+) -> ([f64; 20], [f64; 2], f64, f64) {
     let mut perception = creature.perception_cache;
     let mut scan_offsets = creature.eye_scan_offset;
+    let mut light_scan_offset_out = creature.light_scan_offset;
 
     // 自身状态 [16] 始终更新
     perception[16] = (creature.energy / 2000.0).min(1.0);
@@ -2171,6 +2178,50 @@ fn compute_perception_pure(
     perception[14] = nearest_heading_diff[1];
     perception[15] = nearest_speed_diff[1];
 
+    // === 发光感知（360°扫描，block -2）===
+    {
+        let light_scan_advance = config.eye_scan_speed.to_radians() * dt;
+        let mut light_offset = creature.light_scan_offset + light_scan_advance;
+        if light_offset >= std::f64::consts::TAU {
+            light_offset -= std::f64::consts::TAU;
+        }
+        let light_beam_angle = heading + light_offset;
+        let light_beam_half = (config.eye_scan_speed * dt / 2.0)
+            .to_radians()
+            .max(5.0_f64.to_radians());
+
+        let mut best_dist = f64::MAX;
+        let mut best_intensity = 0.0_f64;
+
+        // 复用 creature_buf（已被生物扫描填充，但这里需要重新查询全范围）
+        creature_grid.query_into(cx, cy, eye_range, creature_buf);
+        for &idx in creature_buf.iter() {
+            if idx == creature_idx {
+                continue;
+            }
+            let other = &creatures[idx];
+            if !other.alive || other.light_intensity <= 0.0 {
+                continue;
+            }
+            let dx = other.x - cx;
+            let dy = other.y - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist <= 0.0 || dist > eye_range {
+                continue;
+            }
+            let angle = dy.atan2(dx);
+            let diff = angle_diff(angle, light_beam_angle);
+            if diff.abs() <= light_beam_half && dist < best_dist {
+                best_dist = dist;
+                best_intensity = other.light_intensity;
+            }
+        }
+
+        perception[18] = light_offset / std::f64::consts::PI - 1.0;
+        perception[19] = best_intensity;
+        light_scan_offset_out = light_offset;
+    }
+
     // === 跟随度计算 ===
     let mut follow_degree = 0.0_f64;
     for eye_i in 0..2 {
@@ -2198,7 +2249,7 @@ fn compute_perception_pure(
         follow_degree = follow_degree.max(eye_follow);
     }
 
-    (perception, scan_offsets, follow_degree)
+    (perception, scan_offsets, follow_degree, light_scan_offset_out)
 }
 
 // ========== 数据结构 ==========

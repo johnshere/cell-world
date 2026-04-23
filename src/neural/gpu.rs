@@ -11,7 +11,7 @@ mod inner {
     pub const MAX_CREATURES: usize = 512;
     pub const MAX_NODES: usize = 64;
     pub const MAX_CONNS: usize = 128;
-    pub const OUTPUTS_PER_CREATURE: usize = 7;
+    pub const OUTPUTS_PER_CREATURE: usize = 8;
 
     const COUNTER_ELEMS: usize = MAX_CREATURES * OUTPUTS_PER_CREATURE;
     const COUNTER_BYTES: u64 = (COUNTER_ELEMS * 4) as u64; // u32 / f32 同宽
@@ -584,7 +584,7 @@ mod inner {
         }
 
         /// 上传感知输入到当前 read 侧的 nodes 缓冲
-        pub fn upload_inputs(&mut self, slot: usize, perception: &[f64; 18]) {
+        pub fn upload_inputs(&mut self, slot: usize, perception: &[f64; 20]) {
             if slot >= MAX_CREATURES {
                 return;
             }
@@ -700,9 +700,9 @@ mod inner {
         }
 
         /// 从 last_raw 读取指定 slot 的脉冲计数和直读输出
-        pub fn slot_raw(&self, slot: usize) -> ([u32; 7], [f32; 7]) {
-            let mut spikes = [0u32; 7];
-            let mut firsts = [0.0f32; 7];
+        pub fn slot_raw(&self, slot: usize) -> ([u32; 8], [f32; 8]) {
+            let mut spikes = [0u32; 8];
+            let mut firsts = [0.0f32; 8];
             let base_bytes = slot * OUTPUTS_PER_CREATURE * 4;
             let spike_src =
                 &self.last_raw[base_bytes..base_bytes + OUTPUTS_PER_CREATURE * 4];
@@ -710,7 +710,7 @@ mod inner {
             let first_src =
                 &self.last_raw[first_base..first_base + OUTPUTS_PER_CREATURE * 4];
 
-            for i in 0..7 {
+            for i in 0..8 {
                 spikes[i] = u32::from_le_bytes([
                     spike_src[i * 4],
                     spike_src[i * 4 + 1],
@@ -814,14 +814,14 @@ mod inner {
             let mut results = Vec::with_capacity(active.len());
             for (creature_id, slot) in active {
                 let (spikes, firsts) = self.gpu.slot_raw(slot);
-                let mut final_outputs = [0.0f64; 7];
-                for i in 0..7 {
+                let mut final_outputs = [0.0f64; 8];
+                for i in 0..8 {
                     final_outputs[i] = firsts[i] as f64;
                 }
 
                 if let Some(modes) = self.output_modes_cache.get(&creature_id) {
                     if self.last_tick_count > 0 {
-                        for (j, &direct_read) in modes.iter().enumerate().take(7) {
+                        for (j, &direct_read) in modes.iter().enumerate().take(8) {
                             if !direct_read {
                                 let rate = spikes[j] as f64 / self.last_tick_count as f64;
                                 final_outputs[j] = rate * 2.0 - 1.0;

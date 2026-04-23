@@ -25,10 +25,10 @@ pub trait TickExecutor: Send {
 /// CPU 执行器
 pub struct CpuExecutor {
     networks: FxHashMap<u64, SpikingNetwork>,
-    current_inputs: FxHashMap<u64, [f64; 18]>,
-    first_outputs: FxHashMap<u64, [f64; 7]>,
+    current_inputs: FxHashMap<u64, [f64; 20]>,
+    first_outputs: FxHashMap<u64, [f64; 8]>,
     compute_times: FxHashMap<u64, u64>,
-    spike_counts: FxHashMap<u64, [u32; 7]>,
+    spike_counts: FxHashMap<u64, [u32; 8]>,
     output_modes_cache: FxHashMap<u64, Vec<bool>>,
     /// 上一批实际执行的 tick 数（用于发放率计算）
     last_tick_count: u32,
@@ -54,7 +54,7 @@ impl TickExecutor for CpuExecutor {
         let modes = network.output_modes().to_vec();
         self.networks.insert(id, network);
         self.output_modes_cache.insert(id, modes);
-        self.spike_counts.insert(id, [0; 7]);
+        self.spike_counts.insert(id, [0; 8]);
     }
 
     fn unregister(&mut self, id: u64) {
@@ -69,7 +69,7 @@ impl TickExecutor for CpuExecutor {
         self.compute_times.clear();
         self.first_outputs.clear();
         for counts in self.spike_counts.values_mut() {
-            *counts = [0; 7];
+            *counts = [0; 8];
         }
 
         self.current_inputs.clear();
@@ -97,9 +97,9 @@ impl TickExecutor for CpuExecutor {
                 *self.compute_times.entry(id).or_insert(0) += elapsed_ns;
 
                 // tick 0 捕获直读输出快照
-                if tick_idx == 0 && outputs.len() >= 7 {
-                    let mut arr = [0.0; 7];
-                    arr.copy_from_slice(&outputs[..7]);
+                if tick_idx == 0 && outputs.len() >= 8 {
+                    let mut arr = [0.0; 8];
+                    arr.copy_from_slice(&outputs[..8]);
                     self.first_outputs.insert(id, arr);
                 }
 
@@ -107,7 +107,7 @@ impl TickExecutor for CpuExecutor {
                 if let Some(modes) = self.output_modes_cache.get(&id) {
                     if let Some(counts) = self.spike_counts.get_mut(&id) {
                         for (j, (&v, &direct_read)) in
-                            outputs.iter().zip(modes.iter()).enumerate().take(7)
+                            outputs.iter().zip(modes.iter()).enumerate().take(8)
                         {
                             if !direct_read && v > 0.5 {
                                 counts[j] += 1;
@@ -123,12 +123,12 @@ impl TickExecutor for CpuExecutor {
         self.networks
             .keys()
             .map(|&id| {
-                let first = self.first_outputs.get(&id).copied().unwrap_or([0.0; 7]);
+                let first = self.first_outputs.get(&id).copied().unwrap_or([0.0; 8]);
                 let mut final_outputs = first;
                 if let Some(modes) = self.output_modes_cache.get(&id) {
                     if let Some(counts) = self.spike_counts.get(&id) {
                         if self.last_tick_count > 0 {
-                            for (j, &direct_read) in modes.iter().enumerate().take(7) {
+                            for (j, &direct_read) in modes.iter().enumerate().take(8) {
                                 if !direct_read {
                                     let rate = counts[j] as f64 / self.last_tick_count as f64;
                                     final_outputs[j] = rate * 2.0 - 1.0;

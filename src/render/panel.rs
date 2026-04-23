@@ -767,7 +767,7 @@ impl StatsPanel {
 
                     ui.separator();
 
-                    // 基本状态
+                    // ── 基本状态 ──
                     let body_radius = (creature.energy * 1.28_f64).cbrt();
                     ui.horizontal(|ui| {
                         ui.label(format!(
@@ -786,63 +786,101 @@ impl StatsPanel {
                     ui.horizontal(|ui| {
                         ui.label(format!("位置: ({:.0}, {:.0})", creature.x, creature.y));
                     });
-
-                    // 冷却
-                    ui.separator();
+                    // 发育进度
+                    let mat = creature.genome.maturation_time;
+                    let dev_progress = if mat > 0.0 { creature.age / mat } else { 1.0 };
+                    let dev_label = if dev_progress < 1.0 { "发育中" } else { "成熟" };
                     ui.horizontal(|ui| {
                         ui.label(format!(
-                            "嘴:{:.1}s  痕迹:{:.1}s",
-                            creature.mouth_cooldown_timer.max(0.0),
-                            creature.trail_emit_timer.max(0.0),
+                            "发育:{:.0}/{:.0}s ({:.0}% {})",
+                            creature.age.min(mat), mat, (dev_progress * 100.0).min(999.0), dev_label
+                        ));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "跟随度:{:.2}  发光:{:.1}",
+                            creature.follow_level, creature.light_intensity
                         ));
                     });
 
-                    // 神经网络输出（实时决策）
+                    // ── 运动决策 (block 25) ──
                     ui.separator();
                     let o = &creature.last_outputs;
-                    ui.label("决策输出");
-                    ui.horizontal(|ui| {
-                        ui.label(format!("转向:{:+.2}  速度:{:.2}", o[0], o[1]));
-                    });
+                    ui.label("运动 (block 25)");
                     ui.horizontal(|ui| {
                         let mouth_str = if o[2] < -0.1 { "咬" } else { "闭" };
                         ui.label(format!(
-                            "嘴:{:.2}({})  繁殖意愿:{:.2}",
-                            o[2], mouth_str, o[3]
+                            "转向:{:+.2}  速度:{:.2}  嘴:{:.2}({})",
+                            o[0], o[1], o[2], mouth_str
                         ));
                     });
                     ui.horizontal(|ui| {
-                        // sigmoid映射：繁殖阈值 20~200，子代比例 0.1~0.5
-                        let threshold = 20.0 + 180.0 / (1.0 + (-o[4]).exp());
-                        let child_ratio = 0.1 + 0.4 / (1.0 + (-o[5]).exp());
                         ui.label(format!(
-                            "繁殖阈值:{:.0}  子代比例:{:.0}%  痕迹:{:.2}",
-                            threshold,
-                            child_ratio * 100.0,
-                            o[6].max(0.0)
+                            "痕迹:{:.2}  嘴冷却:{:.1}s",
+                            o[6].max(0.0),
+                            creature.mouth_cooldown_timer.max(0.0),
                         ));
                     });
 
-                    // 神经网络结构
+                    // ── 繁殖决策 (block -25) ──
+                    ui.label("繁殖 (block -25)");
+                    let threshold = 20.0 + (o[4] * 0.5 + 0.5).clamp(0.0, 1.0) * 180.0;
+                    let child_ratio = 0.1 + (o[5] * 0.5 + 0.5).clamp(0.0, 1.0) * 0.4;
+                    let ready = if o[3] > 0.2 && creature.energy >= threshold { "Ready" } else { "" };
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "意愿:{:.2}  阈值:{:.0}  比例:{:.0}% {}",
+                            o[3], threshold, child_ratio * 100.0, ready
+                        ));
+                    });
+
+                    // ── 发光 (block 26) ──
+                    ui.label(format!("发光 (block 26): {:.1}", creature.light_intensity));
+
+                    // ── 感知概览 ──
+                    ui.separator();
+                    ui.label("感知");
+                    let p = &creature.perception_cache;
+                    ui.horizontal(|ui| {
+                        // 左眼最近目标
+                        let type_l = match p[3] as i32 { 0 => "-", _ if p[3] < 0.5 => "粒", _ if p[3] < 0.8 => "痕", _ => "生" };
+                        let type_r = match p[11] as i32 { 0 => "-", _ if p[11] < 0.5 => "粒", _ if p[11] < 0.8 => "痕", _ => "生" };
+                        ui.label(format!(
+                            "左眼[{}]近:{:.2}  右眼[{}]近:{:.2}",
+                            type_l, p[1], type_r, p[9]
+                        ));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "能量密度 L:{:.3} R:{:.3}  自身:{:.2}",
+                            p[5], p[13], p[16]
+                        ));
+                    });
+                    if p[19] > 0.0 {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("发光感知: 强度={:.1}", p[19]));
+                        });
+                    }
+
+                    // ── 神经网络结构 ──
                     ui.separator();
                     let conn_count = creature.genome.connections.len();
+                    let enabled_count = creature.genome.connections.iter().filter(|c| c.enabled).count();
                     let node_count = creature.genome.nodes.len();
                     let hidden = node_count.saturating_sub(
                         crate::neural::Genome::INPUT_SIZE + crate::neural::Genome::OUTPUT_SIZE,
                     );
                     ui.label(format!(
-                        "节点:{} (隐:{})  连接:{}",
-                        node_count, hidden, conn_count
+                        "节点:{} (隐:{})  连接:{}/{}",
+                        node_count, hidden, enabled_count, conn_count
                     ));
 
                     // 目标偏好基因（target_pref）
-                    ui.separator();
                     let total_pref_entries: usize = creature.genome.conn_probs.values()
                         .map(|p| p.target_pref.len())
                         .sum();
-                    ui.label(format!("目标偏好基因  条目:{}", total_pref_entries));
                     if ui
-                        .button(format!("📊 查看偏好 ({})", total_pref_entries))
+                        .button(format!("查看偏好 ({})", total_pref_entries))
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
                         .clicked()
                     {
