@@ -5,7 +5,7 @@ use super::canvas::species_to_color;
 use super::Selection;
 use crate::config::Config;
 use crate::store::Store;
-use crate::world::{DeathAgeStats, DominantCandidate, SimSnapshot};
+use crate::world::{DeathAgeStats, DominantCandidate, SimSnapshot, GRID_WORLD_SIZE};
 
 /// 面板操作结果
 #[derive(Default)]
@@ -72,6 +72,8 @@ pub struct CachedStats {
     pub top_clans: Vec<(u64, usize)>,
     pub dominant_candidate: Option<DominantCandidate>,
     pub avg_compute_ns: f64,
+    pub avg_nodes: f64,
+    pub avg_connections: f64,
 }
 
 /// 将秒数格式化为 d h m s
@@ -136,7 +138,21 @@ impl StatsPanel {
                 top_clans: stats.top_clans.clone(),
                 dominant_candidate: stats.dominant_candidate.clone(),
                 avg_compute_ns: snapshot.perf_stats.avg_compute_ns,
+                avg_nodes: 0.0,
+                avg_connections: 0.0,
             };
+            // 计算存活生物的脑结构平均
+            let alive: Vec<_> = snapshot.creatures.iter().filter(|c| c.alive).collect();
+            let n = alive.len();
+            if n > 0 {
+                let total_nodes: usize = alive.iter().map(|c| c.genome.nodes.len()).sum();
+                let total_conns: usize = alive
+                    .iter()
+                    .map(|c| c.genome.connections.iter().filter(|cn| cn.enabled).count())
+                    .sum();
+                self.cached_stats.avg_nodes = total_nodes as f64 / n as f64;
+                self.cached_stats.avg_connections = total_conns as f64 / n as f64;
+            }
             // 记录能量历史（总能量 + 生命能量 + 理论投放能量 + 生物数量）
             self.energy_history.push((
                 stats.time,
@@ -346,6 +362,14 @@ impl StatsPanel {
                 ));
             });
         }
+
+        // 脑结构平均
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!(
+                "脑: 均节点:{:.0}  均连接:{:.0}",
+                self.cached_stats.avg_nodes, self.cached_stats.avg_connections
+            ));
+        });
 
         // 底部功能切换按钮
         ui.separator();
@@ -710,6 +734,7 @@ impl StatsPanel {
         ui: &mut Ui,
         selection: &Selection,
         snapshot: &SimSnapshot,
+        lpp: f64,
     ) -> PanelAction {
         let mut action = PanelAction::default();
 
@@ -904,17 +929,46 @@ impl StatsPanel {
                         ui.label(format!("({:.1}, {:.1})", particle.x, particle.y));
                     });
                     ui.horizontal(|ui| {
-                        ui.label("能量值:");
-                        ui.label(format!("{:.1}", particle.energy));
+                        let ratio = if particle.initial_energy > 0.0 {
+                            particle.energy / particle.initial_energy
+                        } else {
+                            0.0
+                        };
+                        ui.label(format!(
+                            "能量:{:.1}/{:.1} ({:.0}%)",
+                            particle.energy,
+                            particle.initial_energy,
+                            ratio * 100.0
+                        ));
                     });
                     ui.horizontal(|ui| {
-                        ui.label("初始能量:");
-                        ui.label(format!("{:.1}", particle.initial_energy));
+                        ui.label(format!("存在时间:{:.1}s", particle.age));
                     });
-                    ui.horizontal(|ui| {
-                        ui.label("存在时间:");
-                        ui.label(format!("{:.1}s", particle.age));
-                    });
+                    if particle.lava {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("熔岩粒子  代数:{}", particle.chain_depth));
+                        });
+                    }
+
+                    // 地形高度 + 等效液面
+                    let cx = (particle.x / GRID_WORLD_SIZE).floor() as i32;
+                    let cy = (particle.y / GRID_WORLD_SIZE).floor() as i32;
+                    let th = snapshot.terrain.height_at(particle.x, particle.y);
+                    if let Some(th) = th {
+                        let count = snapshot
+                            .energy_particles
+                            .iter()
+                            .filter(|p| {
+                                p.alive
+                                    && (p.x / GRID_WORLD_SIZE).floor() as i32 == cx
+                                    && (p.y / GRID_WORLD_SIZE).floor() as i32 == cy
+                            })
+                            .count();
+                        let eff = th as f64 + lpp * count as f64;
+                        ui.horizontal(|ui| {
+                            ui.label(format!("地形高:{}  区块粒子:{}  等效液面:{:.1}", th, count, eff));
+                        });
+                    }
                 }
             }
         }

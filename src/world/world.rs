@@ -629,8 +629,8 @@ impl World {
         visited.insert((cur_cx, cur_cy), true);
 
         for _ in 0..max_depth {
-            // 当前区块模拟 +1 粒子后的高度
-            let cur_h = Self::effective_chunk_height(terrain, cur_cx, cur_cy, chunk_count, lpp, 1);
+            // 当前区块模拟 +1 粒子后的等效高度（粒子固定贡献 1 单位地形，不随 lpp 放大）
+            let cur_h = Self::effective_chunk_height(terrain, cur_cx, cur_cy, chunk_count, lpp, 0) + 1.0;
 
             // 找 8 邻居中有效高度最低的（不含 extra）
             let mut lowest_h = f64::MAX;
@@ -704,8 +704,14 @@ impl World {
             let parent_cx = (px / GRID_WORLD_SIZE).floor() as i32;
             let parent_cy = (py / GRID_WORLD_SIZE).floor() as i32;
 
-            // 逐个扩散子粒子
-            for _ in 0..config.lava_spread_count {
+            // 至少分裂 1 个，以固定概率分裂第 2 个
+            let extra_count = if rng.gen_bool(config.lava_spread_probability.clamp(0.0, 1.0)) {
+                1
+            } else {
+                0
+            };
+            let total = 1 + extra_count;
+            for _ in 0..total {
                 // 子粒子初始落入父粒子所在区块，然后走溢流机制
                 let target = Self::overflow_find_target(
                     &self.terrain,
@@ -978,13 +984,16 @@ impl World {
                 self.creatures[i].physio.clear();
                 self.execute_actions(i, &outputs.to_vec(), dt, config);
 
+                // 集体奖励
+                if config.reward_group_enabled {
+                    self.creatures[i].physio.pleasure_group +=
+                        self.creatures[i].follow_level * 0.1;
+                }
+
                 let total_reward = self.creatures[i]
                     .physio
                     .total_reward(&self.creatures[i].genome.physio);
-                // TODO:100代以上屏蔽赫布学习（实验：观察后期行为多样性）
-                if self.creatures[i].generation < 100 {
-                    self.creatures[i].brain.apply_physiology(total_reward);
-                }
+                self.creatures[i].brain.apply_physiology(total_reward);
 
                 if need_per_creature_timing {
                     let main_ns = creature_t0.elapsed().as_nanos() as u64;
@@ -1001,13 +1010,16 @@ impl World {
                 self.creatures[i].physio.clear();
                 self.execute_actions(i, &outputs, dt, config);
 
+                // 集体奖励
+                if config.reward_group_enabled {
+                    self.creatures[i].physio.pleasure_group +=
+                        self.creatures[i].follow_level * 0.1;
+                }
+
                 let total_reward = self.creatures[i]
                     .physio
                     .total_reward(&self.creatures[i].genome.physio);
-                // TODO:100代以上屏蔽赫布学习（实验：观察后期行为多样性）
-                if self.creatures[i].generation < 100 {
-                    self.creatures[i].brain.apply_physiology(total_reward);
-                }
+                self.creatures[i].brain.apply_physiology(total_reward);
 
                 if need_per_creature_timing {
                     let main_ns = creature_t0.elapsed().as_nanos() as u64;
@@ -1179,7 +1191,7 @@ impl World {
         let pop_ok = config.max_creatures == 0 || alive_count < config.max_creatures;
         if reproduce > 0.2 && pop_ok {
             if self.action_reproduce(creature_idx, reproduce_threshold, reproduce_ratio, config) {
-                self.creatures[creature_idx].physio.pleasure += 0.5;
+                self.creatures[creature_idx].physio.pleasure_energy += 0.5;
                 self.action_counts[3] += 1; // 繁殖
             }
         }
@@ -1215,7 +1227,10 @@ impl World {
                     if angle_diff.abs() <= half_arc {
                         let energy = self.energy_particles[particle_idx].consume();
                         self.creatures[idx].energy += energy;
-                        self.creatures[idx].physio.pleasure += energy / config.initial_energy;
+                        if config.reward_energy_enabled {
+                            self.creatures[idx].physio.pleasure_energy +=
+                                energy / config.initial_energy;
+                        }
                         self.action_counts[1] += 1;
                         break;
                     }
@@ -1230,7 +1245,6 @@ impl World {
             for &trail_idx in &nearby_trails {
                 let trail = &self.trail_points[trail_idx];
                 if trail.alive
-                    && trail.age > 2.0
                     && trail.creator_id != my_id
                     && trail.clan_hash == my_clan_hash
                 {
@@ -1243,7 +1257,10 @@ impl World {
                         if angle_diff.abs() <= half_arc {
                             let energy = self.trail_points[trail_idx].consume();
                             self.creatures[idx].energy += energy;
-                            self.creatures[idx].physio.pleasure += energy / config.initial_energy;
+                            if config.reward_trail_enabled {
+                                self.creatures[idx].physio.pleasure_trail +=
+                                    energy / config.initial_energy;
+                            }
                             break;
                         }
                     }

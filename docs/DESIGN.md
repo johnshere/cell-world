@@ -490,7 +490,7 @@ volcano_energy_amplitude = 0.1
 
 # 熔岩流（溢流机制：等效液面梯度 + visited 防回弹）
 lava_count = 3                    # 每次火山喷发附带的熔岩流粒子数
-lava_spread_count = 2             # 死亡时扩散子代数
+lava_spread_probability = 0.5         # 死亡时分裂第二个子粒子的概率
 lava_max_chain_depth = 5          # 最大链式代数
 lava_level_per_particle = 0.5     # 等效液面系数（等效高度=地形+系数×n，n=区块粒子数）
 lava_decay_rate = 0.005           # 熔岩粒子独立衰减率（/秒）

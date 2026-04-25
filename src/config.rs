@@ -149,9 +149,9 @@ pub struct Config {
     /// 每次火山喷发附带的熔岩流粒子数
     #[serde(default = "default_lava_count")]
     pub lava_count: usize,
-    /// 熔岩粒子死亡时扩散子代数
-    #[serde(default = "default_lava_spread_count")]
-    pub lava_spread_count: usize,
+    /// 熔岩粒子死亡时分裂第二个子粒子的概率
+    #[serde(default = "default_lava_spread_probability")]
+    pub lava_spread_probability: f64,
     /// 最大链式代数
     #[serde(default = "default_lava_max_chain_depth")]
     pub lava_max_chain_depth: u8,
@@ -215,6 +215,21 @@ pub struct Config {
     /// 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
     #[serde(default = "default_terrain_slope_cost")]
     pub terrain_slope_cost: f64,
+
+    // === 奖励通道开关 ===
+    /// 能量吸收奖励（核心生存信号，默认开启）
+    #[serde(default = "default_true")]
+    pub reward_energy_enabled: bool,
+    /// 痕迹吸收奖励
+    #[serde(default)]
+    pub reward_trail_enabled: bool,
+    /// 集体行为奖励（跟随+群居散热）
+    #[serde(default)]
+    pub reward_group_enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_terrain_slope_cost() -> f64 {
@@ -246,8 +261,8 @@ fn default_follow_cost_discount() -> f64 {
 fn default_lava_count() -> usize {
     3
 }
-fn default_lava_spread_count() -> usize {
-    2
+fn default_lava_spread_probability() -> f64 {
+    0.5
 }
 fn default_lava_max_chain_depth() -> u8 {
     5

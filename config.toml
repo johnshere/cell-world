@@ -1,7 +1,7 @@
 # 初始模拟速度
 initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 200
+min_creatures = 5
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 400
 # 初始能量
@@ -19,7 +19,7 @@ volcano_interval = 25.0
 # 火山喷射半径
 volcano_radius = 2500.0
 # 每次喷发粒子数
-volcano_count = 70
+volcano_count = 85
 # 火山粒子能量
 volcano_particle_energy = 160.0
 
@@ -44,21 +44,21 @@ landing_damage_multiplier = 1.0
 
 # === 熔岩流 ===
 # 每次火山喷发附带的熔岩流粒子数
-lava_count = 3
-# 熔岩粒子死亡时扩散子代数
-lava_spread_count = 2
+lava_count = 1
+# 熔岩粒子死亡时分裂第二个子粒子的概率
+lava_spread_probability = 0.6
 # 最大链式代数
 lava_max_chain_depth = 20
 # 每个粒子贡献的等效液面高度
-lava_level_per_particle = 1.1
+lava_level_per_particle = 1.6
 # 熔岩粒子周期性杀伤基础间隔（秒，火山口处）
 lava_kill_base_interval = 1.0
 # 距离对杀伤周期的放大系数
-lava_kill_distance_scale = 0.5
+lava_kill_distance_scale = 1.0
 # 熔岩粒子独立衰减率（/秒）
 lava_decay_rate = 0.005
 # 溢流最大区块跳跃数
-lava_max_overflow_depth = 15
+lava_max_overflow_depth = 20
 
 # === 器官冷却 ===
 # 眼睛冷却时间（秒）— 已废弃
@@ -78,7 +78,7 @@ heat_floor = 0.03
 
 # === 代谢 ===
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
-age_metabolism_factor = 0.012
+age_metabolism_factor = 0.01
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗（每单位距离）
@@ -87,7 +87,7 @@ move_cost = 0.0015
 follow_cost_discount = 0.8
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.025
+heat_dissipation_coefficient = 0.03
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -136,7 +136,7 @@ neural_backend = "auto"
 neural_tick_rate = 600.0
 # 变异率（全局常量，不再是基因组内可演化基因）
 # base/block 两类变异共享此触发概率
-mutation_rate = 0.05
+mutation_rate = 0.08
 base_metabolism = 0.025
 max_speed = 20.0
 meteorite_interval = 0.0
@@ -156,4 +156,8 @@ auto_spawn_interval = 1.0
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
 terrain_slope_cost = 7.0
+# === 奖励通道开关 ===
+reward_energy_enabled = true
+reward_trail_enabled = true
+reward_group_enabled = true
 reproduce_cooldown = 0.0

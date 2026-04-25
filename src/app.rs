@@ -547,7 +547,7 @@ impl CellWorldApp {
             let c = &mut self.config;
             let mut changed = false;
 
-            ui.collapsing("进化与竞争", |ui| {
+            ui.collapsing("进化", |ui| {
                 changed |= config_drag_usize(
                     ui,
                     "初始连接min",
@@ -572,6 +572,20 @@ impl CellWorldApp {
                 );
                 changed |= config_drag_f64(
                     ui,
+                    "变异率",
+                    "base/block两类变异触发概率",
+                    &mut c.mutation_rate,
+                    0.01,
+                    0.01..=0.5,
+                );
+                changed |= ui.checkbox(&mut c.reward_energy_enabled, "能量奖励").changed();
+                changed |= ui.checkbox(&mut c.reward_trail_enabled, "痕迹奖励").changed();
+                changed |= ui.checkbox(&mut c.reward_group_enabled, "集体奖励").changed();
+            });
+
+            ui.collapsing("竞争", |ui| {
+                changed |= config_drag_f64(
+                    ui,
                     "速度战力权重",
                     "移速对战力的加成系数",
                     &mut c.combat_speed_weight,
@@ -593,14 +607,6 @@ impl CellWorldApp {
                     &mut c.bite_transfer_rate,
                     0.01,
                     0.01..=1.0,
-                );
-                changed |= config_drag_f64(
-                    ui,
-                    "变异率",
-                    "base/block两类变异触发概率",
-                    &mut c.mutation_rate,
-                    0.01,
-                    0.01..=0.5,
                 );
             });
 
@@ -1120,12 +1126,13 @@ impl CellWorldApp {
                     &mut c.lava_count,
                     0..=20,
                 );
-                changed |= config_drag_usize(
+                changed |= config_drag_f64(
                     ui,
-                    "扩散子代数",
-                    "死亡时扩散出的子粒子数",
-                    &mut c.lava_spread_count,
-                    1..=5,
+                    "扩散概率",
+                    "死亡时分裂第二个子粒子的概率",
+                    &mut c.lava_spread_probability,
+                    0.01,
+                    0.0..=1.0,
                 );
                 {
                     let mut depth = c.lava_max_chain_depth as usize;
@@ -1146,7 +1153,7 @@ impl CellWorldApp {
                     "每个粒子贡献的等效液面高度",
                     &mut c.lava_level_per_particle,
                     0.01,
-                    0.01..=2.0,
+                    0.01..=5.0,
                 );
                 changed |= config_drag_f64(
                     ui,
@@ -1602,7 +1609,12 @@ impl eframe::App for CellWorldApp {
                 self.render_energy_trend(ui);
 
                 // 显示选中信息
-                selection_action = self.panel.render_selection(ui, &self.selection, &snap);
+                selection_action = self.panel.render_selection(
+                    ui,
+                    &self.selection,
+                    &snap,
+                    self.config.lava_level_per_particle,
+                );
 
                 // 滚动区域：基因库/能量/配置面板（互斥）
                 if self.panel.templates_open

@@ -125,17 +125,20 @@ impl Default for LearningGene {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
 pub struct PhysioGene {
-    /// 快乐敏感度 [0.0~2.0]（多巴胺类：摄食、繁殖等正向事件）
-    pub pleasure_sensitivity: f64,
-    // 后续扩展：
-    // pub pain_sensitivity: f64,
-    // pub comfort_sensitivity: f64,
+    /// 能量吸收敏感度 [0.0~2.0]
+    pub pleasure_energy_sensitivity: f64,
+    /// 痕迹吸收敏感度 [0.0~2.0]
+    pub pleasure_trail_sensitivity: f64,
+    /// 集体行为敏感度 [0.0~2.0]（跟随+群居散热）
+    pub pleasure_group_sensitivity: f64,
 }
 
 impl Default for PhysioGene {
     fn default() -> Self {
         Self {
-            pleasure_sensitivity: 1.0,
+            pleasure_energy_sensitivity: 1.0,
+            pleasure_trail_sensitivity: 1.0,
+            pleasure_group_sensitivity: 1.0,
         }
     }
 }
@@ -591,10 +594,17 @@ impl Genome {
         let mut rng = rand::thread_rng();
 
         if rng.gen::<f64>() < rate {
-            self.physio.pleasure_sensitivity =
-                (self.physio.pleasure_sensitivity + rng.gen_range(-0.1..0.1)).clamp(0.0, 2.0);
+            self.physio.pleasure_energy_sensitivity =
+                (self.physio.pleasure_energy_sensitivity + rng.gen_range(-0.1..0.1)).clamp(0.0, 2.0);
         }
-        // 后续扩展新生理通道时在此添加对应变异
+        if rng.gen::<f64>() < rate {
+            self.physio.pleasure_trail_sensitivity =
+                (self.physio.pleasure_trail_sensitivity + rng.gen_range(-0.1..0.1)).clamp(0.0, 2.0);
+        }
+        if rng.gen::<f64>() < rate {
+            self.physio.pleasure_group_sensitivity =
+                (self.physio.pleasure_group_sensitivity + rng.gen_range(-0.1..0.1)).clamp(0.0, 2.0);
+        }
     }
 
     /// 单个分区概率基因变异（加性扰动 + 归一化）

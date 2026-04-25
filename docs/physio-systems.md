@@ -28,10 +28,22 @@ eligibility_trace × total_reward × hebbian_sign × rate → Δw
 
 ## 已实现通道
 
-### 快乐 (pleasure) ✅
+### 能量吸收快乐 (pleasure_energy) ✅
 - **类比**：多巴胺
-- **触发**：吸收能量粒子 `+absorbed/initial_energy`、吸收痕迹点 `+absorbed/initial_energy`、成功繁殖 `+0.5`
+- **触发**：吸收能量粒子 `+absorbed/initial_energy`、繁殖 `+0.5`
 - **驱动行为**：主动觅食、留在资源区、产生繁殖意愿
+
+### 痕迹吸收快乐 (pleasure_trail) ✅
+- **类比**：多巴胺（独立通道）
+- **触发**：吸收痕迹点 `+absorbed/initial_energy`
+- **开关**：`reward_trail_enabled`（config，面板 checkbox 控制）
+- **驱动行为**：主动觅食痕迹
+
+### 集体快乐 (pleasure_group) ✅
+- **类比**：催产素 / 群居安全感
+- **触发**：跟随度 > 0.3 时每帧注入 `follow_level × 0.1`
+- **开关**：`reward_group_enabled`（config，面板 checkbox 控制）
+- **驱动行为**：跟随族群、群居
 
 ---
 
@@ -158,11 +170,11 @@ eligibility_trace × total_reward × hebbian_sign × rate → Δw
 
 新增一个通道只需三步：
 
-1. **`PhysioState`**（`creature.rs`）：加一个字段，如 `pub pain: f64`
-2. **`PhysioGene`**（`genome.rs`）：加对应敏感度，如 `pub pain_sensitivity: f64`，并在 `mutate_physio_gene()` 中加变异逻辑
-3. **`world.rs`**：在对应事件发生处写入信号值，如 `creature.physio.pain += damage`
+1. **`PhysioState`**（`creature.rs`）：加一个字段，如 `pub pain: f64`；`clear()` 中清零；`total_reward()` 中加求和行
+2. **`PhysioGene`**（`genome.rs`）：加对应敏感度，如 `pub pain_sensitivity: f64`；`Default` 中设默认值；`mutate_physio_gene()` 中加变异
+3. **`world.rs`**：在对应事件发生处写入信号值；`config.rs` 加开关字段；面板加 checkbox
 
-`total_reward()` 和 `apply_physiology()` 无需改动——`total_reward()` 中加一行叠加即可。
+当前通道数：3（energy / trail / group），每通道全部新增位置见上面的实现列表。
 
 ---
 

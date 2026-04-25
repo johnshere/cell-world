@@ -98,7 +98,7 @@ cargo clippy          # 代码检查
   - 对比旧方案：从每 tick 1 次 readback + spin_loop → 每批 1 次 readback + Wait，CPU↔GPU 同步开销 10×
 - **面板速度**: 同步批处理模型下只有单一"FPS: X | 速度: Nx"显示。历史上的"神经/世界"双值已移除（反压已删除）
 - **无限世界**: 无边界，视窗可自由拖拽缩放
-- **火山 + 熔岩流**: 火山定期喷发；间隔和能量均受正弦周期调制（模拟季节）。每次喷发额外产生熔岩流粒子（lava_count），使用独立衰减率（lava_decay_rate）。自然衰减死亡时链式扩散子代（lava_spread_count），被吃不扩散。扩散采用**溢流机制**：子粒子初始落入父粒子所在区块，然后沿等效液面梯度溢流。等效高度=地形高度+lava_level_per_particle×n，n=区块内所有存活粒子数（含普通粒子和熔岩粒子）。溢流时当前区块模拟+1粒子高度，若高于8邻居中最低者则流向最低（多个最低随机选一），标记已访问区块防回弹，最大跳跃数=lava_max_overflow_depth，超限或超出火山半径则丢弃粒子。同一帧多个父粒子死亡按id排序处理，逐个子粒子顺序放置并实时更新区块计数。周期性杀伤关联扩散代数（depth_ratio=chain_depth/max_chain_depth）：间隔=lava_kill_base_interval×(1+depth_ratio×lava_kill_distance_scale)，半径=volcano_kill_radius×max(0,2×(1-depth_ratio))，chain_depth=0杀伤最强，max_chain_depth时半径归零
+- **火山 + 熔岩流**: 火山定期喷发；间隔和能量均受正弦周期调制（模拟季节）。每次喷发额外产生熔岩流粒子（lava_count），使用独立衰减率（lava_decay_rate）。自然衰减死亡时链式扩散子代（lava_spread_probability），被吃不扩散。扩散采用**溢流机制**：子粒子初始落入父粒子所在区块，然后沿等效液面梯度溢流。等效高度=地形高度+lava_level_per_particle×n，n=区块内所有存活粒子数（含普通粒子和熔岩粒子）。溢流时当前区块模拟+1粒子高度，若高于8邻居中最低者则流向最低（多个最低随机选一），标记已访问区块防回弹，最大跳跃数=lava_max_overflow_depth，超限或超出火山半径则丢弃粒子。同一帧多个父粒子死亡按id排序处理，逐个子粒子顺序放置并实时更新区块计数。周期性杀伤关联扩散代数（depth_ratio=chain_depth/max_chain_depth）：间隔=lava_kill_base_interval×(1+depth_ratio×lava_kill_distance_scale)，半径=volcano_kill_radius×max(0,2×(1-depth_ratio))，chain_depth=0杀伤最强，max_chain_depth时半径归零
 - **感知系统（扫描眼 + 发光感知）**:
   - 双眼窄波束逐帧扫描（280°/s），140° 全 FOV，探测距离=vision_range
   - 左眼从 heading+20° 逆时针扫，右眼从 heading-20° 顺时针扫
@@ -130,12 +130,13 @@ cargo clippy          # 代码检查
 - **火山粒子分布**: 线性分布（r=u×radius）
 - **咬合系统**: 咬合力=|mouth|（mouth<-0.1 触发），伤害=战力比 ×bite_transfer_rate(0.8)，无额外咬消耗，冷却 1s；喂食机制已移除，能量分享通过痕迹实现
 - **战力系统**: 战力 = f(能量, 速度, 同族援助)，咬时攻方乘咬合力；同族援助范围=vision_range
-- **生理系统（框架 + 快乐通道）**:
+- **生理系统（3 通道 + 面板开关）**:
   - 框架：`PhysioState` 帧内缓冲（世界注入），`PhysioGene` 各通道敏感度（可演化）
-  - 当前通道：**快乐**（pleasure）—— 摄食吸收 `+absorbed/initial_energy`、成功繁殖 `+0.5`
+  - 通道 1：**能量吸收快乐**（pleasure_energy）—— 摄食吸收 `+absorbed/initial_energy`、成功繁殖 `+0.5`，面板 `reward_energy_enabled` 控制
+  - 通道 2：**痕迹吸收快乐**（pleasure_trail）—— 吃痕迹 `+absorbed/initial_energy`，面板 `reward_trail_enabled` 控制
+  - 通道 3：**集体快乐**（pleasure_group）—— 每帧 `follow_level × 0.1`，面板 `reward_group_enabled` 控制
   - 学习路径：`total_reward = Σ(通道值 × 敏感度)` → eligibility trace × total_reward × hebbian_sign × hebbian_rate → Δw
-  - 后续可扩展：痛觉（被咬）、舒适（散热）、运动负荷等，每种只需加字段 + 写入点
-  - 替换旧 RewardGene（其 4 字段从未被 spiking.rs 使用）
+  - 三通道独立开关（能量/痕迹/集体），任一通道开启即有奖励驱动学习
 - **物理约束**: 存在消耗（基础代谢 × 年龄倍率+体温逸散）、繁殖成本（神经控制 10%~50%）、死亡条件（能量 ≤0）
 - **变异率（v2.5 改为全局常量）**: `config.mutation_rate` 单一字段（默认 0.15）
   - 同时作为 base/block 两类变异的触发概率

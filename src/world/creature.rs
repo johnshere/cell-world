@@ -7,26 +7,29 @@ use crate::config::Config;
 use crate::neural::{Genome, PhysioGene, SpikingNetwork};
 
 /// 生理状态缓冲（世界注入，帧内累积，apply 后清零）
-/// 框架设计：每新增一种生理通道只需加一个字段
 #[derive(Clone, Default)]
 pub struct PhysioState {
-    /// 快乐（多巴胺类）：摄食、繁殖等正向事件
-    pub pleasure: f64,
-    // 后续扩展：
-    // pub pain: f64,
-    // pub comfort: f64,
+    /// 能量吸收快乐
+    pub pleasure_energy: f64,
+    /// 痕迹吸收快乐
+    pub pleasure_trail: f64,
+    /// 集体行为快乐（跟随+群居散热）
+    pub pleasure_group: f64,
 }
 
 impl PhysioState {
     /// 清零所有通道（帧开始时调用）
     pub fn clear(&mut self) {
-        self.pleasure = 0.0;
+        self.pleasure_energy = 0.0;
+        self.pleasure_trail = 0.0;
+        self.pleasure_group = 0.0;
     }
 
     /// 各通道乘以对应敏感度基因后求和，返回最终学习信号
     pub fn total_reward(&self, gene: &PhysioGene) -> f64 {
-        let pleasure = self.pleasure * gene.pleasure_sensitivity;
-        pleasure
+        self.pleasure_energy * gene.pleasure_energy_sensitivity
+            + self.pleasure_trail * gene.pleasure_trail_sensitivity
+            + self.pleasure_group * gene.pleasure_group_sensitivity
     }
 }
 
