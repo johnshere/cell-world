@@ -990,10 +990,13 @@ impl World {
                         self.creatures[i].follow_level * 0.1;
                 }
 
+                // 奖励信号通过 bridge 发送给神经线程（延迟一帧应用到正确的 SpikingNetwork）
                 let total_reward = self.creatures[i]
                     .physio
                     .total_reward(&self.creatures[i].genome.physio);
-                self.creatures[i].brain.apply_physiology(total_reward);
+                if let Some(ref bridge) = self.neural_bridge {
+                    bridge.send_reward(self.creatures[i].id, total_reward);
+                }
 
                 if need_per_creature_timing {
                     let main_ns = creature_t0.elapsed().as_nanos() as u64;
@@ -1191,7 +1194,6 @@ impl World {
         let pop_ok = config.max_creatures == 0 || alive_count < config.max_creatures;
         if reproduce > 0.2 && pop_ok {
             if self.action_reproduce(creature_idx, reproduce_threshold, reproduce_ratio, config) {
-                self.creatures[creature_idx].physio.pleasure_energy += 0.5;
                 self.action_counts[3] += 1; // 繁殖
             }
         }

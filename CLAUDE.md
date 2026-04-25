@@ -81,7 +81,7 @@ cargo clippy          # 代码检查
   - sim 线程（world.update、感知并行、动作串行、快照导出，`sim_thread::spawn_sim_thread`）
   - neural 线程（SNN 批处理，`neural::thread::spawn_neural_thread`，仅 bridge 模式存在）
   - UI ↔ sim：`mpsc::Sender<SimCommand>`（命令）+ `Arc<RwLock<SimSnapshot>>`（快照数据）
-  - sim ↔ neural：`NeuralBridge` 内 `mpsc<TickRequest>`/`mpsc<TickResponse>`
+  - sim ↔ neural：`NeuralBridge` 内 `mpsc<TickRequest>`/`mpsc<TickResponse>`，`TickRequest` 携带 events + inputs + tick_count + rewards（上一帧奖励信号）
   - sim 墙钟节拍 = 1/30s（固定），每拍做 `speed × N` 次 `world.update(SIM_DT)`
 - **时间模型**: 固定步长 dt=1/30 模拟秒，加速通过每帧多次 update 实现；SNN 每次 update 固定 10 ticks（neural_tick_rate=300，`300 × 1/30 = 10 ticks/update`）
 - **加速语义主旨**: **加速只是更快获得结果，不影响结果**。任意倍速 v 下，给定初始状态 $S_0$ 和配置 $C$，运行 K 次 update 后的状态 $S_K$ 与 v 无关（二进制一致）
@@ -125,17 +125,18 @@ cargo clippy          # 代码检查
   - heat_factor = heat_floor + (1 - heat_floor) × exp(-nearby_energy / energy_denominator)
   - heat_cost = heat_dissipation_coefficient × 周长 × heat_factor × dt
   - 荒野(nearby_energy=0)时 heat_factor=1.0，散热最大但有上界；能量丰富区散热降至 heat_floor
-- **痕迹系统**: 基础痕迹=移动消耗（无额外开销）+ 神经网络控制额外投放（输出 6，正半轴映射 0~30%自身能量），自己的痕迹不可吃、其他生物均可吃；衰减率 0.12/s；抑制半径 10px，生成间隔 0.25s
+- **痕迹系统**: 基础痕迹=移动消耗（无额外开销）+ 神经网络控制额外投放（输出 6，正半轴映射 0~30%自身能量），自己的痕迹不可吃、同族其他生物可吃（clan_hash 匹配）；衰减率 0.12/s；抑制半径 10px，生成间隔 0.25s
 - **落地杀伤**: 火山喷发粒子落地时砸死半径内生物（volcano_kill_radius）
 - **火山粒子分布**: 线性分布（r=u×radius）
 - **咬合系统**: 咬合力=|mouth|（mouth<-0.1 触发），伤害=战力比 ×bite_transfer_rate(0.8)，无额外咬消耗，冷却 1s；喂食机制已移除，能量分享通过痕迹实现
 - **战力系统**: 战力 = f(能量, 速度, 同族援助)，咬时攻方乘咬合力；同族援助范围=vision_range
 - **生理系统（3 通道 + 面板开关）**:
   - 框架：`PhysioState` 帧内缓冲（世界注入），`PhysioGene` 各通道敏感度（可演化）
-  - 通道 1：**能量吸收快乐**（pleasure_energy）—— 摄食吸收 `+absorbed/initial_energy`、成功繁殖 `+0.5`，面板 `reward_energy_enabled` 控制
+  - 通道 1：**能量吸收快乐**（pleasure_energy）—— 摄食吸收 `+absorbed/initial_energy`，面板 `reward_energy_enabled` 控制
   - 通道 2：**痕迹吸收快乐**（pleasure_trail）—— 吃痕迹 `+absorbed/initial_energy`，面板 `reward_trail_enabled` 控制
   - 通道 3：**集体快乐**（pleasure_group）—— 每帧 `follow_level × 0.1`，面板 `reward_group_enabled` 控制
   - 学习路径：`total_reward = Σ(通道值 × 敏感度)` → eligibility trace × total_reward × hebbian_sign × hebbian_rate → Δw
+  - **Bridge 模式下奖励信号通过 `NeuralBridge.send_reward()` 延迟一帧发送给神经线程**，在下一批 tick 前对正确的 SpikingNetwork 实例调用 `apply_physiology`；Legacy 模式下直接在 world 线程本地调用
   - 三通道独立开关（能量/痕迹/集体），任一通道开启即有奖励驱动学习
 - **物理约束**: 存在消耗（基础代谢 × 年龄倍率+体温逸散）、繁殖成本（神经控制 10%~50%）、死亡条件（能量 ≤0）
 - **变异率（v2.5 改为全局常量）**: `config.mutation_rate` 单一字段（默认 0.15）

@@ -3,7 +3,8 @@ use std::thread;
 use std::time::Instant;
 
 use super::bridge::{
-    BridgeServerHandle, CreatureEvent, CreatureInput, CreatureOutput, NeuralBridge, TickResponse,
+    BridgeServerHandle, CreatureEvent, CreatureInput, CreatureOutput, CreatureReward, NeuralBridge,
+    TickResponse,
 };
 use super::genome::Genome;
 use super::spiking::SpikingNetwork;
@@ -16,6 +17,8 @@ use crate::config::Config;
 pub trait TickExecutor: Send {
     fn register(&mut self, id: u64, genome: &Genome);
     fn unregister(&mut self, id: u64);
+    /// 应用上一帧的奖励信号到对应网络的权重（在 tick 前调用）
+    fn apply_rewards(&mut self, rewards: &[CreatureReward]);
     /// 一次性执行一批 tick：注入输入 + 推进 tick_count 个 tick
     fn run_batch(&mut self, inputs: &[CreatureInput], tick_count: usize);
     /// 读取上一批的最终输出（按 creature_id 返回）
@@ -49,6 +52,14 @@ impl CpuExecutor {
 }
 
 impl TickExecutor for CpuExecutor {
+    fn apply_rewards(&mut self, rewards: &[CreatureReward]) {
+        for r in rewards {
+            if let Some(network) = self.networks.get_mut(&r.creature_id) {
+                network.apply_physiology(r.total_reward);
+            }
+        }
+    }
+
     fn register(&mut self, id: u64, genome: &Genome) {
         let network = SpikingNetwork::from_genome(genome);
         let modes = network.output_modes().to_vec();
@@ -239,6 +250,11 @@ fn neural_thread_main(handle: BridgeServerHandle, backend: &str) {
                     executor.unregister(id);
                 }
             }
+        }
+
+        // 应用上一帧的奖励信号（在 tick 前，利用上一批积累的 eligibility traces）
+        if !req.rewards.is_empty() {
+            executor.apply_rewards(&req.rewards);
         }
 
         // 执行一批 tick

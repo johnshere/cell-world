@@ -3,7 +3,7 @@ mod inner {
     use rustc_hash::FxHashMap;
     use std::time::Instant;
 
-    use super::super::bridge::{CreatureInput, CreatureOutput};
+    use super::super::bridge::{CreatureInput, CreatureOutput, CreatureReward};
     use super::super::genome::{Genome, NodeType};
     use super::super::slot_alloc::SlotAllocator;
     use super::super::thread::TickExecutor;
@@ -755,6 +755,10 @@ mod inner {
     }
 
     impl TickExecutor for GpuExecutor {
+        fn apply_rewards(&mut self, _rewards: &[CreatureReward]) {
+            // GPU 后端暂不支持在线学习，奖励信号忽略
+        }
+
         fn register(&mut self, id: u64, genome: &Genome) {
             if let Some(slot) = self.slots.allocate(id) {
                 self.gpu.upload_genome(slot, genome);

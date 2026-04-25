@@ -28,7 +28,7 @@
   - neural 线程（仅 bridge 模式）：SNN 批处理，由 sim 请求驱动，无独立节奏
 - **神经后端（两种都保持主旨）**：
   - **Legacy**（`neural_backend="legacy"`）：world.update 直接调用 `brain.tick_multi(perception, 10)`，CPU SpikingNetwork 原子推进
-  - **Bridge**（`auto`/`cpu`/`gpu`）：world 每次 update 向 neural 线程发送 `TickRequest { events, inputs, tick_count=10 }` 并**同步阻塞等** `TickResponse`。neural 线程 `req_rx.recv()` 阻塞驱动，不按墙钟
+  - **Bridge**（`auto`/`cpu`/`gpu`）：world 每次 update 向 neural 线程发送 `TickRequest { events, inputs, tick_count, rewards }` 并**同步阻塞等** `TickResponse`。rewards 携带上一帧的奖励信号，神经线程在 tick 前对正确的 SpikingNetwork 调用 `apply_physiology`。neural 线程 `req_rx.recv()` 阻塞驱动，不按墙钟
 - **GPU 批内单次 readback（C 方案，bridge+gpu 专属优化）**：
   - Shader 新增 binding：`4=spike_counts (atomic<u32>)`、`5=first_outputs (f32)`、`6=tick_params uniform`
   - 批开始：清零 spike_counts + first_outputs GPU 缓冲

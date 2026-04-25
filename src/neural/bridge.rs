@@ -27,11 +27,20 @@ pub enum CreatureEvent {
     Died { id: u64 },
 }
 
+/// 奖励信号（上一帧的 total_reward，延迟一帧发送）
+#[derive(Clone)]
+pub struct CreatureReward {
+    pub creature_id: u64,
+    pub total_reward: f64,
+}
+
 /// 世界线程 → 神经线程的一次 tick 批请求
 pub struct TickRequest {
     pub events: Vec<CreatureEvent>,
     pub inputs: Vec<CreatureInput>,
     pub tick_count: usize,
+    /// 上一帧的奖励信号，神经线程在 tick 前应用
+    pub rewards: Vec<CreatureReward>,
 }
 
 /// 神经线程 → 世界线程的一次响应
@@ -49,6 +58,8 @@ pub struct NeuralBridge {
     resp_rx: Mutex<mpsc::Receiver<TickResponse>>,
     /// 累积待发送的生命周期事件，run_batch_sync 时打包进请求
     pending_events: Mutex<Vec<CreatureEvent>>,
+    /// 累积待发送的奖励信号（上一帧产生，下一帧发送）
+    pending_rewards: Mutex<Vec<CreatureReward>>,
     running: Arc<AtomicBool>,
 }
 
@@ -61,6 +72,7 @@ impl NeuralBridge {
             req_tx,
             resp_rx: Mutex::new(resp_rx),
             pending_events: Mutex::new(Vec::new()),
+            pending_rewards: Mutex::new(Vec::new()),
             running: Arc::clone(&running),
         };
         let handle = BridgeServerHandle {
@@ -78,6 +90,19 @@ impl NeuralBridge {
         }
     }
 
+    /// 向桥推送奖励信号（本帧产生，下次 run_batch_sync 时发送给神经线程）
+    pub fn send_reward(&self, creature_id: u64, total_reward: f64) {
+        if total_reward.abs() < 0.001 {
+            return;
+        }
+        if let Ok(mut buf) = self.pending_rewards.lock() {
+            buf.push(CreatureReward {
+                creature_id,
+                total_reward,
+            });
+        }
+    }
+
     /// 同步执行一批 tick：打包事件+感知+次数，阻塞等待神经线程返回决策输出
     pub fn run_batch_sync(
         &self,
@@ -90,12 +115,19 @@ impl NeuralBridge {
             .map(|mut v| std::mem::take(&mut *v))
             .unwrap_or_default();
 
+        let rewards = self
+            .pending_rewards
+            .lock()
+            .map(|mut v| std::mem::take(&mut *v))
+            .unwrap_or_default();
+
         if self
             .req_tx
             .send(TickRequest {
                 events,
                 inputs,
                 tick_count,
+                rewards,
             })
             .is_err()
         {
