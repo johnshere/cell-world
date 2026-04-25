@@ -107,13 +107,13 @@ cargo clippy          # 代码检查
 - **感知系统（扫描眼 + 发光感知）**:
   - 双眼窄波束逐帧扫描（280°/s），140° 全 FOV，探测距离=vision_range
   - 左眼从 heading+20° 逆时针扫，右眼从 heading-20° 顺时针扫
-  - 扫描目标：粒子(0.33)、痕迹(0.67)、生物(1.0)
+  - 扫描目标：普通粒子(0.25)、熔岩粒子(0.50)、痕迹(0.75)、生物(1.0)
   - 全 FOV 能量密度：反距离 ² 加权（Σ energy/dist²），与散热计算一致
   - 朝向差/速度差：仅当最近目标为生物时有值，否则为 0
   - 自身状态: 1 通道（能量/2000），始终更新
   - 发光感知：360° 全向扫描，独立 light_scan_offset，与眼睛同速，检测 vision_range 内发光生物
 - **20 维输入**: 左眼 8 + 右眼 8 + 自身 1 + 地形 1 + 发光感知 2
-  - 左眼 [0..7]: 扫描角归一化(-1~1), 目标接近度, 目标能量/200, 实体类型(0/0.33/0.67/1.0), 基因相似度(0~1), 能量密度, 朝向差(-1~1,仅生物), 速度差(-1~1,仅生物)  → block -1
+  - 左眼 [0..7]: 扫描角归一化(-1~1), 目标接近度, 目标能量/200, 实体类型(0/0.25/0.50/0.75/1.0), 基因相似度(0~1), 能量密度, 朝向差(-1~1,仅生物), 速度差(-1~1,仅生物)  → block -1
   - 右眼 [8..15]: 扫描角归一化, 目标接近度, 目标能量/200, 实体类型, 基因相似度, 能量密度, 朝向差, 速度差  → block 1
   - 自身 [16]: 能量/2000  → block 0
   - 地形 [17]: 前方坡度方向 `dh.signum()`（-1=下坡, 0=平地或无地形, 1=上坡），前瞻 15px  → block 0
@@ -138,7 +138,7 @@ cargo clippy          # 代码检查
 - **生理系统（3 通道 + 面板开关）**:
   - 框架：`PhysioState` 帧内缓冲（世界注入），`PhysioGene` 各通道敏感度（可演化）
   - 通道 1：**能量吸收快乐**（pleasure_energy）—— 摄食吸收 `+absorbed/initial_energy`，面板 `reward_energy_enabled` 控制
-  - 通道 2：**痕迹吸收快乐**（pleasure_trail）—— 吃痕迹 `+absorbed/initial_energy`，面板 `reward_trail_enabled` 控制
+  - 通道 2：**痕迹快乐**（pleasure_trail）—— 吃痕迹 `+absorbed/initial_energy` + 主动释放痕迹 `+extra/initial_energy`，面板 `reward_trail_enabled` 控制
   - 通道 3：**集体快乐**（pleasure_group）—— 每帧 `follow_level × 0.1`，面板 `reward_group_enabled` 控制
   - 学习路径：`total_reward = Σ(通道值 × 敏感度)` → eligibility trace × total_reward × hebbian_sign × hebbian_rate → Δw
   - **Bridge 模式下奖励信号通过 `NeuralBridge.send_reward()` 延迟一帧发送给神经线程**，在下一批 tick 前对正确的 SpikingNetwork 实例调用 `apply_physiology`；Legacy 模式下直接在 world 线程本地调用

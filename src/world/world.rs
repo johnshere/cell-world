@@ -1168,6 +1168,11 @@ impl World {
                         let extra = self.creatures[creature_idx].energy * trail_strength * dt;
                         self.creatures[creature_idx].energy -= extra;
                         trail_energy += extra;
+                        // 主动释放痕迹的奖励
+                        if config.reward_trail_enabled {
+                            self.creatures[creature_idx].physio.pleasure_trail +=
+                                extra / config.initial_energy;
+                        }
                     }
                     if trail_energy > 0.001 {
                         let creator_id = self.creatures[creature_idx].id;
@@ -2096,7 +2101,7 @@ fn compute_perception_pure(
             if diff_beam.abs() <= beam_half_width && dist < nearest_dist[eye_i] {
                 nearest_dist[eye_i] = dist;
                 nearest_energy[eye_i] = particle.energy;
-                nearest_type[eye_i] = 0.33;
+                nearest_type[eye_i] = if particle.lava { 0.50 } else { 0.25 };
                 nearest_is_ally[eye_i] = 0.0;
             }
         }
@@ -2132,7 +2137,7 @@ fn compute_perception_pure(
                 if diff_beam.abs() <= beam_half_width && dist < nearest_dist[eye_i] {
                     nearest_dist[eye_i] = dist;
                     nearest_energy[eye_i] = trail.energy;
-                    nearest_type[eye_i] = 0.67;
+                    nearest_type[eye_i] = 0.75;
                     nearest_is_ally[eye_i] = is_ally;
                 }
             }
