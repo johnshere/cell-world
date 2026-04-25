@@ -109,7 +109,7 @@ impl Default for LearningGene {
             learning_on: 0.5,
             hebbian_rate: 0.01,
             hebbian_sign: 0.7,
-            eligibility_decay: 0.95,
+            eligibility_decay: 0.8,
             reinforcement_rate: 0.001,
             metabolic_penalty: 0.0,
         }

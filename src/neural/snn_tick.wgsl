@@ -128,7 +128,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let lp = learning_params[creature_slot];
     if lp.learning_on > 0.5 {
         let post_fired_prev = is_fired(prev.flags);
-        let trace_decay_factor = 1.0 - lp.trace_decay;
+        let trace_decay_factor = lp.trace_decay;
         let trace_conn_base = creature_slot * MAX_CONNS;
 
         for (var c = 0u; c < creature_meta_data.conn_count; c++) {

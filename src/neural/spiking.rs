@@ -390,7 +390,7 @@ impl SpikingNetwork {
 
     /// 更新资格迹（每tick结束时调用）
     fn update_eligibility_traces(&mut self) {
-        let decay = 1.0 - self.learning_gene.eligibility_decay;
+        let decay = self.learning_gene.eligibility_decay;
 
         // 更新正向连接资格迹
         for (&out_node, inputs_list) in &self.forward_inputs {
