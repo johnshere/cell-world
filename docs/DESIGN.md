@@ -30,11 +30,15 @@
   - **Legacy**（`neural_backend="legacy"`）：world.update 直接调用 `brain.tick_multi(perception, 10)`，CPU SpikingNetwork 原子推进
   - **Bridge**（`auto`/`cpu`/`gpu`）：world 每次 update 向 neural 线程发送 `TickRequest { events, inputs, tick_count, rewards }` 并**同步阻塞等** `TickResponse`。rewards 携带上一帧的奖励信号，神经线程在 tick 前对正确的 SpikingNetwork 调用 `apply_physiology`。neural 线程 `req_rx.recv()` 阻塞驱动，不按墙钟
 - **GPU 批内单次 readback（C 方案，bridge+gpu 专属优化）**：
-  - Shader 新增 binding：`4=spike_counts (atomic<u32>)`、`5=first_outputs (f32)`、`6=tick_params uniform`
+  - Shader binding：`0-1=nodes ping-pong`、`2=connections`、`3=creature_meta`、`4=spike_counts (atomic<u32>)`、`5=first_outputs (f32)`、`6=tick_params uniform`、`7=eligibility_traces (f32 read_write)`、`8=learning_params (GpuLearningParams read)`
   - 批开始：清零 spike_counts + first_outputs GPU 缓冲
   - 批内 10 个 dispatch：tick 0 写 first_outputs，每次 fire 时 `atomicAdd(&spike_counts[out])`
+  - Shader 每 tick 更新 eligibility trace：`trace *= (1-decay)`，pre&post 在 `nodes_prev` 中同时 fired 则 `trace += 1.0`
   - 批末尾：一次 `copy_buffer_to_buffer` 把两段连续拷贝到 staging，`map_async` + `Maintain::Wait` 一次拉回
-  - 相比历史 per-tick readback + spin_loop，CPU↔GPU 同步开销降低 10×
+- **GPU 在线 Hebbian 学习**：`apply_rewards` 在每帧 tick 前由 CPU 侧执行
+  - 有奖励时一次性读回全部 eligibility traces（256KB），逐生物计算 `Δw = rate × trace × reward × sign`
+  - 更新 `connections_cpu` 权重（clamp [-2.0, 2.0]），traces *= 0.1 衰减，回写 connections + traces 到 GPU
+  - 与 CPU 后端行为对齐（`SpikingNetwork::apply_physiology`），学习效果方向一致
 - **面板速度**：同步批处理下只有单值"FPS: X | 速度: Nx"；历史上的"神经/世界"双值和反压机制均已删除
 
 ---
@@ -585,6 +589,13 @@ auto_spawn_interval = 45.0
 - [x] GPU 路径批内单次 readback：shader 端 atomic spike 累加 + tick 0 写 first_outputs，批末尾一次性 `copy_buffer_to_buffer` 拉回两段
 - [x] TickExecutor trait 新接口 `run_batch(inputs, tick_count)` 替换 `inject_inputs/tick/read_outputs` 三步
 - [x] 面板单值速度，删除"神经/世界"双值显示
+
+### v2.6 - GPU 在线 Hebbian 学习 ✅
+- [x] Shader (`snn_tick.wgsl`) 新增 binding 7 (eligibility_traces) + binding 8 (learning_params)，每 tick 更新 eligibility trace
+- [x] `GpuCompute` 新增 eligibility_traces_buf (256KB) + learning_params_buf (8KB) + traces_staging_buf (256KB)
+- [x] `GpuExecutor::apply_rewards` 完整实现：readback traces → 计算 Δw → 更新权重 → traces 衰减写回
+- [x] GPU 后端学习行为与 CPU 后端 (`SpikingNetwork::apply_physiology`) 对齐
+- [x] Bridge 协议扩展 `TickRequest.rewards` 携带上一帧奖励信号，神经线程 tick 前应用
 
 ### 未来方向
 - [ ] 长时间运行稳定性验证

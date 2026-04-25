@@ -58,8 +58,8 @@ cargo clippy          # 代码检查
 |          | `src/neural/block.rs`      | 分区（感官/联合/运动），ConnProbs 区块连接概率基因    |
 |          | `src/neural/bridge.rs`     | 同步批处理桥（TickRequest/TickResponse mpsc 通道）    |
 |          | `src/neural/thread.rs`     | 神经线程入口，TickExecutor trait，CpuExecutor 实现    |
-|          | `src/neural/gpu.rs`        | GPU 后端（wgpu），批处理 run_batch + 单次 readback    |
-|          | `src/neural/snn_tick.wgsl` | Compute shader：atomic spike 累加 + first_outputs     |
+|          | `src/neural/gpu.rs`        | GPU 后端（wgpu），批处理 run_batch + 在线 Hebbian 学习 |
+|          | `src/neural/snn_tick.wgsl` | Compute shader：spike 累加 + eligibility trace 计算   |
 |          | `src/neural/slot_alloc.rs` | GPU 固定槽位分配（MAX_CREATURES=512）                 |
 | 世界系统 | `src/world/world.rs`       | 主循环、感知、动作执行、bridge 同步调用              |
 |          | `src/world/sim_thread.rs`  | sim 线程入口，命令处理，快照导出                     |
@@ -89,13 +89,18 @@ cargo clippy          # 代码检查
   - **Bridge 后端**（`auto`/`cpu`/`gpu`）：world 每次 update 向 neural 线程发送 `TickRequest { events, inputs, tick_count=10 }`，**同步阻塞等** `TickResponse`。neural 线程完全由 world 驱动，没有独立节奏、没有反压、没有墙钟
   - 两种后端都严格保持主旨
 - **GPU 批内单次 readback（C 方案）**: Bridge + GPU 模式的关键优化
-  - Shader（`snn_tick.wgsl`）：`binding 4=spike_counts (atomic<u32>)`、`5=first_outputs (f32)`、`6=tick_params uniform`
+  - Shader（`snn_tick.wgsl`）：binding 0-6 前向推理 + `7=eligibility_traces (f32 read_write)` + `8=learning_params (GpuLearningParams read)`
   - 批开始：CPU 清零 spike_counts + first_outputs GPU 缓冲
   - 批内每个 tick：write_tick_index → 独立 submit 一次 dispatch（ping-pong bind group 预构建）
   - Shader 行为：tick 0 写直读输出到 first_outputs；所有 tick 内发放的输出节点 `atomicAdd(&spike_counts[out])`
+  - Shader 学习：每 tick 每非输入节点更新 eligibility trace（`trace *= (1-decay)`，pre&post co-fired 则 `trace += 1.0`，使用 `nodes_prev` fired 状态）
   - 批末尾：一次 `copy_buffer_to_buffer` 把 spike_counts + first_outputs 连续拷到 staging，`map_async` + `Maintain::Wait` 一次性读回
   - CPU 侧按 `output_modes_cache` 决定每个输出是取 first_outputs 还是 `spike_counts / tick_count × 2 - 1`
-  - 对比旧方案：从每 tick 1 次 readback + spin_loop → 每批 1 次 readback + Wait，CPU↔GPU 同步开销 10×
+- **GPU 在线 Hebbian 学习**: `apply_rewards` 在 tick 前执行（CPU 侧）
+  - 有奖励时：一次性读回全部 eligibility traces（256KB）
+  - 逐生物计算 `Δw = hebbian_rate × trace × total_reward × sign`，更新 `connections_cpu` 权重（clamp [-2.0, 2.0]）
+  - 应用后 traces *= 0.1（对齐 CPU 版 `apply_physiology`），回写 connections + traces 到 GPU
+  - 学习基因（LearningGene）在 register 时缓存，learning_params 上传到 GPU binding 8
 - **面板速度**: 同步批处理模型下只有单一"FPS: X | 速度: Nx"显示。历史上的"神经/世界"双值已移除（反压已删除）
 - **无限世界**: 无边界，视窗可自由拖拽缩放
 - **火山 + 熔岩流**: 火山定期喷发；间隔和能量均受正弦周期调制（模拟季节）。每次喷发额外产生熔岩流粒子（lava_count），使用独立衰减率（lava_decay_rate）。自然衰减死亡时链式扩散子代（lava_spread_probability），被吃不扩散。扩散采用**溢流机制**：子粒子初始落入父粒子所在区块，然后沿等效液面梯度溢流。等效高度=地形高度+lava_level_per_particle×n，n=区块内所有存活粒子数（含普通粒子和熔岩粒子）。溢流时当前区块模拟+1粒子高度，若高于8邻居中最低者则流向最低（多个最低随机选一），标记已访问区块防回弹，最大跳跃数=lava_max_overflow_depth，超限或超出火山半径则丢弃粒子。同一帧多个父粒子死亡按id排序处理，逐个子粒子顺序放置并实时更新区块计数。周期性杀伤关联扩散代数（depth_ratio=chain_depth/max_chain_depth）：间隔=lava_kill_base_interval×(1+depth_ratio×lava_kill_distance_scale)，半径=volcano_kill_radius×max(0,2×(1-depth_ratio))，chain_depth=0杀伤最强，max_chain_depth时半径归零
@@ -146,7 +151,7 @@ cargo clippy          # 代码检查
   - 想调节探索强度直接改 config
 - **发育时间基因（maturation_time）**: 控制结构变异（add_connection/add_node）的活跃窗口
   - 存储在 `Genome.maturation_time`（f64，单位=模拟秒），初代=5000.0
-  - 繁殖遗传：`child.maturation_time = (parent.age + parent.maturation_time) / 2`（取发起繁殖方）
+  - 繁殖遗传：`child.maturation_time = (parent.age + parent.maturation_time) / 2`（取发起繁殖方，覆盖 crossover 的原子选取）
   - 结构变异调制：`effective_rate = base_rate × 2 × exp(-parent_age / maturation_time)`
     - 幼年父代（age≈0）：结构变异概率 ×2（神经可塑性高）
     - 发育完成（age=maturation_time）：×0.74（略低于基准）
@@ -154,7 +159,7 @@ cargo clippy          # 代码检查
   - 仅影响结构变异，权重微调不受影响（权重=持续学习，结构=发育期可塑性）
   - crossover 中原子孟德尔遗传（50/50 选父/母之一）
 - **Crossover（v2.5 改为全原子孟德尔）**: 所有连续参数按"原子"整取，不做算术平均
-  - 原子粒度：每条共享连接 / 每个共享节点 / 每个 block 的 ConnProbsGene / LearningGene 整块 / PhysioGene 整块 / maturation_time
+  - 原子粒度：每条共享连接 / 每个共享节点 / 每个 block 的 ConnProbsGene / LearningGene 整块 / PhysioGene 整块 / maturation_time（注：maturation_time 被繁殖遗传公式覆盖，crossover 选取实际不生效）
   - crossover 不创造新值，只重组；创造新值是 mutation 的职责
   - 结果：crossover 不再主动收缩群体方差，多样性保持完全依赖 mutation 注入
 - **交配阈值（v2.5）**: `find_mate` 使用 `species_similarity_threshold × 0.9` 作为交配相似度下限

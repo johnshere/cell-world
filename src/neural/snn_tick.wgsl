@@ -45,6 +45,14 @@ struct TickParams {
     _pad2: u32,
 }
 
+// 学习参数（per-creature）
+struct GpuLearningParams {
+    trace_decay: f32,
+    learning_on: f32,
+    _pad0: f32,
+    _pad1: f32,
+}
+
 @group(0) @binding(0) var<storage, read> nodes_prev: array<GpuNode>;
 @group(0) @binding(1) var<storage, read_write> nodes_next: array<GpuNode>;
 @group(0) @binding(2) var<storage, read> connections: array<GpuConnection>;
@@ -52,6 +60,8 @@ struct TickParams {
 @group(0) @binding(4) var<storage, read_write> spike_counts: array<atomic<u32>>;
 @group(0) @binding(5) var<storage, read_write> first_outputs: array<f32>;
 @group(0) @binding(6) var<uniform> params: TickParams;
+@group(0) @binding(7) var<storage, read_write> eligibility_traces: array<f32>;
+@group(0) @binding(8) var<storage, read> learning_params: array<GpuLearningParams>;
 
 fn is_fired(flags: u32) -> bool {
     return (flags & 1u) != 0u;
@@ -112,6 +122,33 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if is_input(prev.flags) {
         nodes_next[node_global] = next_node;
         return;
+    }
+
+    // --- Eligibility trace 更新（在不应期 early return 之前，确保 trace 始终衰减） ---
+    let lp = learning_params[creature_slot];
+    if lp.learning_on > 0.5 {
+        let post_fired_prev = is_fired(prev.flags);
+        let trace_decay_factor = 1.0 - lp.trace_decay;
+        let trace_conn_base = creature_slot * MAX_CONNS;
+
+        for (var c = 0u; c < creature_meta_data.conn_count; c++) {
+            let conn_t = connections[trace_conn_base + c];
+            if conn_t.to_node == node_local {
+                let trace_idx = trace_conn_base + c;
+                var t = eligibility_traces[trace_idx];
+                t *= trace_decay_factor;
+
+                if post_fired_prev {
+                    let from_g = creature_slot * MAX_NODES + conn_t.from_node;
+                    let pre_fired = is_fired(nodes_prev[from_g].flags);
+                    if pre_fired {
+                        t += 1.0;
+                    }
+                }
+
+                eligibility_traces[trace_idx] = t;
+            }
+        }
     }
 
     let ref_count = get_refractory_count(prev.flags);

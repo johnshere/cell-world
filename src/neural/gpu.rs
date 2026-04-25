@@ -4,7 +4,7 @@ mod inner {
     use std::time::Instant;
 
     use super::super::bridge::{CreatureInput, CreatureOutput, CreatureReward};
-    use super::super::genome::{Genome, NodeType};
+    use super::super::genome::{Genome, LearningGene, NodeType};
     use super::super::slot_alloc::SlotAllocator;
     use super::super::thread::TickExecutor;
 
@@ -17,6 +17,11 @@ mod inner {
     const COUNTER_BYTES: u64 = (COUNTER_ELEMS * 4) as u64; // u32 / f32 同宽
     const STAGING_BYTES: u64 = COUNTER_BYTES * 2; // spike_counts + first_outputs
     const TICK_PARAMS_BYTES: u64 = 16; // vec4<u32> 对齐
+
+    // 学习相关常量
+    const TRACES_TOTAL: usize = MAX_CREATURES * MAX_CONNS; // 65536
+    const TRACES_BYTES: u64 = (TRACES_TOTAL * 4) as u64; // 262144 = 256KB
+    const LEARNING_PARAMS_BYTES: u64 = (MAX_CREATURES * 16) as u64; // 8192 = 8KB
 
     /// GPU 探测结果
     pub enum GpuProbeResult {
@@ -45,6 +50,15 @@ mod inner {
         pub to_node: u32,
         pub weight: f32,
         pub _pad: u32,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
+    pub struct GpuLearningParams {
+        pub trace_decay: f32,
+        pub learning_on: f32,
+        pub _pad0: f32,
+        pub _pad1: f32,
     }
 
     #[repr(C)]
@@ -108,7 +122,7 @@ mod inner {
         }
     }
 
-    fn bind_group_layout_entries() -> [wgpu::BindGroupLayoutEntry; 7] {
+    fn bind_group_layout_entries() -> [wgpu::BindGroupLayoutEntry; 9] {
         [
             storage_entry(0, true),  // nodes_prev
             storage_entry(1, false), // nodes_next
@@ -117,6 +131,8 @@ mod inner {
             storage_entry(4, false), // spike_counts (atomic)
             storage_entry(5, false), // first_outputs
             uniform_entry(6),        // tick_params
+            storage_entry(7, false), // eligibility_traces (read_write)
+            storage_entry(8, true),  // learning_params (read)
         ]
     }
 
@@ -248,6 +264,11 @@ mod inner {
         // 回读 staging：连续存放 spike_counts(14336) + first_outputs(14336)
         staging_buf: wgpu::Buffer,
 
+        // 学习相关 buffer
+        eligibility_traces_buf: wgpu::Buffer,
+        learning_params_buf: wgpu::Buffer,
+        traces_staging_buf: wgpu::Buffer,
+
         // 预构建 bind group：读A→写B / 读B→写A
         bind_group_ping: wgpu::BindGroup,
         bind_group_pong: wgpu::BindGroup,
@@ -264,6 +285,9 @@ mod inner {
 
         // 上一批读回的原始字节（spike_counts + first_outputs）
         last_raw: Vec<u8>,
+
+        // 学习相关 CPU 镜像
+        traces_cpu: Vec<f32>,
     }
 
     impl GpuCompute {
@@ -375,6 +399,26 @@ mod inner {
                 mapped_at_creation: false,
             });
 
+            // 学习相关 buffer
+            let eligibility_traces_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("eligibility_traces"),
+                size: TRACES_BYTES,
+                usage: usage_storage_rw,
+                mapped_at_creation: false,
+            });
+            let learning_params_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("learning_params"),
+                size: LEARNING_PARAMS_BYTES,
+                usage: usage_storage_r,
+                mapped_at_creation: false,
+            });
+            let traces_staging_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("traces_staging"),
+                size: TRACES_BYTES,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+
             let bind_group_ping = Self::make_bind_group(
                 &device,
                 &bind_group_layout,
@@ -385,6 +429,8 @@ mod inner {
                 &spike_counts_buf,
                 &first_outputs_buf,
                 &tick_params_buf,
+                &eligibility_traces_buf,
+                &learning_params_buf,
                 "snn-bind-ping",
             );
             let bind_group_pong = Self::make_bind_group(
@@ -397,6 +443,8 @@ mod inner {
                 &spike_counts_buf,
                 &first_outputs_buf,
                 &tick_params_buf,
+                &eligibility_traces_buf,
+                &learning_params_buf,
                 "snn-bind-pong",
             );
 
@@ -412,6 +460,9 @@ mod inner {
                 first_outputs_buf,
                 tick_params_buf,
                 staging_buf,
+                eligibility_traces_buf,
+                learning_params_buf,
+                traces_staging_buf,
                 bind_group_ping,
                 bind_group_pong,
                 ping: true,
@@ -420,6 +471,7 @@ mod inner {
                 meta_cpu: vec![GpuCreatureMeta::default(); MAX_CREATURES],
                 zero_counter_bytes: vec![0u8; COUNTER_BYTES as usize],
                 last_raw: vec![0u8; STAGING_BYTES as usize],
+                traces_cpu: vec![0.0f32; TRACES_TOTAL],
             })
         }
 
@@ -433,6 +485,8 @@ mod inner {
             spike: &wgpu::Buffer,
             first: &wgpu::Buffer,
             params: &wgpu::Buffer,
+            traces: &wgpu::Buffer,
+            learning: &wgpu::Buffer,
             label: &str,
         ) -> wgpu::BindGroup {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -466,6 +520,14 @@ mod inner {
                     wgpu::BindGroupEntry {
                         binding: 6,
                         resource: params.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: traces.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: learning.as_entire_binding(),
                     },
                 ],
             })
@@ -570,6 +632,9 @@ mod inner {
             let meta_data = bytemuck::cast_slice(&self.meta_cpu[slot..slot + 1]);
             self.queue
                 .write_buffer(&self.meta_buf, meta_offset, meta_data);
+
+            // 清零该 slot 的 eligibility traces
+            self.clear_slot_traces(slot);
         }
 
         pub fn clear_slot(&mut self, slot: usize) {
@@ -581,6 +646,80 @@ mod inner {
             let meta_data = bytemuck::cast_slice(&self.meta_cpu[slot..slot + 1]);
             self.queue
                 .write_buffer(&self.meta_buf, meta_offset, meta_data);
+            self.clear_slot_traces(slot);
+        }
+
+        /// 清零指定 slot 的 eligibility traces（CPU 镜像 + GPU 缓冲）
+        fn clear_slot_traces(&mut self, slot: usize) {
+            let trace_base = slot * MAX_CONNS;
+            for i in 0..MAX_CONNS {
+                self.traces_cpu[trace_base + i] = 0.0;
+            }
+            self.upload_traces_slot(slot);
+        }
+
+        /// 上传学习参数到指定 slot
+        fn upload_learning_params(&mut self, slot: usize, params: &GpuLearningParams) {
+            let offset = (slot * std::mem::size_of::<GpuLearningParams>()) as u64;
+            let data = bytemuck::cast_slice(std::slice::from_ref(params));
+            self.queue
+                .write_buffer(&self.learning_params_buf, offset, data);
+        }
+
+        /// 上传指定 slot 的 connections 到 GPU（权重更新后调用）
+        fn upload_connections_slot(&mut self, slot: usize) {
+            let conn_base = slot * MAX_CONNS;
+            let offset = (conn_base * std::mem::size_of::<GpuConnection>()) as u64;
+            let data =
+                bytemuck::cast_slice(&self.connections_cpu[conn_base..conn_base + MAX_CONNS]);
+            self.queue
+                .write_buffer(&self.connections_buf, offset, data);
+        }
+
+        /// 上传指定 slot 的 traces 到 GPU（衰减写回后调用）
+        fn upload_traces_slot(&mut self, slot: usize) {
+            let trace_base = slot * MAX_CONNS;
+            let offset = (trace_base * std::mem::size_of::<f32>()) as u64;
+            let data =
+                bytemuck::cast_slice(&self.traces_cpu[trace_base..trace_base + MAX_CONNS]);
+            self.queue
+                .write_buffer(&self.eligibility_traces_buf, offset, data);
+        }
+
+        /// 阻塞读回全部 eligibility traces（apply_rewards 前调用）
+        fn readback_traces_blocking(&mut self) {
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("readback-traces"),
+                });
+            encoder.copy_buffer_to_buffer(
+                &self.eligibility_traces_buf,
+                0,
+                &self.traces_staging_buf,
+                0,
+                TRACES_BYTES,
+            );
+            self.queue.submit(Some(encoder.finish()));
+
+            let slice = self.traces_staging_buf.slice(..);
+            let (tx, rx) = std::sync::mpsc::channel();
+            slice.map_async(wgpu::MapMode::Read, move |result| {
+                let _ = tx.send(result);
+            });
+            self.device.poll(wgpu::Maintain::Wait);
+            match rx.recv() {
+                Ok(Ok(())) => {
+                    let data = slice.get_mapped_range();
+                    let f32_slice: &[f32] = bytemuck::cast_slice(&data);
+                    self.traces_cpu.copy_from_slice(f32_slice);
+                    drop(data);
+                    self.traces_staging_buf.unmap();
+                }
+                _ => {
+                    eprintln!("[gpu] traces readback 失败");
+                }
+            }
         }
 
         /// 上传感知输入到当前 read 侧的 nodes 缓冲
@@ -739,6 +878,8 @@ mod inner {
         last_tick_count: u32,
         /// 上批整体耗时（所有生物均摊）
         last_batch_ns: u64,
+        /// 学习基因缓存：creature_id -> LearningGene
+        learning_genes: FxHashMap<u64, LearningGene>,
     }
 
     impl GpuExecutor {
@@ -750,13 +891,57 @@ mod inner {
                 output_modes_cache: FxHashMap::default(),
                 last_tick_count: 0,
                 last_batch_ns: 0,
+                learning_genes: FxHashMap::default(),
             })
         }
     }
 
     impl TickExecutor for GpuExecutor {
-        fn apply_rewards(&mut self, _rewards: &[CreatureReward]) {
-            // GPU 后端暂不支持在线学习，奖励信号忽略
+        fn apply_rewards(&mut self, rewards: &[CreatureReward]) {
+            if rewards.is_empty() {
+                return;
+            }
+
+            // 一次性读回全部 traces（256KB，PCIe 4.0 ~8μs 数据传输）
+            self.gpu.readback_traces_blocking();
+
+            for r in rewards {
+                let Some(slot) = self.slots.get_slot(r.creature_id) else {
+                    continue;
+                };
+                let Some(gene) = self.learning_genes.get(&r.creature_id) else {
+                    continue;
+                };
+
+                if gene.learning_on < 0.5 {
+                    continue;
+                }
+                if r.total_reward.abs() < 0.001 {
+                    continue;
+                }
+
+                let sign = (gene.hebbian_sign - 0.5) * 2.0; // -1 ~ 1
+                let rate = gene.hebbian_rate;
+                let conn_count = self.gpu.meta_cpu[slot].conn_count as usize;
+                let conn_base = slot * MAX_CONNS;
+
+                for c in 0..conn_count {
+                    let trace = self.gpu.traces_cpu[conn_base + c];
+                    if trace.abs() < 0.001 {
+                        continue;
+                    }
+                    let delta = rate * (trace as f64) * r.total_reward * sign;
+                    let conn = &mut self.gpu.connections_cpu[conn_base + c];
+                    conn.weight = (conn.weight as f64 + delta).clamp(-2.0, 2.0) as f32;
+
+                    // Post-apply trace 衰减（对齐 CPU 版 apply_physiology 的 traces *= 0.1）
+                    self.gpu.traces_cpu[conn_base + c] *= 0.1;
+                }
+
+                // 回写修改后的 connections 和 traces 到 GPU
+                self.gpu.upload_connections_slot(slot);
+                self.gpu.upload_traces_slot(slot);
+            }
         }
 
         fn register(&mut self, id: u64, genome: &Genome) {
@@ -769,6 +954,16 @@ mod inner {
                     .map(|n| n.threshold == 0.0)
                     .collect();
                 self.output_modes_cache.insert(id, output_modes);
+
+                // 存储学习基因并上传学习参数到 GPU
+                self.learning_genes.insert(id, genome.learning.clone());
+                let params = GpuLearningParams {
+                    trace_decay: genome.learning.eligibility_decay as f32,
+                    learning_on: genome.learning.learning_on as f32,
+                    _pad0: 0.0,
+                    _pad1: 0.0,
+                };
+                self.gpu.upload_learning_params(slot, &params);
             }
         }
 
@@ -778,6 +973,7 @@ mod inner {
             }
             self.slots.free(id);
             self.output_modes_cache.remove(&id);
+            self.learning_genes.remove(&id);
         }
 
         fn run_batch(&mut self, inputs: &[CreatureInput], tick_count: usize) {
