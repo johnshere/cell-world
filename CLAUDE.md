@@ -139,7 +139,7 @@ cargo clippy          # 代码检查
   - 框架：`PhysioState` 帧内缓冲（世界注入），`PhysioGene` 各通道敏感度（可演化）
   - 通道 1：**能量吸收快乐**（pleasure_energy）—— 摄食吸收 `+absorbed/initial_energy`，面板 `reward_energy_enabled` 控制
   - 通道 2：**痕迹快乐**（pleasure_trail）—— 吃痕迹 `+absorbed/initial_energy` + 主动释放痕迹 `+extra/initial_energy`，面板 `reward_trail_enabled` 控制
-  - 通道 3：**集体快乐**（pleasure_group）—— 每帧 `follow_level × 0.1`，面板 `reward_group_enabled` 控制
+  - 通道 3：**集体快乐**（pleasure_group）—— 每帧 `follow_level × duration_factor × 0.1`，`duration_factor = min(group_duration/10, 1)`，持续结伴 10 秒后奖励达到满值；`group_duration` 在 `follow_level>0.1` 时按 dt 累积，脱离时 `×0.95` 衰减；面板 `reward_group_enabled` 控制
   - 学习路径：`total_reward = Σ(通道值 × 敏感度)` → eligibility trace × total_reward × hebbian_sign × hebbian_rate → Δw
   - **Bridge 模式下奖励信号通过 `NeuralBridge.send_reward()` 延迟一帧发送给神经线程**，在下一批 tick 前对正确的 SpikingNetwork 实例调用 `apply_physiology`；Legacy 模式下直接在 world 线程本地调用
   - 三通道独立开关（能量/痕迹/集体），任一通道开启即有奖励驱动学习

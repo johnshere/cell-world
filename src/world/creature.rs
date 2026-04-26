@@ -73,6 +73,10 @@ pub struct Creature {
     // 跟随度（指数平滑后的值，0~1）
     pub follow_level: f64,
 
+    // 持续结伴时长（秒），用于集体奖励累积
+    #[cfg_attr(feature = "persistence", serde(default))]
+    pub group_duration: f64,
+
     // 感知结果缓存（20维：左眼8 + 右眼8 + 自身1 + 地形1 + 发光感知2）
     // 扫描眼逐帧增量更新，必须持久化
     pub perception_cache: [f64; 20],
@@ -133,6 +137,7 @@ impl Creature {
             clan_hash: genome_hash,
             current_speed: 0.0,
             follow_level: 0.0,
+            group_duration: 0.0,
             perception_cache: [0.0; 20],
             last_outputs: [0.0; 8],
             eye_scan_offset: [0.0; 2],

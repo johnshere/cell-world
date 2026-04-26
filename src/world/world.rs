@@ -928,6 +928,13 @@ impl World {
             let current = self.creatures[i].follow_level;
             self.creatures[i].follow_level += (target - current) * (rate * dt).min(1.0);
 
+            // 持续结伴时长累积（用于集体奖励爬升）
+            if self.creatures[i].follow_level > 0.1 {
+                self.creatures[i].group_duration += dt;
+            } else {
+                self.creatures[i].group_duration *= 0.95; // 离队后缓慢衰减
+            }
+
             // 冷却递减
             self.creatures[i].mouth_cooldown_timer -= dt;
 
@@ -984,10 +991,12 @@ impl World {
                 self.creatures[i].physio.clear();
                 self.execute_actions(i, &outputs.to_vec(), dt, config);
 
-                // 集体奖励
+                // 集体奖励（持续结伴累积：duration_factor 从 0 线性爬升到 1，10 秒满）
                 if config.reward_group_enabled {
+                    let duration_factor =
+                        (self.creatures[i].group_duration / 10.0).min(1.0);
                     self.creatures[i].physio.pleasure_group +=
-                        self.creatures[i].follow_level * 0.1;
+                        self.creatures[i].follow_level * duration_factor * 0.1;
                 }
 
                 // 奖励信号通过 bridge 发送给神经线程（延迟一帧应用到正确的 SpikingNetwork）
@@ -1013,10 +1022,12 @@ impl World {
                 self.creatures[i].physio.clear();
                 self.execute_actions(i, &outputs, dt, config);
 
-                // 集体奖励
+                // 集体奖励（持续结伴累积：duration_factor 从 0 线性爬升到 1，10 秒满）
                 if config.reward_group_enabled {
+                    let duration_factor =
+                        (self.creatures[i].group_duration / 10.0).min(1.0);
                     self.creatures[i].physio.pleasure_group +=
-                        self.creatures[i].follow_level * 0.1;
+                        self.creatures[i].follow_level * duration_factor * 0.1;
                 }
 
                 let total_reward = self.creatures[i]
