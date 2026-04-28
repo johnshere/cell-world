@@ -1003,14 +1003,12 @@ impl World {
                 self.creatures[i].last_outputs = outputs;
 
                 self.creatures[i].physio.clear();
+                let turn_output = outputs[0];
                 self.execute_actions(i, &outputs.to_vec(), dt, config);
 
-                // 集体奖励（持续结伴累积：duration_factor 从 0 线性爬升到 1，10 秒满）
+                // 主动靠近奖励：转向朝同伴 + 距离缩小 → 即时奖励
                 if config.reward_group_enabled {
-                    let duration_factor =
-                        (self.creatures[i].group_duration / 10.0).min(1.0);
-                    self.creatures[i].physio.pleasure_group +=
-                        self.creatures[i].follow_level * duration_factor * 0.1;
+                    self.compute_approach_reward(i, turn_output, dt, config);
                 }
 
                 // 奖励信号通过 bridge 发送给神经线程（延迟一帧应用到正确的 SpikingNetwork）
@@ -1034,14 +1032,12 @@ impl World {
                 }
 
                 self.creatures[i].physio.clear();
+                let turn_output = outputs[0];
                 self.execute_actions(i, &outputs, dt, config);
 
-                // 集体奖励（持续结伴累积：duration_factor 从 0 线性爬升到 1，10 秒满）
+                // 主动靠近奖励：转向朝同伴 + 距离缩小 → 即时奖励
                 if config.reward_group_enabled {
-                    let duration_factor =
-                        (self.creatures[i].group_duration / 10.0).min(1.0);
-                    self.creatures[i].physio.pleasure_group +=
-                        self.creatures[i].follow_level * duration_factor * 0.1;
+                    self.compute_approach_reward(i, turn_output, dt, config);
                 }
 
                 let total_reward = self.creatures[i]
@@ -1485,6 +1481,53 @@ impl World {
             }
         }
         None
+    }
+
+    /// 计算主动靠近奖励：转向朝同伴 + 距离在缩小 → 即时奖励
+    fn compute_approach_reward(&mut self, idx: usize, turn_output: f64, dt: f64, config: &Config) {
+        let creature = &self.creatures[idx];
+        let cx = creature.x;
+        let cy = creature.y;
+        let heading = creature.heading;
+        let prev_dist = creature.approach_nearest_dist;
+
+        // 找 vision_range 内最近存活生物
+        let nearby = self.creature_grid.query(cx, cy, config.vision_range);
+        let mut best_dist = f64::MAX;
+        let mut best_bearing = 0.0_f64;
+        for &other_idx in &nearby {
+            if other_idx == idx || !self.creatures[other_idx].alive {
+                continue;
+            }
+            let other = &self.creatures[other_idx];
+            let dx = other.x - cx;
+            let dy = other.y - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist > 0.0 && dist < best_dist {
+                best_dist = dist;
+                best_bearing = dy.atan2(dx);
+            }
+        }
+
+        // 更新距离缓存
+        self.creatures[idx].approach_nearest_dist = best_dist;
+
+        if best_dist >= f64::MAX || prev_dist >= f64::MAX {
+            return; // 无邻居或首帧，跳过
+        }
+
+        // 条件A：转向方向与同伴方位一致
+        let heading_to_bearing = angle_diff(best_bearing, heading);
+        let turn_align = turn_output * heading_to_bearing; // >0 = 朝同伴转
+
+        // 条件B：距离在缩小
+        let approach_speed = (prev_dist - best_dist) / dt; // >0 = 在靠近
+
+        if turn_align > 0.0 && approach_speed > 0.0 {
+            let align_factor = turn_align.min(1.0);
+            let speed_factor = (approach_speed / config.max_speed).min(1.0);
+            self.creatures[idx].physio.pleasure_group += align_factor * speed_factor;
+        }
     }
 
     // ========== 更新/清理 ==========
