@@ -863,32 +863,39 @@ impl World {
                 let alive = energy > 0.0 && !energy.is_nan() && !energy.is_infinite();
 
                 // 感知计算（仅存活时）
-                let (perception_cache, eye_scan_offset, follow_degree, light_scan_offset) = if alive
-                {
-                    compute_perception_pure(
-                        i,
-                        creature,
-                        dt,
-                        config,
-                        creatures_ref,
-                        energy_particles_ref,
-                        trail_points_ref,
-                        energy_grid_ref,
-                        creature_grid_ref,
-                        trail_grid_ref,
-                        trail_disabled,
-                        terrain_ref,
-                        &mut energy_buf,
-                        &mut creature_buf,
-                        &mut trail_buf,
-                    )
+                let (perception_cache, eye_scan_offset, follow_degree_raw, light_scan_offset) =
+                    if alive {
+                        compute_perception_pure(
+                            i,
+                            creature,
+                            dt,
+                            config,
+                            creatures_ref,
+                            energy_particles_ref,
+                            trail_points_ref,
+                            energy_grid_ref,
+                            creature_grid_ref,
+                            trail_grid_ref,
+                            trail_disabled,
+                            terrain_ref,
+                            &mut energy_buf,
+                            &mut creature_buf,
+                            &mut trail_buf,
+                        )
+                    } else {
+                        (
+                            creature.perception_cache,
+                            creature.eye_scan_offset,
+                            0.0,
+                            creature.light_scan_offset,
+                        )
+                    };
+
+                // 跟随度稀疏计算：计时器 > 0 时复用缓存
+                let follow_degree = if creature.follow_update_timer > 0.0 {
+                    creature.follow_degree_cache
                 } else {
-                    (
-                        creature.perception_cache,
-                        creature.eye_scan_offset,
-                        0.0,
-                        creature.light_scan_offset,
-                    )
+                    follow_degree_raw
                 };
 
                 PerceptionResult {
@@ -922,8 +929,15 @@ impl World {
             self.creatures[i].light_scan_offset = result.light_scan_offset;
             self.creatures[i].age += dt;
 
+            // 跟随度稀疏计算计时器
+            self.creatures[i].follow_update_timer -= dt;
+            if self.creatures[i].follow_update_timer <= 0.0 {
+                self.creatures[i].follow_degree_cache = result.follow_degree;
+                self.creatures[i].follow_update_timer = config.follow_update_interval;
+            }
+
             // 指数平滑 follow_level
-            let target = result.follow_degree;
+            let target = self.creatures[i].follow_degree_cache;
             let rate = 4.0; // ~0.25s 响应时间
             let current = self.creatures[i].follow_level;
             self.creatures[i].follow_level += (target - current) * (rate * dt).min(1.0);
@@ -2279,32 +2293,47 @@ fn compute_perception_pure(
         light_scan_offset_out = light_offset;
     }
 
-    // === 跟随度计算 ===
-    let mut follow_degree = 0.0_f64;
-    for eye_i in 0..2 {
-        if nearest_type[eye_i] != 1.0 {
+    // === 跟随度计算（全向直接遍历，不依赖扫描波束）===
+    let mut follow_total = 0.0_f64;
+    let opt_angle = config.follow_optimal_angle;
+    let sigma_sq = config.follow_angle_width * config.follow_angle_width;
+    // creature_buf 已在上方扫描生物时填充，包含 vision_range 内所有生物索引
+    for &idx in creature_buf.iter() {
+        if idx == creature_idx {
             continue;
-        } // 仅生物
-        if nearest_dist[eye_i] >= f64::MAX {
+        }
+        let other = &creatures[idx];
+        if !other.alive {
+            continue;
+        }
+        let dx = other.x - cx;
+        let dy = other.y - cy;
+        let dist = (dx * dx + dy * dy).sqrt();
+        if dist <= 0.0 || dist > eye_range {
             continue;
         }
 
-        // 因子1: 方向对齐度（heading_diff 已归一化到 -1~1）
-        let alignment = 1.0 - nearest_heading_diff[eye_i].abs();
+        // 因子1: 方向对齐度（双方朝向差）
+        let heading_diff = angle_diff(other.heading, heading);
+        let alignment = 1.0 - heading_diff.abs() / std::f64::consts::PI;
 
-        // 因子2: 最优距离（高斯，与双方半径相关）
-        let target_radius = (nearest_energy[eye_i] * 1.28).cbrt();
+        // 因子2: 最优距离（高斯钟形）
+        let target_radius = (other.energy * 1.28).cbrt();
         let optimal_dist = 2.5 * (body_radius + target_radius);
-        let dist_ratio = (nearest_dist[eye_i] - optimal_dist) / optimal_dist;
+        let dist_ratio = (dist - optimal_dist) / optimal_dist;
         let distance_factor = (-dist_ratio * dist_ratio).exp();
 
-        // 因子3: 位置偏移（scan_norm=-1.0 对应 ±20° 偏移，峰值在此）
-        let pos_offset = scan_norm[eye_i] + 1.0;
-        let position_factor = (-(pos_offset * pos_offset) / 0.32).exp(); // σ²=0.16
+        // 因子3: 方位角双峰（±follow_optimal_angle 最省力，正前方非最优）
+        let angle_to_target = dy.atan2(dx);
+        let frontal_diff = angle_diff(angle_to_target, heading).abs();
+        let offset_left = (frontal_diff - opt_angle).abs();
+        let offset_right = (frontal_diff + opt_angle).abs();
+        let offset = offset_left.min(offset_right);
+        let position_factor = (-offset * offset / (2.0 * sigma_sq)).exp();
 
-        let eye_follow = alignment * distance_factor * position_factor;
-        follow_degree = follow_degree.max(eye_follow);
+        follow_total += alignment * distance_factor * position_factor;
     }
+    let follow_degree = (1.0 - (-follow_total).exp()) * config.follow_max_level;
 
     (
         perception,

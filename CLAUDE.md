@@ -140,6 +140,16 @@ cargo clippy          # 代码检查
 - **火山粒子分布**: 线性分布（r=u×radius）
 - **咬合系统**: 咬合力=|mouth|（mouth<-0.1 触发），伤害=战力比 ×bite_transfer_rate(0.8)，无额外咬消耗，冷却 1s；喂食机制已移除，能量分享通过痕迹实现
 - **战力系统**: 战力 = f(能量, 速度, 同族援助)，咬时攻方乘咬合力；同族援助范围=vision_range
+- **跟随省力系统（全向直接遍历）**:
+  - 不依赖扫描波束，直接遍历 vision_range 内所有存活生物，每个邻居计算三因子贡献并累加
+  - 因子1：朝向对齐度 `alignment = 1.0 - |heading_diff|/π`（同向=1，反向=0）
+  - 因子2：距离高斯 `distance_factor = exp(-((dist-optimal)/optimal)²)`，`optimal = 2.5×(双方半径之和)`
+  - 因子3：方位角双峰 `position_factor = exp(-offset²/(2σ²))`，峰值在 ±`follow_optimal_angle`（默认±30°），正前方非最优（避免一字纵队），自然形成 V 形/并行编队
+  - 饱和归一化：`follow_degree = (1 - exp(-Σcontributions)) × follow_max_level`，群体越大越省力但边际递减
+  - 稀疏计算：每 `follow_update_interval`（默认0.25s）重算一次，中间帧复用缓存
+  - 指数平滑 `follow_level += (target - current) × (4.0 × dt).min(1.0)`
+  - 省力：`move_cost × (1 - follow_level × follow_cost_discount)`
+  - 配置：`follow_optimal_angle`(30°), `follow_angle_width`(25°), `follow_max_level`(1.0), `follow_update_interval`(0.25s), `follow_cost_discount`(0.3)
 - **生理系统（3 通道 + 面板开关）**:
   - 框架：`PhysioState` 帧内缓冲（世界注入），`PhysioGene` 各通道敏感度（可演化）
   - 通道 1：**能量吸收快乐**（pleasure_energy）—— 摄食吸收 `+absorbed/initial_energy`，面板 `reward_energy_enabled` 控制

@@ -73,6 +73,14 @@ pub struct Creature {
     // 跟随度（指数平滑后的值，0~1）
     pub follow_level: f64,
 
+    // 跟随度稀疏计算计时器（<=0 时重新计算）
+    #[cfg_attr(feature = "persistence", serde(default))]
+    pub follow_update_timer: f64,
+
+    // 上次计算的跟随度原始值（稀疏计算缓存）
+    #[cfg_attr(feature = "persistence", serde(default))]
+    pub follow_degree_cache: f64,
+
     // 持续结伴时长（秒），用于集体奖励累积
     #[cfg_attr(feature = "persistence", serde(default))]
     pub group_duration: f64,
@@ -137,6 +145,8 @@ impl Creature {
             clan_hash: genome_hash,
             current_speed: 0.0,
             follow_level: 0.0,
+            follow_update_timer: 0.0,
+            follow_degree_cache: 0.0,
             group_duration: 0.0,
             perception_cache: [0.0; 20],
             last_outputs: [0.0; 8],

@@ -73,6 +73,22 @@ pub struct Config {
     #[serde(default = "default_follow_cost_discount")]
     pub follow_cost_discount: f64,
 
+    /// 跟随最省力方位角（弧度，左右对称双峰，默认 30°≈0.524 rad）
+    #[serde(default = "default_follow_optimal_angle")]
+    pub follow_optimal_angle: f64,
+
+    /// 跟随方位角容忍宽度σ（弧度，默认 25°≈0.436 rad）
+    #[serde(default = "default_follow_angle_width")]
+    pub follow_angle_width: f64,
+
+    /// 跟随度归一化上限缩放
+    #[serde(default = "default_follow_max_level")]
+    pub follow_max_level: f64,
+
+    /// 跟随度稀疏计算间隔（秒）
+    #[serde(default = "default_follow_update_interval")]
+    pub follow_update_interval: f64,
+
     /// 视觉半径（眼睛能看到的最大距离）
     pub vision_range: f64,
     /// 接触判定距离
@@ -256,6 +272,18 @@ fn default_eye_scan_speed() -> f64 {
 }
 fn default_follow_cost_discount() -> f64 {
     0.3
+}
+fn default_follow_optimal_angle() -> f64 {
+    30.0_f64.to_radians() // ±30°
+}
+fn default_follow_angle_width() -> f64 {
+    25.0_f64.to_radians() // σ=25°
+}
+fn default_follow_max_level() -> f64 {
+    1.0
+}
+fn default_follow_update_interval() -> f64 {
+    0.25
 }
 
 fn default_lava_count() -> usize {

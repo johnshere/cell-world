@@ -520,6 +520,10 @@ age_metabolism_factor = 0.025
 metabolism_exponent = 2.0
 move_cost = 0.0005
 follow_cost_discount = 0.6
+follow_optimal_angle = 0.524    # ±30° 最省力方位角
+follow_angle_width = 0.436      # σ=25° 容忍宽度
+follow_max_level = 1.0          # 归一化上限
+follow_update_interval = 0.25   # 稀疏计算间隔（秒）
 max_speed = 20.0
 
 # 进化
