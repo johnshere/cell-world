@@ -518,7 +518,7 @@ heat_dissipation_coefficient = 0.001
 base_metabolism = 0.025
 age_metabolism_factor = 0.025
 metabolism_exponent = 2.0
-move_cost = 0.0005
+move_cost = 3.0          # 系数：面板值 ×0.00001 × 半径³ = 实际消耗基础率
 follow_cost_discount = 0.6
 follow_optimal_angle = 0.524    # ±30° 最省力方位角
 follow_angle_width = 0.436      # σ=25° 容忍宽度

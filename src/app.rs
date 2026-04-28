@@ -170,8 +170,8 @@ impl CellWorldApp {
                 .open(log_path)
             {
                 let _ = writeln!(file, "# Cell World 运行日志\n");
-                let _ = writeln!(file, "| 时间 | 生物 | 粒子 | 痕迹 | 总能 | 代 | 种群 | 寿命(均/中/长/短/死) | 行为(移动/吸收/咬/繁殖) |");
-                let _ = writeln!(file, "|------|------|------|------|------|----|------|----------------------|------------------------|");
+                let _ = writeln!(file, "| 时间 | 生物 | 粒子 | 痕迹 | 总能 | 代 | 种群 | 寿命(均/中/长/短/死) | 行为(移动/吸收/咬/无性/有性) |");
+                let _ = writeln!(file, "|------|------|------|------|------|----|------|----------------------|---------------------------|");
             }
             // 性能分析日志
             if let Ok(mut file) = OpenOptions::new()
@@ -193,7 +193,7 @@ impl CellWorldApp {
             let death = &stats.death_age_stats;
             let _ = writeln!(
                 file,
-                "| {:.0} | {} | {} | {} | {:.0} | {} | {} | {:.1}/{:.1}/{:.1}/{:.1}/{} | {}/{}/{}/{} |",
+                "| {:.0} | {} | {} | {} | {:.0} | {} | {} | {:.1}/{:.1}/{:.1}/{:.1}/{} | {}/{}/{}/{}/{} |",
                 stats.time,
                 stats.creature_count,
                 stats.energy_particle_count,
@@ -202,7 +202,7 @@ impl CellWorldApp {
                 stats.max_generation,
                 stats.clan_count,
                 death.avg, death.median, death.max, death.min, death.count,
-                acts[0], acts[1], acts[2], acts[3]
+                acts[0], acts[1], acts[2], acts[3], acts[4]
             );
         }
 
@@ -654,10 +654,10 @@ impl CellWorldApp {
                 changed |= config_drag_f64(
                     ui,
                     "移动消耗",
-                    "每单位距离消耗*速度",
+                    "系数×0.00001×半径³×速度",
                     &mut c.move_cost,
-                    0.0001,
-                    0.0001..=0.1,
+                    0.1,
+                    0.1..=100.0,
                 );
                 changed |= config_drag_f64(
                     ui,
@@ -734,15 +734,30 @@ impl CellWorldApp {
                     changed = true;
                 }
 
-                // 自动投放间隔
-                changed |= config_drag_f64(
-                    ui,
-                    "自动投放间隔(秒)",
-                    "0=禁用，定时投放随机生物",
-                    &mut c.auto_spawn_interval,
-                    1.0,
-                    0.0..=3600.0,
-                );
+                // 自动投放间隔（拖拽步进 1，可手动输入一位小数）
+                {
+                    let r = ui
+                        .horizontal(|ui| {
+                            ui.label("自动投放间隔(秒)");
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.add(
+                                    egui::DragValue::new(&mut c.auto_spawn_interval)
+                                        .speed(1.0)
+                                        .range(0.0..=3600.0)
+                                        .max_decimals(1),
+                                )
+                                .changed()
+                            })
+                            .inner
+                        })
+                        .inner;
+                    ui.label(
+                        egui::RichText::new("0=禁用，定时投放随机生物")
+                            .color(egui::Color32::from_gray(110))
+                            .size(10.0),
+                    );
+                    changed |= r;
+                }
 
                 changed |= config_drag_usize(
                     ui,

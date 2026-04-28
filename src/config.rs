@@ -67,7 +67,7 @@ pub struct Config {
     /// 最大速度（px/s）
     #[serde(default = "default_max_speed")]
     pub max_speed: f64,
-    /// 移动消耗（每单位距离）
+    /// 移动消耗系数（面板值 ×0.00001 × 半径³ = 实际消耗 每单位距离*速度）
     pub move_cost: f64,
     /// 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
     #[serde(default = "default_follow_cost_discount")]

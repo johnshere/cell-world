@@ -26,7 +26,7 @@ pub struct WorldSnapshot {
     /// 已废弃，保留兼容旧存档
     #[serde(default)]
     pub meteorite_timer: f64,
-    pub action_counts: [usize; 4],
+    pub action_counts: [usize; 5],
     pub death_age_stats: DeathAgeStats,
     pub death_ages: Vec<f64>,
     pub death_age_sum: f64,

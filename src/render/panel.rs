@@ -65,8 +65,8 @@ pub struct CachedStats {
     pub volcano_countdown: f64,
     pub max_generation: usize,
     pub avg_energy: f64,
-    // 行为触发统计（4事件：移动/吸收/咬/繁殖）
-    pub action_counts: [usize; 4],
+    // 行为触发统计（5事件：移动/吸收/咬/无性繁殖/有性繁殖）
+    pub action_counts: [usize; 5],
     pub death_age_stats: DeathAgeStats,
     pub clan_count: usize,
     pub top_clans: Vec<(u64, usize)>,
@@ -319,16 +319,6 @@ impl StatsPanel {
                 ui.label(format!("算力:{:.0}ns", self.cached_stats.avg_compute_ns));
             }
             ui.label("│");
-            // 火山倒计时
-            let countdown = self.cached_stats.volcano_countdown;
-            let color = if countdown < 5.0 {
-                egui::Color32::from_rgb(255, 80, 30)
-            } else if countdown < 15.0 {
-                egui::Color32::from_rgb(255, 200, 50)
-            } else {
-                egui::Color32::from_rgb(200, 200, 200)
-            };
-            ui.colored_label(color, format!("🌋{:.0}s", countdown));
         });
 
         // 行为统计（5事件）
@@ -344,11 +334,12 @@ impl StatsPanel {
         };
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
-                "行为: 移动:{}│吸收:{}│咬:{}│繁殖:{}",
+                "行为: 移动:{}│吸收:{}│咬:{}│繁殖(无性{}/有性{})",
                 format_count(acts[0]),
                 format_count(acts[1]),
                 format_count(acts[2]),
-                format_count(acts[3])
+                format_count(acts[3]),
+                format_count(acts[4])
             ));
         });
 

@@ -60,8 +60,8 @@ pub struct World {
     similarity_cache: RefCell<FxHashMap<(u64, u64), f64>>,
     cache_cleanup_timer: f64,
 
-    // 行为触发次数统计（4事件：移动/吸收/咬/繁殖）
-    pub action_counts: [usize; 4],
+    // 行为触发次数统计（5事件：移动/吸收/咬/无性繁殖/有性繁殖）
+    pub action_counts: [usize; 5],
 
     // 死亡年龄统计
     death_ages: Vec<f64>,
@@ -135,7 +135,7 @@ impl World {
             perf_stats: PerfStats::default(),
             similarity_cache: RefCell::new(FxHashMap::default()),
             cache_cleanup_timer: 0.0,
-            action_counts: [0; 4],
+            action_counts: [0; 5],
             death_ages: Vec::new(),
             death_age_sum: 0.0,
             death_age_stats: DeathAgeStats::default(),
@@ -307,7 +307,7 @@ impl World {
         volcano_timer: f64,
         next_creature_id: u64,
         next_energy_id: u64,
-        action_counts: [usize; 4],
+        action_counts: [usize; 5],
         death_age_stats: DeathAgeStats,
         death_ages: Vec<f64>,
         death_age_sum: f64,
@@ -1126,7 +1126,9 @@ impl World {
         self.creatures[creature_idx].heading += turn_amount;
         // 转向消耗：与角速度的平方成正比（慢转低耗，急转高耗）
         let angular_speed = turn_amount.abs() / dt;
-        self.creatures[creature_idx].energy -= turn_amount.abs() * config.move_cost * angular_speed;
+        let radius_cubed = self.creatures[creature_idx].energy.max(0.0) * 1.28;
+        self.creatures[creature_idx].energy -=
+            turn_amount.abs() * config.move_cost * 0.00001 * radius_cubed * angular_speed;
 
         let actual_speed = speed.abs() * config.max_speed;
         self.creatures[creature_idx].current_speed = actual_speed;
@@ -1153,7 +1155,8 @@ impl World {
                 config,
             );
             move_cost = distance
-                * config.move_cost
+                * config.move_cost * 0.00001
+                * radius_cubed
                 * actual_speed
                 * (1.0 - follow_discount)
                 * terrain_factor;
@@ -1219,9 +1222,7 @@ impl World {
         let alive_count = self.creatures.iter().filter(|c| c.alive).count();
         let pop_ok = config.max_creatures == 0 || alive_count < config.max_creatures;
         if reproduce > 0.2 && pop_ok {
-            if self.action_reproduce(creature_idx, reproduce_threshold, reproduce_ratio, config) {
-                self.action_counts[3] += 1; // 繁殖
-            }
+            self.action_reproduce(creature_idx, reproduce_threshold, reproduce_ratio, config);
         }
     }
 
@@ -1400,6 +1401,7 @@ impl World {
 
         // 尝试找同种配偶
         let mate = self.find_mate(idx, config);
+        let is_sexual = mate.is_some();
 
         let reproduce_age_cost = 50.0;
         let creature_id = self.next_creature_id;
@@ -1436,6 +1438,13 @@ impl World {
                 config,
             )
         };
+
+        // 计数繁殖类型
+        if is_sexual {
+            self.action_counts[4] += 1;
+        } else {
+            self.action_counts[3] += 1;
+        }
 
         // 种族颜色继承：与源头基因比较，相似度 >= 阈值则同族，否则建新族
         let parent_clan = self.creatures[idx].clan_hash;
@@ -2410,7 +2419,7 @@ pub struct WorldStats {
     pub theoretical_energy: f64,
     pub max_generation: usize,
     pub avg_energy: f64,
-    pub action_counts: [usize; 4],
+    pub action_counts: [usize; 5],
     pub death_age_stats: DeathAgeStats,
     pub clan_count: usize,
     /// 种族前三: (clan_hash, count)
