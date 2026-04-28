@@ -657,7 +657,7 @@ impl CellWorldApp {
                     "每单位距离消耗*速度",
                     &mut c.move_cost,
                     0.0001,
-                    0.0001..=0.01,
+                    0.0001..=0.1,
                 );
                 changed |= config_drag_f64(
                     ui,
@@ -665,7 +665,7 @@ impl CellWorldApp {
                     "前方有同向生物时移动消耗减少比例",
                     &mut c.follow_cost_discount,
                     0.01,
-                    0.0..=0.8,
+                    0.0..=0.99,
                 );
                 changed |= config_drag_f64(
                     ui,
@@ -1678,6 +1678,7 @@ impl eframe::App for CellWorldApp {
 
         // 处理重置世界
         if panel_action.reset_world {
+            self.panel.energy_history.clear();
             self.sim.send(SimCommand::ResetWorld);
         }
 

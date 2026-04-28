@@ -4,6 +4,10 @@ Cell-World 神经网络涌现生态模拟器 - Claude Code 开发指南
 
 > **完整设计文档**: [docs/DESIGN.md](docs/DESIGN.md)
 
+## 规则
+
+当用户使用中文提问或明确要求用中文时，你必须用中文回答所有问题。
+
 ## ⚠️ 文档同步铁律
 
 **每次修改代码都必须同步更新 CLAUDE.md 和 docs/DESIGN.md**，这是强制要求，不是建议。
@@ -34,6 +38,7 @@ cell-world 的核心理念是让群体行为（集群、尾随、捕猎、哺育
 ### 如何正确推动涌现
 
 当行为不出现时，应该优先问：
+
 1. **是不是有架构缺陷阻断了演化路径？**（如 crossover 主动消灭多样性 → 修）
 2. **是不是演化信号被某个 bug 扭曲了？**（如加速模式破坏决策一致性 → 修）
 3. **还是只是时间不够？**（→ 耐心等，跑更长）
@@ -51,28 +56,28 @@ cargo clippy          # 代码检查
 
 ## 核心模块
 
-| 模块     | 文件                       | 职责                                                  |
-| -------- | -------------------------- | ----------------------------------------------------- |
-| 神经网络 | `src/neural/genome.rs`     | NEAT 基因组，结构变异，PhysioGene 生理敏感度基因      |
-|          | `src/neural/spiking.rs`    | CPU SpikingNetwork 前向传播（legacy/cpu 后端）        |
-|          | `src/neural/block.rs`      | 分区（感官/联合/运动），ConnProbs 区块连接概率基因    |
-|          | `src/neural/bridge.rs`     | 同步批处理桥（TickRequest/TickResponse mpsc 通道）    |
-|          | `src/neural/thread.rs`     | 神经线程入口，TickExecutor trait，CpuExecutor 实现    |
+| 模块     | 文件                       | 职责                                                   |
+| -------- | -------------------------- | ------------------------------------------------------ |
+| 神经网络 | `src/neural/genome.rs`     | NEAT 基因组，结构变异，PhysioGene 生理敏感度基因       |
+|          | `src/neural/spiking.rs`    | CPU SpikingNetwork 前向传播（legacy/cpu 后端）         |
+|          | `src/neural/block.rs`      | 分区（感官/联合/运动），ConnProbs 区块连接概率基因     |
+|          | `src/neural/bridge.rs`     | 同步批处理桥（TickRequest/TickResponse mpsc 通道）     |
+|          | `src/neural/thread.rs`     | 神经线程入口，TickExecutor trait，CpuExecutor 实现     |
 |          | `src/neural/gpu.rs`        | GPU 后端（wgpu），批处理 run_batch + 在线 Hebbian 学习 |
-|          | `src/neural/snn_tick.wgsl` | Compute shader：spike 累加 + eligibility trace 计算   |
-|          | `src/neural/slot_alloc.rs` | GPU 固定槽位分配（MAX_CREATURES=512）                 |
-| 世界系统 | `src/world/world.rs`       | 主循环、感知、动作执行、bridge 同步调用              |
-|          | `src/world/sim_thread.rs`  | sim 线程入口，命令处理，快照导出                     |
-|          | `src/world/creature.rs`    | 生物结构                                              |
-|          | `src/world/energy.rs`      | 能量粒子                                              |
-|          | `src/world/trail.rs`       | 痕迹点系统                                            |
-|          | `src/world/spatial.rs`     | 空间索引 O(1) 查询                                    |
-|          | `src/world/terrain.rs`     | 50×50 chunk fBm 噪声高度图（生成后冻结）              |
-| 渲染     | `src/render/canvas.rs`     | 画布渲染、拖拽缩放                                    |
-|          | `src/render/panel.rs`      | 侧边栏统计面板                                        |
-| 应用     | `src/app.rs`               | egui 应用主循环、日志、选中                           |
-| 配置     | `src/config.rs`            | 参数配置                                              |
-| 存储     | `src/store.rs`             | 生物模板存档（JSON）                                  |
+|          | `src/neural/snn_tick.wgsl` | Compute shader：spike 累加 + eligibility trace 计算    |
+|          | `src/neural/slot_alloc.rs` | GPU 固定槽位分配（MAX_CREATURES=512）                  |
+| 世界系统 | `src/world/world.rs`       | 主循环、感知、动作执行、bridge 同步调用                |
+|          | `src/world/sim_thread.rs`  | sim 线程入口，命令处理，快照导出                       |
+|          | `src/world/creature.rs`    | 生物结构                                               |
+|          | `src/world/energy.rs`      | 能量粒子                                               |
+|          | `src/world/trail.rs`       | 痕迹点系统                                             |
+|          | `src/world/spatial.rs`     | 空间索引 O(1) 查询                                     |
+|          | `src/world/terrain.rs`     | 50×50 chunk fBm 噪声高度图（生成后冻结）               |
+| 渲染     | `src/render/canvas.rs`     | 画布渲染、拖拽缩放                                     |
+|          | `src/render/panel.rs`      | 侧边栏统计面板                                         |
+| 应用     | `src/app.rs`               | egui 应用主循环、日志、选中                            |
+| 配置     | `src/config.rs`            | 参数配置                                               |
+| 存储     | `src/store.rs`             | 生物模板存档（JSON）                                   |
 
 ## 关键设计
 
@@ -99,7 +104,7 @@ cargo clippy          # 代码检查
 - **GPU 在线 Hebbian 学习**: `apply_rewards` 在 tick 前执行（CPU 侧）
   - 有奖励时：一次性读回全部 eligibility traces（256KB）
   - 逐生物计算 `Δw = hebbian_rate × trace × total_reward × sign`，更新 `connections_cpu` 权重（clamp [-2.0, 2.0]）
-  - 应用后 traces *= 0.1（对齐 CPU 版 `apply_physiology`），回写 connections + traces 到 GPU
+  - 应用后 traces \*= 0.1（对齐 CPU 版 `apply_physiology`），回写 connections + traces 到 GPU
   - 学习基因（LearningGene）在 register 时缓存，learning_params 上传到 GPU binding 8
 - **面板速度**: 同步批处理模型下只有单一"FPS: X | 速度: Nx"显示。历史上的"神经/世界"双值已移除（反压已删除）
 - **无限世界**: 无边界，视窗可自由拖拽缩放
@@ -113,12 +118,12 @@ cargo clippy          # 代码检查
   - 自身状态: 1 通道（能量/2000），始终更新
   - 发光感知：360° 全向扫描，独立 light_scan_offset，与眼睛同速，检测 vision_range 内发光生物
 - **20 维输入**: 左眼 8 + 右眼 8 + 自身 1 + 地形 1 + 发光感知 2
-  - 左眼 [0..7]: 扫描角归一化(-1~1), 目标接近度, 目标能量/200, 实体类型(0/0.25/0.50/0.75/1.0), 基因相似度(0~1), 能量密度, 朝向差(-1~1,仅生物), 速度差(-1~1,仅生物)  → block -1
-  - 右眼 [8..15]: 扫描角归一化, 目标接近度, 目标能量/200, 实体类型, 基因相似度, 能量密度, 朝向差, 速度差  → block 1
-  - 自身 [16]: 能量/2000  → block 0
-  - 地形 [17]: 前方坡度方向 `dh.signum()`（-1=下坡, 0=平地或无地形, 1=上坡），前瞻 15px  → block 0
-  - 发光扫描角 [18]: 归一化(-1~1)  → block -2
-  - 发光强度 [19]: 最近发光生物的 light_intensity(0~1)  → block -2
+  - 左眼 [0..7]: 扫描角归一化(-1~1), 目标接近度, 目标能量/200, 实体类型(0/0.25/0.50/0.75/1.0), 基因相似度(0~1), 能量密度, 朝向差(-1~1,仅生物), 速度差(-1~1,仅生物) → block -1
+  - 右眼 [8..15]: 扫描角归一化, 目标接近度, 目标能量/200, 实体类型, 基因相似度, 能量密度, 朝向差, 速度差 → block 1
+  - 自身 [16]: 能量/2000 → block 0
+  - 地形 [17]: 前方坡度方向 `dh.signum()`（-1=下坡, 0=平地或无地形, 1=上坡），前瞻 15px → block 0
+  - 发光扫描角 [18]: 归一化(-1~1) → block -2
+  - 发光强度 [19]: 最近发光生物的 light_intensity(0~1) → block -2
 - **8 维输出（全部直读模式 tanh）**:
   - 转向角(0, block 25)、速度(1, block 25)、嘴(2, block 25，<-0.1=咬/接触食物自动吸收，冷却 1s)
   - 繁殖意愿(3, block -25，>0.2 触发)、繁殖阈值(4, block -25，sigmoid→20~200)、子代能量比例(5, block -25，sigmoid→0.1~0.5)

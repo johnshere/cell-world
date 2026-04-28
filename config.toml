@@ -1,7 +1,7 @@
 # 初始模拟速度
 initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 5
+min_creatures = 40
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 400
 # 初始能量
@@ -19,7 +19,7 @@ volcano_interval = 25.0
 # 火山喷射半径
 volcano_radius = 2500.0
 # 每次喷发粒子数
-volcano_count = 85
+volcano_count = 100
 # 火山粒子能量
 volcano_particle_energy = 160.0
 
@@ -44,19 +44,19 @@ landing_damage_multiplier = 1.0
 
 # === 熔岩流 ===
 # 每次火山喷发附带的熔岩流粒子数
-lava_count = 1
+lava_count = 2
 # 熔岩粒子死亡时分裂第二个子粒子的概率
-lava_spread_probability = 0.6
+lava_spread_probability = 0.55
 # 最大链式代数
-lava_max_chain_depth = 20
+lava_max_chain_depth = 5
 # 每个粒子贡献的等效液面高度
-lava_level_per_particle = 1.6
+lava_level_per_particle = 1.7
 # 熔岩粒子周期性杀伤基础间隔（秒，火山口处）
 lava_kill_base_interval = 1.0
 # 距离对杀伤周期的放大系数
 lava_kill_distance_scale = 1.0
 # 熔岩粒子独立衰减率（/秒）
-lava_decay_rate = 0.005
+lava_decay_rate = 0.007
 # 溢流最大区块跳跃数
 lava_max_overflow_depth = 20
 
@@ -82,12 +82,12 @@ age_metabolism_factor = 0.01
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗（每单位距离）
-move_cost = 0.0015
+move_cost = 0.01
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
-follow_cost_discount = 0.8
+follow_cost_discount = 0.99
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.03
+heat_dissipation_coefficient = 0.01
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -125,7 +125,7 @@ trail_emit_interval = 0.4
 
 # === 算力能量 ===
 # 算力转能量系数（内部除以1亿，0 = 禁用）
-compute_energy_factor = 75.0
+compute_energy_factor = 90.5
 
 # === SNN ===
 # 每帧 SNN tick 数（同步模式）
@@ -136,7 +136,7 @@ neural_backend = "auto"
 neural_tick_rate = 600.0
 # 变异率（全局常量，不再是基因组内可演化基因）
 # base/block 两类变异共享此触发概率
-mutation_rate = 0.08
+mutation_rate = 0.1
 base_metabolism = 0.025
 max_speed = 20.0
 meteorite_interval = 0.0
@@ -151,13 +151,13 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = false
-auto_spawn_interval = 1.0
+auto_spawn_interval = 5.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
 terrain_slope_cost = 7.0
 # === 奖励通道开关 ===
-reward_energy_enabled = true
+reward_energy_enabled = false
 reward_trail_enabled = true
 reward_group_enabled = true
 reproduce_cooldown = 0.0

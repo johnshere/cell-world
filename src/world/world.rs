@@ -1380,6 +1380,7 @@ impl World {
 
         let child_energy = self.creatures[idx].energy * ratio;
         self.creatures[idx].energy -= child_energy;
+        self.creatures[idx].age += 50.0;
 
         let mut rng = rand::thread_rng();
         let heading = self.creatures[idx].heading;
