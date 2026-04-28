@@ -1394,7 +1394,6 @@ impl World {
 
         let child_energy = self.creatures[idx].energy * ratio;
         self.creatures[idx].energy -= child_energy;
-        self.creatures[idx].age += 50.0;
 
         let mut rng = rand::thread_rng();
         let heading = self.creatures[idx].heading;
@@ -1406,19 +1405,19 @@ impl World {
         // 尝试找同种配偶
         let mate = self.find_mate(idx, config);
 
+        let reproduce_age_cost = 50.0;
         let creature_id = self.next_creature_id;
         self.next_creature_id += 1;
 
-        let parent_age = self.creatures[idx].age;
-        let parent_maturation = self.creatures[idx].genome.maturation_time;
-
         let mut child = if let Some((mate_genome, mate_heading)) = mate {
+            // 有性繁殖：年龄 +n
+            self.creatures[idx].age += reproduce_age_cost;
+            let parent_age = self.creatures[idx].age;
+            let parent_maturation = self.creatures[idx].genome.maturation_time;
             let crossover_genome =
                 Genome::crossover(&self.creatures[idx].genome, &mate_genome, true);
             let mut child_genome = crossover_genome.mutate(config, parent_age);
-            // 子代发育时间 = (母方年龄 + 母方发育时间) / 2
             child_genome.maturation_time = (parent_age + parent_maturation) / 2.0;
-            // 父辈方向均值（弧度直接平均，已足够）
             let child_heading = (heading + mate_heading) / 2.0;
             Creature::new(
                 creature_id,
@@ -1431,6 +1430,8 @@ impl World {
                 Some(child_heading),
             )
         } else {
+            // 无性繁殖：年龄 +2n（惩罚独立繁殖）
+            self.creatures[idx].age += reproduce_age_cost * 2.0;
             self.creatures[idx].reproduce(
                 creature_id,
                 self.creatures[idx].x + offset_x,
