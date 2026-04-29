@@ -63,6 +63,9 @@ pub struct World {
     // 行为触发次数统计（5事件：移动/吸收/咬/无性繁殖/有性繁殖）
     pub action_counts: [usize; 5],
 
+    // 奖励触发次数统计（3通道：能量/痕迹/集体）
+    pub reward_counts: [usize; 3],
+
     // 死亡年龄统计
     death_ages: Vec<f64>,
     death_age_sum: f64,
@@ -136,6 +139,7 @@ impl World {
             similarity_cache: RefCell::new(FxHashMap::default()),
             cache_cleanup_timer: 0.0,
             action_counts: [0; 5],
+            reward_counts: [0; 3],
             death_ages: Vec::new(),
             death_age_sum: 0.0,
             death_age_stats: DeathAgeStats::default(),
@@ -336,6 +340,7 @@ impl World {
             similarity_cache: RefCell::new(FxHashMap::default()),
             cache_cleanup_timer: 0.0,
             action_counts,
+            reward_counts: [0; 3],
             death_ages,
             death_age_sum,
             death_age_stats,
@@ -1196,6 +1201,7 @@ impl World {
                         if config.reward_trail_enabled {
                             self.creatures[creature_idx].physio.pleasure_trail +=
                                 extra / config.initial_energy;
+                            self.reward_counts[1] += 1;
                         }
                     }
                     if trail_energy > 0.001 {
@@ -1259,6 +1265,7 @@ impl World {
                         if config.reward_energy_enabled {
                             self.creatures[idx].physio.pleasure_energy +=
                                 energy / config.initial_energy;
+                            self.reward_counts[0] += 1;
                         }
                         self.action_counts[1] += 1;
                         break;
@@ -1289,6 +1296,7 @@ impl World {
                             if config.reward_trail_enabled {
                                 self.creatures[idx].physio.pleasure_trail +=
                                     energy / config.initial_energy;
+                                self.reward_counts[1] += 1;
                             }
                             break;
                         }
@@ -1536,6 +1544,7 @@ impl World {
             let align_factor = turn_align.min(1.0);
             let speed_factor = (approach_speed / config.max_speed).min(1.0);
             self.creatures[idx].physio.pleasure_group += align_factor * speed_factor;
+            self.reward_counts[2] += 1;
         }
     }
 
@@ -1769,6 +1778,7 @@ impl World {
             max_generation,
             avg_energy,
             action_counts: self.action_counts,
+            reward_counts: self.reward_counts,
             death_age_stats: self.death_age_stats.clone(),
             clan_count,
             top_clans: clan_vec,
@@ -2420,6 +2430,8 @@ pub struct WorldStats {
     pub max_generation: usize,
     pub avg_energy: f64,
     pub action_counts: [usize; 5],
+    /// 奖励触发次数（3通道：能量/痕迹/集体）
+    pub reward_counts: [usize; 3],
     pub death_age_stats: DeathAgeStats,
     pub clan_count: usize,
     /// 种族前三: (clan_hash, count)

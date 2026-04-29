@@ -67,6 +67,8 @@ pub struct CachedStats {
     pub avg_energy: f64,
     // 行为触发统计（5事件：移动/吸收/咬/无性繁殖/有性繁殖）
     pub action_counts: [usize; 5],
+    // 奖励触发统计（3通道：能量/痕迹/集体）
+    pub reward_counts: [usize; 3],
     pub death_age_stats: DeathAgeStats,
     pub clan_count: usize,
     pub top_clans: Vec<(u64, usize)>,
@@ -133,6 +135,7 @@ impl StatsPanel {
                 max_generation: stats.max_generation,
                 avg_energy: stats.avg_energy,
                 action_counts: stats.action_counts,
+                reward_counts: stats.reward_counts,
                 death_age_stats: stats.death_age_stats.clone(),
                 clan_count: stats.clan_count,
                 top_clans: stats.top_clans.clone(),
@@ -340,6 +343,17 @@ impl StatsPanel {
                 format_count(acts[2]),
                 format_count(acts[3]),
                 format_count(acts[4])
+            ));
+        });
+
+        // 奖励触发统计（3通道）
+        let rw = &self.cached_stats.reward_counts;
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!(
+                "奖励: 能量:{}│痕迹:{}│集体:{}",
+                format_count(rw[0]),
+                format_count(rw[1]),
+                format_count(rw[2])
             ));
         });
 
