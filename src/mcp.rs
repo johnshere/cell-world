@@ -31,7 +31,7 @@ use serde_json::{json, Value};
 use tokio::sync::broadcast;
 
 use crate::config::Config;
-use crate::world::sim_thread::{SimCommand, SimHandle, SimSnapshot};
+use crate::world::sim_thread::{SimCommand, SimSnapshot};
 use crate::world::{Creature, EnergyParticle, TrailPoint};
 
 // ─── 共享状态 ──────────────────────────────────────────────────────────
@@ -39,7 +39,7 @@ use crate::world::{Creature, EnergyParticle, TrailPoint};
 pub struct AppState {
     pub snapshot: Arc<RwLock<SimSnapshot>>,
     pub config: Arc<RwLock<Config>>,
-    pub sim_handle: SimHandle,
+    pub cmd_tx: std::sync::mpsc::Sender<SimCommand>,
     sessions: Arc<RwLock<HashMap<String, broadcast::Sender<String>>>>,
     pub mcp_paused: AtomicBool,
 }
@@ -843,14 +843,8 @@ fn call_set_paused(state: &Arc<AppState>, args: &Value) -> Value {
     let was_paused = state.mcp_paused.load(Ordering::Relaxed);
     state.mcp_paused.store(paused, Ordering::Relaxed);
 
-    if paused {
-        state.sim_handle.send(SimCommand::Pause);
-    } else {
-        state.sim_handle.send(SimCommand::Resume);
-    }
-
-    // 等待 sim 线程处理命令（~2帧）
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    let cmd = if paused { SimCommand::Pause } else { SimCommand::Resume };
+    let _ = state.cmd_tx.send(cmd);
 
     let time = state.snapshot.read().unwrap().time;
 
@@ -1031,73 +1025,42 @@ fn err_text(msg: &str) -> Value {
 
 // ─── 启动入口 ─────────────────────────────────────────────────────────
 
-/// 启动 headless MCP 模式（无 GUI，纯模拟 + MCP SSE 服务器）
-pub fn start_mcp_mode(port: u16) {
-    use crate::config::Config;
-    use crate::neural::thread::spawn_neural_thread;
-    use crate::store::Store;
-    use crate::world::sim_thread::spawn_sim_thread;
-    use crate::world::TerrainMap;
-    use crate::world::World;
+/// 在独立线程中启动 MCP SSE 服务器，与 GUI 共享 sim 数据
+/// 由 CellWorldApp::new() 调用，不阻塞 GUI
+pub fn start_mcp_server(
+    port: u16,
+    snapshot: Arc<RwLock<SimSnapshot>>,
+    config: Arc<RwLock<Config>>,
+    cmd_tx: std::sync::mpsc::Sender<SimCommand>,
+) {
+    std::thread::Builder::new()
+        .name("mcp-server".to_string())
+        .spawn(move || {
+            eprintln!("[mcp] Starting MCP SSE server on port {}", port);
 
-    eprintln!("[mcp] Starting cell-world in headless MCP mode on port {}", port);
+            let state = Arc::new(AppState {
+                snapshot,
+                config,
+                cmd_tx,
+                sessions: Arc::new(RwLock::new(HashMap::new())),
+                mcp_paused: AtomicBool::new(false),
+            });
 
-    let config = Config::load();
-    let mut world = World::new(&config);
+            let app = Router::new()
+                .route("/sse", get(sse_handler))
+                .route("/messages", post(messages_handler))
+                .with_state(state);
 
-    // 加载地形
-    if let Some(loaded) = TerrainMap::load_from_disk() {
-        world.terrain = loaded;
-    }
+            let addr = SocketAddr::from(([127, 0, 0, 1], port));
 
-    // 从 store 恢复优势种
-    let store = Store::new();
-    world.dominant_species = store.dominant_species().clone();
-
-    // 启动神经线程
-    if config.neural_backend != "legacy" {
-        let bridge = spawn_neural_thread(&config);
-        world.set_neural_bridge(bridge);
-    }
-
-    // 启动模拟线程
-    let sim = spawn_sim_thread(world, config.clone());
-    let shared_snapshot = sim.snapshot_arc();
-
-    let shared_config = Arc::new(RwLock::new(config));
-
-    let state = Arc::new(AppState {
-        snapshot: shared_snapshot,
-        config: shared_config,
-        sim_handle: sim,
-        sessions: Arc::new(RwLock::new(HashMap::new())),
-        mcp_paused: AtomicBool::new(false),
-    });
-
-    // 构建 axum 路由
-    let app = Router::new()
-        .route("/sse", get(sse_handler))
-        .route("/messages", post(messages_handler))
-        .with_state(state);
-
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-
-    let rt = tokio::runtime::Runtime::new().expect("Failed to start tokio runtime");
-    rt.block_on(async {
-        eprintln!("[mcp] SSE server listening on http://{}", addr);
-        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-
-        tokio::select! {
-            result = axum::serve(listener, app) => {
-                if let Err(e) = result {
+            let rt = tokio::runtime::Runtime::new().expect("Failed to start tokio runtime");
+            rt.block_on(async {
+                eprintln!("[mcp] SSE server listening on http://{}", addr);
+                let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+                if let Err(e) = axum::serve(listener, app).await {
                     eprintln!("[mcp] Server error: {}", e);
                 }
-            }
-            _ = tokio::signal::ctrl_c() => {
-                eprintln!("[mcp] Shutting down...");
-            }
-        }
-    });
-
-    eprintln!("[mcp] Server stopped");
+            });
+        })
+        .expect("Failed to spawn MCP server thread");
 }

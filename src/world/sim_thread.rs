@@ -106,6 +106,11 @@ impl SimHandle {
     pub fn snapshot_arc(&self) -> Arc<RwLock<SimSnapshot>> {
         self.snapshot.clone()
     }
+
+    /// 克隆命令发送端，用于 MCP 等外部线程发送指令
+    pub fn cmd_sender(&self) -> mpsc::Sender<SimCommand> {
+        self.cmd_tx.clone()
+    }
 }
 
 impl Drop for SimHandle {

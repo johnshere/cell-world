@@ -15,25 +15,19 @@ use eframe::NativeOptions;
 fn main() -> eframe::Result<()> {
     let mcp_port = parse_mcp_args();
 
-    if let Some(port) = mcp_port {
-        // Headless MCP 模式（无 GUI）
-        mcp::start_mcp_mode(port);
-        Ok(())
-    } else {
-        // 正常 GUI 模式
-        let options = NativeOptions {
-            viewport: egui::ViewportBuilder::default()
-                .with_maximized(true)
-                .with_title("Cell World - Neural Emergence Simulator"),
-            ..Default::default()
-        };
+    // 始终启动 GUI，--mcp 时额外启动 MCP SSE 服务器
+    let options = NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_maximized(true)
+            .with_title("Cell World - Neural Emergence Simulator"),
+        ..Default::default()
+    };
 
-        eframe::run_native(
-            "Cell World",
-            options,
-            Box::new(|cc| Ok(Box::new(CellWorldApp::new(cc)))),
-        )
-    }
+    eframe::run_native(
+        "Cell World",
+        options,
+        Box::new(move |cc| Ok(Box::new(CellWorldApp::new(cc, mcp_port)))),
+    )
 }
 
 /// 解析 --mcp 和 --mcp-port 参数

@@ -67,7 +67,7 @@ pub struct CellWorldApp {
 }
 
 impl CellWorldApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, mcp_port: Option<u16>) -> Self {
         // 配置中文字体
         let mut fonts = egui::FontDefinitions::default();
         fonts.font_data.insert(
@@ -107,6 +107,16 @@ impl CellWorldApp {
 
         // 启动模拟线程
         let sim = spawn_sim_thread(world, config.clone());
+
+        // 如果指定了 --mcp，启动 MCP SSE 服务器（与 GUI 共享 sim 数据）
+        if let Some(port) = mcp_port {
+            crate::mcp::start_mcp_server(
+                port,
+                sim.snapshot_arc(),
+                std::sync::Arc::new(std::sync::RwLock::new(config.clone())),
+                sim.cmd_sender(),
+            );
+        }
 
         // 检查存档列表
         let archive_list = list_archives();
