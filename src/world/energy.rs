@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 /// 粒子来源
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "persistence", derive(Serialize, Deserialize))]
 pub enum ParticleSource {
     Volcano,

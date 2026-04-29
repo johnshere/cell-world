@@ -9,7 +9,8 @@
 - **语言**：Rust
 - **渲染**：egui + eframe
 - **哈希**：FxHashMap（rustc-hash）
-- **序列化**：serde + serde_json（可选 persistence feature）
+- **序列化**：serde + serde_json
+- **MCP SSE 服务器**（headless 模式）：tokio + axum，通过 `--mcp` 参数启动，暴露实时模拟数据查询接口
 
 ### 世界特性
 
@@ -40,6 +41,7 @@
   - 更新 `connections_cpu` 权重（clamp [-2.0, 2.0]），traces *= 0.1 衰减，回写 connections + traces 到 GPU
   - 与 CPU 后端行为对齐（`SpikingNetwork::apply_physiology`），学习效果方向一致
 - **面板速度**：同步批处理下只有单值"FPS: X | 速度: Nx"；历史上的"神经/世界"双值和反压机制均已删除
+- **MCP SSE 服务器**（`--mcp` 模式）：新增 MCP 线程（tokio + axum），通过 SSE 传输向 Claude Code 暴露模拟实时数据。与 sim 线程共享 `Arc<RwLock<SimSnapshot>>` 只读访问。提供 12 个工具（`get_stats`, `get_creatures`, `get_creature`, `get_neighbors`, `get_energy_particles`, `get_trails`, `get_clans`, `get_dominant_species`, `get_config`, `get_terrain_info`, `set_paused`, `get_performance`）及 6 个资源 URI。查询可暂停/恢复模拟保证调度一致性。详见 [MCP.md](MCP.md)
 
 ---
 

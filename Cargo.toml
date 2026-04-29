@@ -29,11 +29,16 @@ regex = "1"
 # 压缩
 flate2 = { version = "1.0", optional = true }
 
-# 序列化（可选，用于保存/加载）
+# 序列化
 serde = { version = "1.0", features = ["derive"], optional = true }
-serde_json = { version = "1.0", optional = true }
+serde_json = "1.0"
 toml = { version = "0.8", optional = true }
 toml_edit = { version = "0.22", optional = true }
+
+# MCP / HTTP SSE 服务器
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal", "net", "time"] }
+axum = "0.7"
+futures = "0.3"
 
 # GPU 计算（可选）
 wgpu = { version = "22.1", optional = true }
@@ -42,7 +47,7 @@ pollster = { version = "0.4", optional = true }
 
 [features]
 default = ["persistence", "gpu"]
-persistence = ["serde", "serde_json", "toml", "toml_edit", "flate2"]
+persistence = ["serde", "toml", "toml_edit", "flate2"]
 gpu = ["wgpu", "bytemuck", "pollster"]
 
 [profile.release]

@@ -48,7 +48,8 @@ cell-world 的核心理念是让群体行为（集群、尾随、捕猎、哺育
 
 ```bash
 cargo build           # 编译项目
-cargo run             # 运行项目
+cargo run             # 运行项目（GUI 模式）
+cargo run -- --mcp    # 运行 MCP 模式（headless，暴露 SSE 数据接口）
 cargo build --release # 发布构建（启用 LTO 优化）
 cargo fmt             # 格式化代码
 cargo clippy          # 代码检查
@@ -76,6 +77,7 @@ cargo clippy          # 代码检查
 | 渲染     | `src/render/canvas.rs`     | 画布渲染、拖拽缩放                                     |
 |          | `src/render/panel.rs`      | 侧边栏统计面板                                         |
 | 应用     | `src/app.rs`               | egui 应用主循环、日志、选中                            |
+| MCP      | `src/mcp.rs`               | MCP SSE 服务器，实时数据查询接口（12 个工具）          |
 | 配置     | `src/config.rs`            | 参数配置                                               |
 | 存储     | `src/store.rs`             | 生物模板存档（JSON）                                   |
 

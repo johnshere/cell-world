@@ -101,6 +101,11 @@ impl SimHandle {
     pub fn snapshot(&self) -> std::sync::RwLockReadGuard<'_, SimSnapshot> {
         self.snapshot.read().unwrap()
     }
+
+    /// 返回共享快照的 Arc 克隆，用于 MCP 或其他线程共享
+    pub fn snapshot_arc(&self) -> Arc<RwLock<SimSnapshot>> {
+        self.snapshot.clone()
+    }
 }
 
 impl Drop for SimHandle {
