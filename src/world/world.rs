@@ -1500,18 +1500,20 @@ impl World {
         None
     }
 
-    /// 计算主动靠近奖励：转向朝同伴 + 距离在缩小 → 即时奖励
+    /// 计算主动靠近奖励：转向朝同伴 + 距离在缩小 + 尚未到达跟随最优距离 → 即时奖励
     fn compute_approach_reward(&mut self, idx: usize, turn_output: f64, dt: f64, config: &Config) {
         let creature = &self.creatures[idx];
         let cx = creature.x;
         let cy = creature.y;
         let heading = creature.heading;
         let prev_dist = creature.approach_nearest_dist;
+        let body_radius = (creature.energy.max(0.0) * 1.28).cbrt();
 
         // 找 vision_range 内最近存活生物
         let nearby = self.creature_grid.query(cx, cy, config.vision_range);
         let mut best_dist = f64::MAX;
         let mut best_bearing = 0.0_f64;
+        let mut best_radius = 0.0_f64;
         for &other_idx in &nearby {
             if other_idx == idx || !self.creatures[other_idx].alive {
                 continue;
@@ -1523,6 +1525,7 @@ impl World {
             if dist > 0.0 && dist < best_dist {
                 best_dist = dist;
                 best_bearing = dy.atan2(dx);
+                best_radius = (other.energy.max(0.0) * 1.28).cbrt();
             }
         }
 
@@ -1531,6 +1534,12 @@ impl World {
 
         if best_dist >= f64::MAX || prev_dist >= f64::MAX {
             return; // 无邻居或首帧，跳过
+        }
+
+        // 已到达跟随最优距离以内，不再奖励靠近（避免绕圈）
+        let optimal_dist = 2.5 * (body_radius + best_radius);
+        if best_dist <= optimal_dist {
+            return;
         }
 
         // 条件A：转向方向与同伴方位一致
