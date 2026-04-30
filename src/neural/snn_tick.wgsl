@@ -206,16 +206,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let out_global = creature_slot * 8u + output_idx;
 
             if is_direct_read(next_node.flags) {
-                // 直读输出：tick 0 时保存 tanh 值（CPU 末尾读回）
-                if params.tick_index == 0u {
-                    let x = next_node.membrane;
-                    let x2 = x * x;
-                    first_outputs[out_global] = clamp(
-                        x * (27.0 + x2) / (27.0 + 9.0 * x2),
-                        -1.0,
-                        1.0,
-                    );
-                }
+                // 直读输出：每 tick 覆盖写 tanh 值，最后一 tick 的写入即末次值
+                // （水流式语义：信号每 tick 流动一层，末次值反映完整传播结果）
+                let x = next_node.membrane;
+                let x2 = x * x;
+                first_outputs[out_global] = clamp(
+                    x * (27.0 + x2) / (27.0 + 9.0 * x2),
+                    -1.0,
+                    1.0,
+                );
             } else {
                 // 脉冲输出：发放则原子累加
                 if is_fired(next_node.flags) {

@@ -36,8 +36,10 @@ pub struct SpikingNetwork {
     /// 正向连接：node_id -> [(from_node, weight), ...]
     forward_inputs: FxHashMap<usize, Vec<(usize, f64)>>,
     /// 回环连接：node_id -> [(from_node, weight), ...]
+    /// 注：水流式语义下与 forward_inputs 行为一致（都读 prev_state），保留分桶仅为兼容
     recurrent_inputs: FxHashMap<usize, Vec<(usize, f64)>>,
-    /// 回环源节点的上一 tick 状态: node_id -> (membrane, fired)
+    /// 全节点上一 tick 状态快照: node_id -> (membrane, fired)
+    /// 水流式语义：所有连接都从此快照读取（与 GPU shader 行为一致）
     prev_state: FxHashMap<usize, (f64, bool)>,
 
     // === Learning ===
@@ -108,10 +110,9 @@ impl SpikingNetwork {
             position.insert(node_id, pos);
         }
 
-        // 分离正向连接和回环连接
+        // 分离正向连接和回环连接（水流式语义下两者行为一致，保留分桶仅为兼容）
         let mut forward_inputs: FxHashMap<usize, Vec<(usize, f64)>> = FxHashMap::default();
         let mut recurrent_inputs: FxHashMap<usize, Vec<(usize, f64)>> = FxHashMap::default();
-        let mut recurrent_source_ids: FxHashSet<usize> = FxHashSet::default();
 
         for conn in &genome.connections {
             if !conn.enabled {
@@ -132,7 +133,6 @@ impl SpikingNetwork {
                     .entry(conn.out_node)
                     .or_default()
                     .push((conn.in_node, conn.weight));
-                recurrent_source_ids.insert(conn.in_node);
             } else {
                 forward_inputs
                     .entry(conn.out_node)
@@ -141,10 +141,10 @@ impl SpikingNetwork {
             }
         }
 
-        // 初始化回环源节点的 prev_state
+        // 初始化全节点 prev_state（水流式：所有连接都从此快照读）
         let mut prev_state = FxHashMap::default();
-        for &src_id in &recurrent_source_ids {
-            prev_state.insert(src_id, (0.0, false));
+        for node in &genome.nodes {
+            prev_state.insert(node.id, (0.0, false));
         }
 
         Self {
@@ -216,15 +216,16 @@ impl SpikingNetwork {
 
     /// 执行一个 tick（注入输入）
     pub fn tick(&mut self, inputs: &[f64]) -> Vec<f64> {
-        self.save_recurrent_state();
-
-        // 设置输入节点
+        // 先注入输入（覆盖输入节点状态）
         for (i, &input_id) in self.input_ids.iter().enumerate() {
             if let Some(node) = self.nodes.get_mut(&input_id) {
                 node.membrane = if i < inputs.len() { inputs[i] } else { 0.0 };
                 node.fired = true;
             }
         }
+        // 再拍全节点快照：含新输入 + 非输入节点的上一 tick 末状态
+        // 与 GPU shader 行为对齐：输入立即可见，非输入节点信号每 tick 流动一层
+        self.save_state_snapshot();
 
         let outputs = self.tick_inner();
         self.update_eligibility_traces();
@@ -234,7 +235,7 @@ impl SpikingNetwork {
     /// 执行一个 tick（不注入新输入，输入节点保持上次状态）
     /// 感知在帧内不变，保持输入信号持续激励脉冲神经元
     pub fn tick_free(&mut self) -> Vec<f64> {
-        self.save_recurrent_state();
+        self.save_state_snapshot();
         // 不修改输入节点，保持上一次 tick() 注入的 membrane 和 fired 状态
         let outputs = self.tick_inner();
         self.update_eligibility_traces();
@@ -242,14 +243,14 @@ impl SpikingNetwork {
     }
 
     /// 执行多 tick：首次注入输入，后续 tick_free
-    /// 直读输出取首次 tick 值，脉冲输出取发放率
+    /// 水流式语义：直读输出取末次 tick 值（信号传播 N 层后的稳定状态），脉冲输出取发放率
     pub fn tick_multi(&mut self, inputs: &[f64], ticks: usize) -> Vec<f64> {
         let n = self.output_ids.len().min(8);
         let mut spike_counts = [0u32; 8];
 
-        // 第 1 tick: 注入输入（直读输出在此刻最有意义）
-        let first_outputs = self.tick(inputs);
-        for (j, (&v, &direct_read)) in first_outputs
+        // 第 1 tick: 注入输入
+        let mut last_outputs = self.tick(inputs);
+        for (j, (&v, &direct_read)) in last_outputs
             .iter()
             .zip(self.output_modes.iter())
             .enumerate()
@@ -260,10 +261,10 @@ impl SpikingNetwork {
             }
         }
 
-        // 后续 ticks: tick_free 保持输入信号，脉冲神经元持续获得激励
+        // 后续 ticks: tick_free 保持输入信号，让水流继续往下游传播
         for _ in 1..ticks {
-            let outputs = self.tick_free();
-            for (j, (&v, &direct_read)) in outputs
+            last_outputs = self.tick_free();
+            for (j, (&v, &direct_read)) in last_outputs
                 .iter()
                 .zip(self.output_modes.iter())
                 .enumerate()
@@ -275,28 +276,29 @@ impl SpikingNetwork {
             }
         }
 
-        // 组合最终输出：直读取首次值，脉冲取发放率
-        let mut final_outputs = first_outputs;
+        // 组合最终输出：直读取末次值（last_outputs 已是 tick N-1 的结果），脉冲取发放率
         for (j, &direct_read) in self.output_modes.iter().enumerate().take(n) {
-            if !direct_read && j < final_outputs.len() {
+            if !direct_read && j < last_outputs.len() {
                 let rate = spike_counts[j] as f64 / ticks.max(1) as f64;
-                final_outputs[j] = rate * 2.0 - 1.0;
+                last_outputs[j] = rate * 2.0 - 1.0;
             }
         }
 
-        final_outputs
+        last_outputs
     }
 
-    /// 保存回环源节点的当前状态（用于下一轮 tick 的回环读取）
-    fn save_recurrent_state(&mut self) {
-        for (&src_id, state) in self.prev_state.iter_mut() {
-            if let Some(node) = self.nodes.get(&src_id) {
+    /// 保存全节点的当前状态快照（水流式语义：下一 tick 所有连接都从此快照读）
+    fn save_state_snapshot(&mut self) {
+        for (&id, state) in self.prev_state.iter_mut() {
+            if let Some(node) = self.nodes.get(&id) {
                 *state = (node.membrane, node.fired);
             }
         }
     }
 
     /// 内部 tick 逻辑（评估非输入节点）
+    /// 水流式语义：所有连接（正向 + 回环）都从 prev_state 读取
+    /// 与 GPU shader 行为对齐：每条边引入 1 tick 延迟，信号每 tick 流动一层
     fn tick_inner(&mut self) -> Vec<f64> {
         let eval_order = self.eval_order.clone();
         for &node_id in &eval_order {
@@ -304,14 +306,17 @@ impl SpikingNetwork {
                 continue;
             }
 
-            // 正向连接信号（读当前 tick 状态）
             let mut weighted_sum = 0.0;
+
+            // 正向连接：读 prev_state（与回环统一，水流式）
             if let Some(inputs_list) = self.forward_inputs.get(&node_id) {
                 for &(in_node, weight) in inputs_list {
-                    if let Some(src) = self.nodes.get(&in_node) {
-                        if src.fired {
-                            if src.threshold == 0.0 {
-                                weighted_sum += src.membrane * weight;
+                    if let Some(&(prev_membrane, prev_fired)) = self.prev_state.get(&in_node) {
+                        if prev_fired {
+                            let threshold =
+                                self.nodes.get(&in_node).map(|n| n.threshold).unwrap_or(0.0);
+                            if threshold == 0.0 {
+                                weighted_sum += prev_membrane * weight;
                             } else {
                                 weighted_sum += weight;
                             }
@@ -320,7 +325,7 @@ impl SpikingNetwork {
                 }
             }
 
-            // 回环连接信号（读上一 tick 保存的状态）
+            // 回环连接：同样读 prev_state
             if let Some(recurrent_list) = self.recurrent_inputs.get(&node_id) {
                 for &(in_node, weight) in recurrent_list {
                     if let Some(&(prev_membrane, prev_fired)) = self.prev_state.get(&in_node) {
@@ -388,45 +393,44 @@ impl SpikingNetwork {
             .collect()
     }
 
-    /// 更新资格迹（每tick结束时调用）
+    /// 更新资格迹（每 tick 结束时调用）
+    /// 水流式语义：所有连接的 pre/post fired 都从 prev_state 读，与 GPU shader 一致
     fn update_eligibility_traces(&mut self) {
         let decay = self.learning_gene.eligibility_decay;
 
-        // 更新正向连接资格迹
-        for (&out_node, inputs_list) in &self.forward_inputs {
-            for &(in_node, _) in inputs_list {
-                let pre_fired = self.nodes.get(&in_node).map(|n| n.fired).unwrap_or(false);
-                let post_fired = self.nodes.get(&out_node).map(|n| n.fired).unwrap_or(false);
+        // 收集所有连接键，避免对 self 的双重借用
+        let pairs: Vec<(usize, usize)> = self
+            .forward_inputs
+            .iter()
+            .flat_map(|(&out, list)| list.iter().map(move |(in_n, _)| (*in_n, out)))
+            .chain(
+                self.recurrent_inputs
+                    .iter()
+                    .flat_map(|(&out, list)| list.iter().map(move |(in_n, _)| (*in_n, out))),
+            )
+            .collect();
 
-                let key = (in_node, out_node);
-                let trace = self.eligibility_traces.entry(key).or_insert(0.0);
+        for (in_node, out_node) in pairs {
+            let pre_fired = self
+                .prev_state
+                .get(&in_node)
+                .map(|(_, f)| *f)
+                .unwrap_or(false);
+            let post_fired = self
+                .prev_state
+                .get(&out_node)
+                .map(|(_, f)| *f)
+                .unwrap_or(false);
 
-                // 资格迹衰减
-                *trace *= decay;
+            let key = (in_node, out_node);
+            let trace = self.eligibility_traces.entry(key).or_insert(0.0);
 
-                // 如果 pre 和 post 同时激活，累积资格迹
-                if pre_fired && post_fired {
-                    *trace += 1.0;
-                }
-            }
-        }
+            // 资格迹衰减
+            *trace *= decay;
 
-        // 更新回环连接资格迹
-        for (&out_node, recurrent_list) in &self.recurrent_inputs {
-            for &(in_node, _) in recurrent_list {
-                let key = (in_node, out_node);
-                let trace = self.eligibility_traces.entry(key).or_insert(0.0);
-
-                // 资格迹衰减
-                *trace *= decay;
-
-                // 回环：pre用prev_state
-                if let Some(&(_prev_membrane, prev_fired)) = self.prev_state.get(&in_node) {
-                    let post_fired = self.nodes.get(&out_node).map(|n| n.fired).unwrap_or(false);
-                    if prev_fired && post_fired {
-                        *trace += 1.0;
-                    }
-                }
+            // pre 和 post 在上一 tick 共激活则累积
+            if pre_fired && post_fired {
+                *trace += 1.0;
             }
         }
     }

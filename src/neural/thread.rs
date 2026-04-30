@@ -107,8 +107,8 @@ impl TickExecutor for CpuExecutor {
                 let elapsed_ns = t0.elapsed().as_nanos() as u64;
                 *self.compute_times.entry(id).or_insert(0) += elapsed_ns;
 
-                // tick 0 捕获直读输出快照
-                if tick_idx == 0 && outputs.len() >= 8 {
+                // 末次 tick 捕获直读输出快照（水流式：信号传播 N 层后的稳定状态）
+                if tick_idx == n - 1 && outputs.len() >= 8 {
                     let mut arr = [0.0; 8];
                     arr.copy_from_slice(&outputs[..8]);
                     self.first_outputs.insert(id, arr);
