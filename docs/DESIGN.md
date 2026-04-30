@@ -487,6 +487,7 @@ volcano_particle_energy = 185.0
 volcano_decay_rate = 0.001
 volcano_kill_radius = 62.0
 landing_damage_multiplier = 1.7
+particle_min_energy = 100.0        # 粒子消失能量阈值（低于此值死亡）
 
 # 火山正弦周期调制
 volcano_interval_cycle = 1500.0

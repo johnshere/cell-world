@@ -36,9 +36,6 @@ pub struct EnergyParticle {
     pub lava_kill_timer: f64,
 }
 
-/// 最小能量
-pub const MIN_ENERGY: f64 = 100.0;
-
 impl EnergyParticle {
     pub fn new(
         id: u64,
@@ -91,12 +88,12 @@ impl EnergyParticle {
     }
 
     /// 更新（返回是否仍然存活）
-    pub fn update(&mut self, dt: f64, decay_rate: f64) -> bool {
+    pub fn update(&mut self, dt: f64, decay_rate: f64, min_energy: f64) -> bool {
         self.age += dt;
         // 能量衰减
         self.energy -= self.energy * decay_rate * dt;
         // 能量过低则死亡
-        if self.energy <= MIN_ENERGY {
+        if self.energy <= min_energy {
             self.alive = false;
         }
         // 保留 lifetime 硬上限（释放粒子兼容）

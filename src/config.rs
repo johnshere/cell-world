@@ -192,6 +192,9 @@ pub struct Config {
     /// 落地杀伤系数（新公式：damage = c × (1 - exp(-p × multiplier / c))）
     #[serde(default = "default_landing_damage_multiplier")]
     pub landing_damage_multiplier: f64,
+    /// 粒子消失能量阈值（低于此值粒子死亡）
+    #[serde(default = "default_particle_min_energy")]
+    pub particle_min_energy: f64,
 
     // === 痕迹点 ===
     /// 痕迹点能量衰减率（/秒）
@@ -322,6 +325,9 @@ fn default_neural_tick_rate() -> f64 {
 }
 fn default_mutation_rate() -> f64 {
     0.15
+}
+fn default_particle_min_energy() -> f64 {
+    100.0
 }
 
 impl Config {

@@ -1487,6 +1487,12 @@ impl World {
                 continue;
             }
             let other = &self.creatures[other_idx];
+            // 父子关系不能繁殖
+            if other.parent_id == Some(self.creatures[idx].id)
+                || self.creatures[idx].parent_id == Some(other.id)
+            {
+                continue;
+            }
             let dist = ((other.x - creature.x).powi(2) + (other.y - creature.y).powi(2)).sqrt();
             // 交配阈值 = 聚类阈值 × 0.9，允许跨 clan 基因流
             // 聚类严格（0.95）、交配宽松（0.855），打破演化停滞
@@ -1570,7 +1576,7 @@ impl World {
             } else {
                 config.volcano_decay_rate
             };
-            particle.update(dt, decay);
+            particle.update(dt, decay, config.particle_min_energy);
 
             // 熔岩粒子周期性杀伤（关联扩散代数，非距离）
             if particle.alive && particle.lava {

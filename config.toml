@@ -1,7 +1,7 @@
 # 初始模拟速度
 initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 40
+min_creatures = 50
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 400
 # 初始能量
@@ -19,9 +19,9 @@ volcano_interval = 25.0
 # 火山喷射半径
 volcano_radius = 2500.0
 # 每次喷发粒子数
-volcano_count = 110
+volcano_count = 180
 # 火山粒子能量
-volcano_particle_energy = 160.0
+volcano_particle_energy = 100.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -82,12 +82,12 @@ age_metabolism_factor = 0.012
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗系数（面板值×0.00001×半径³ = 实际消耗）
-move_cost = 4.7
+move_cost = 11.5
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.95
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.037
+heat_dissipation_coefficient = 0.045
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -151,7 +151,7 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = false
-auto_spawn_interval = 7.0
+auto_spawn_interval = 15.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
@@ -165,3 +165,4 @@ follow_optimal_angle = 0.5235987755982988
 follow_angle_width = 0.4363323129985824
 follow_max_level = 1.0
 follow_update_interval = 0.25
+particle_min_energy = 50.0

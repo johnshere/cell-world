@@ -1103,6 +1103,14 @@ impl CellWorldApp {
                     0.1,
                     0.0..=20.0,
                 );
+                changed |= config_drag_f64(
+                    ui,
+                    "粒子消失阈值",
+                    "粒子能量低于此值时死亡",
+                    &mut c.particle_min_energy,
+                    1.0,
+                    0.0..=500.0,
+                );
                 ui.separator();
                 ui.label("正弦周期调制");
                 changed |= config_drag_f64(
