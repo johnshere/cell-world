@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "cell-world": {
+      "type": "sse",
+      "url": "http://127.0.0.1:9877/sse",
+      "description": "Cell-World 神经网络涌现生态模拟器 - 暴露种群统计、生物查询、配置读取等 12 个只读工具；接口描述文档./docs/MCP.md"
+    }
+  }
+}

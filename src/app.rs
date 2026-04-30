@@ -52,6 +52,8 @@ pub struct CellWorldApp {
     show_archive_list: bool,
     archive_list: Vec<ArchiveSummary>,
     archive_selected: Option<usize>,
+    // 弹框是否由重置按钮触发（新开始→ResetWorld，而非启动时的空世界）
+    archive_dialog_is_reset: bool,
     // 待保存的存档名（save弹框中输入）
     pending_save_name: Option<String>,
     // 保存确认弹框
@@ -146,6 +148,7 @@ impl CellWorldApp {
             show_archive_list,
             archive_list,
             archive_selected: None,
+            archive_dialog_is_reset: false,
             pending_save_name: None,
             snapshot_confirm_save: false,
             terrain_confirm_generate: false,
@@ -1262,6 +1265,7 @@ impl eframe::App for CellWorldApp {
                                 .clicked()
                             {
                                 self.show_archive_list = false;
+                                self.archive_dialog_is_reset = false;
                             }
                         });
                     });
@@ -1320,6 +1324,7 @@ impl eframe::App for CellWorldApp {
                             self.show_archive_list = false;
                             self.archive_list.clear();
                             self.archive_selected = None;
+                            self.archive_dialog_is_reset = false;
                         }
                     }
                 }
@@ -1339,9 +1344,15 @@ impl eframe::App for CellWorldApp {
             }
 
             if chose_new {
+                let was_reset = self.archive_dialog_is_reset;
                 self.show_archive_list = false;
                 self.archive_list.clear();
                 self.archive_selected = None;
+                self.archive_dialog_is_reset = false;
+                if was_reset {
+                    self.panel.energy_history.clear();
+                    self.sim.send(SimCommand::ResetWorld);
+                }
             }
 
             // 有弹框时暂停世界逻辑
@@ -1709,10 +1720,19 @@ impl eframe::App for CellWorldApp {
             self.snapshot_confirm_save = true;
         }
 
-        // 处理重置世界
+        // 处理重置世界：弹出存档选择框，复用启动时的"载入/新开始"逻辑
         if panel_action.reset_world {
             self.panel.energy_history.clear();
-            self.sim.send(SimCommand::ResetWorld);
+            let archives = list_archives();
+            if archives.is_empty() {
+                // 无存档则直接重置
+                self.sim.send(SimCommand::ResetWorld);
+            } else {
+                self.archive_list = archives;
+                self.archive_selected = None;
+                self.show_archive_list = true;
+                self.archive_dialog_is_reset = true;
+            }
         }
 
         // 处理生成地形

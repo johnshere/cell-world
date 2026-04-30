@@ -4,6 +4,7 @@ use std::time::Instant;
 use super::canvas::species_to_color;
 use super::Selection;
 use crate::config::Config;
+use crate::snapshot::list_archives;
 use crate::store::Store;
 use crate::world::{DeathAgeStats, DominantCandidate, SimSnapshot, GRID_WORLD_SIZE};
 
@@ -226,7 +227,12 @@ impl StatsPanel {
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .clicked()
                 {
-                    self.reset_confirm_open = true;
+                    // 有存档则直接让 app 弹出存档列表；无存档才弹确认框
+                    if list_archives().is_empty() {
+                        self.reset_confirm_open = true;
+                    } else {
+                        action.reset_world = true;
+                    }
                 }
             });
         });

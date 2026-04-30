@@ -19,9 +19,9 @@ volcano_interval = 25.0
 # 火山喷射半径
 volcano_radius = 2500.0
 # 每次喷发粒子数
-volcano_count = 180
+volcano_count = 200
 # 火山粒子能量
-volcano_particle_energy = 100.0
+volcano_particle_energy = 90.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -82,12 +82,12 @@ age_metabolism_factor = 0.012
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗系数（面板值×0.00001×半径³ = 实际消耗）
-move_cost = 11.5
+move_cost = 6.5
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.95
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.045
+heat_dissipation_coefficient = 0.041
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -125,7 +125,7 @@ trail_emit_interval = 0.4
 
 # === 算力能量 ===
 # 算力转能量系数（内部除以1亿，0 = 禁用）
-compute_energy_factor = 90.5
+compute_energy_factor = 100.0
 
 # === SNN ===
 # 每帧 SNN tick 数（同步模式）
