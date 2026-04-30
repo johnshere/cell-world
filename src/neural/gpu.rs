@@ -8,6 +8,11 @@ mod inner {
     use super::super::slot_alloc::SlotAllocator;
     use super::super::thread::TickExecutor;
 
+    // ⚠️ 容量上限三处硬编码同步：
+    // - 本处：MAX_NODES / MAX_CONNS
+    // - CPU：src/neural/spiking.rs::SpikingNetwork::from_genome 内同名常量
+    // - Shader：src/neural/snn_tick.wgsl 内 const MAX_NODES / MAX_CONNS
+    // 改任意一处必须同步改另两处，否则 CPU/GPU 行为会偏离。
     pub const MAX_CREATURES: usize = 512;
     pub const MAX_NODES: usize = 64;
     pub const MAX_CONNS: usize = 128;

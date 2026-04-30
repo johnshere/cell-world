@@ -7,6 +7,11 @@
 //   - first_outputs: tick 0 时保存直读输出 tanh 值，末尾一次读回
 //   - params.tick_index: 当前是批内第几个 tick（0-based），由 CPU 在每次 dispatch 前写入
 
+// ⚠️ 容量上限三处硬编码同步：
+// - 本处：MAX_NODES / MAX_CONNS
+// - CPU：src/neural/spiking.rs::SpikingNetwork::from_genome 内同名常量
+// - GPU Rust 端：src/neural/gpu.rs 顶部 MAX_NODES / MAX_CONNS
+// 改任意一处必须同步改另两处，否则 CPU/GPU 行为会偏离。
 const MAX_NODES: u32 = 64u;
 const MAX_CONNS: u32 = 128u;
 const MAX_CREATURES: u32 = 512u;
