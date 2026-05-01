@@ -110,7 +110,7 @@ cargo clippy          # 代码检查
   - 学习基因（LearningGene）在 register 时缓存，learning_params 上传到 GPU binding 8
 - **面板速度**: 同步批处理模型下只有单一"FPS: X | 速度: Nx"显示。历史上的"神经/世界"双值已移除（反压已删除）
 - **无限世界**: 无边界，视窗可自由拖拽缩放
-- **火山 + 熔岩流**: 火山定期喷发；间隔和能量均受正弦周期调制（模拟季节）。每次喷发额外产生熔岩流粒子（lava_count），使用独立衰减率（lava_decay_rate）。自然衰减死亡时链式扩散子代（lava_spread_probability），被吃不扩散。扩散采用**溢流机制**：子粒子初始落入父粒子所在区块，然后沿等效液面梯度溢流。等效高度=地形高度+lava_level_per_particle×n，n=区块内所有存活粒子数（含普通粒子和熔岩粒子）。溢流时当前区块模拟+1粒子高度，若高于8邻居中最低者则流向最低（多个最低随机选一），标记已访问区块防回弹，最大跳跃数=lava_max_overflow_depth，超限或超出火山半径则丢弃粒子。同一帧多个父粒子死亡按id排序处理，逐个子粒子顺序放置并实时更新区块计数。周期性杀伤关联扩散代数（depth_ratio=chain_depth/max_chain_depth）：间隔=lava_kill_base_interval×(1+depth_ratio×lava_kill_distance_scale)，半径=volcano_kill_radius×max(0,2×(1-depth_ratio))，chain_depth=0杀伤最强，max_chain_depth时半径归零
+- **火山 + 熔岩流**: 火山定期喷发；间隔和能量均受正弦周期调制（模拟季节）。普通粒子落地簇生：每个落点掷 10 次 `lava_spread_probability` 伯努利，命中则在落点 15px 内追加一个同能量普通粒子（不杀伤、不再扩散，期望 0~10 个/落点）。每次喷发额外产生熔岩流粒子（lava_count），使用独立衰减率（lava_decay_rate）。自然衰减死亡时链式扩散子代（lava_spread_probability），被吃不扩散。注意：`lava_spread_probability` 同时控制普通粒子簇生概率与熔岩粒子链扩散概率。扩散采用**溢流机制**：子粒子初始落入父粒子所在区块，然后沿等效液面梯度溢流。等效高度=地形高度+lava_level_per_particle×n，n=区块内所有存活粒子数（含普通粒子和熔岩粒子）。溢流时当前区块模拟+1粒子高度，若高于8邻居中最低者则流向最低（多个最低随机选一），标记已访问区块防回弹，最大跳跃数=lava_max_overflow_depth，超限或超出火山半径则丢弃粒子。同一帧多个父粒子死亡按id排序处理，逐个子粒子顺序放置并实时更新区块计数。周期性杀伤关联扩散代数（depth_ratio=chain_depth/max_chain_depth）：间隔=lava_kill_base_interval×(1+depth_ratio×lava_kill_distance_scale)，半径=volcano_kill_radius×max(0,2×(1-depth_ratio))，chain_depth=0杀伤最强，max_chain_depth时半径归零
 - **感知系统（扫描眼 + 发光感知）**:
   - 双眼窄波束逐帧扫描（280°/s），140° 全 FOV，探测距离=vision_range
   - 左眼从 heading+20° 逆时针扫，右眼从 heading-20° 顺时针扫

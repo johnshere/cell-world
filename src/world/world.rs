@@ -522,6 +522,29 @@ impl World {
                     }
                 }
             }
+            // 子粒子簇生：10 次伯努利掷骰，每次以 lava_spread_probability 概率
+            // 在落点 15px 内追加一个同能量普通粒子（不杀伤、不再扩散）
+            let splash_prob = config.lava_spread_probability.clamp(0.0, 1.0);
+            for _ in 0..10 {
+                if !rng.gen_bool(splash_prob) {
+                    continue;
+                }
+                let cangle = rng.gen_range(0.0..std::f64::consts::TAU);
+                let cu: f64 = rng.gen_range(0.0..1.0);
+                let cr = cu * 15.0;
+                let cx = x + cr * cangle.cos();
+                let cy = y + cr * cangle.sin();
+                let cid = self.next_energy_id;
+                self.next_energy_id += 1;
+                self.energy_particles.push(EnergyParticle::new(
+                    cid,
+                    cx,
+                    cy,
+                    current_energy,
+                    f64::MAX,
+                    ParticleSource::Volcano,
+                ));
+            }
         }
 
         // 熔岩流粒子：火山口附近小范围内喷出
@@ -1720,8 +1743,10 @@ impl World {
         // 理论投放速率（能量/秒）：火山每秒投放（含熔岩流）
         let volcano_interval = config.current_volcano_interval(self.time);
         let volcano_rate = if volcano_interval > 0.0 {
-            let total_count = config.volcano_count + config.lava_count;
-            config.current_volcano_energy(self.time) * total_count as f64 / volcano_interval
+            let splash_expectation = 10.0 * config.lava_spread_probability.clamp(0.0, 1.0);
+            let total_count = config.volcano_count as f64 * (1.0 + splash_expectation)
+                + config.lava_count as f64;
+            config.current_volcano_energy(self.time) * total_count / volcano_interval
         } else {
             0.0
         };
