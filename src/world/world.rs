@@ -1008,12 +1008,11 @@ impl World {
                 self.creatures[i].last_outputs = outputs;
 
                 self.creatures[i].physio.clear();
-                let turn_output = outputs[0];
                 self.execute_actions(i, &outputs.to_vec(), dt, config);
 
-                // 主动靠近奖励：转向朝同伴 + 距离缩小 → 即时奖励
+                // 群体奖励：同向 × 在移动 → 即时奖励（无漩涡稳定解）
                 if config.reward_group_enabled {
-                    self.compute_approach_reward(i, turn_output, dt, config);
+                    self.compute_group_reward(i, config);
                 }
 
                 // 奖励信号通过 bridge 发送给神经线程（延迟一帧应用到正确的 SpikingNetwork）
@@ -1037,12 +1036,11 @@ impl World {
                 }
 
                 self.creatures[i].physio.clear();
-                let turn_output = outputs[0];
                 self.execute_actions(i, &outputs, dt, config);
 
-                // 主动靠近奖励：转向朝同伴 + 距离缩小 → 即时奖励
+                // 群体奖励：同向 × 在移动 → 即时奖励（无漩涡稳定解）
                 if config.reward_group_enabled {
-                    self.compute_approach_reward(i, turn_output, dt, config);
+                    self.compute_group_reward(i, config);
                 }
 
                 let total_reward = self.creatures[i]
@@ -1506,59 +1504,43 @@ impl World {
         None
     }
 
-    /// 计算主动靠近奖励：转向朝同伴 + 距离在缩小 + 尚未到达跟随最优距离 → 即时奖励
-    fn compute_approach_reward(&mut self, idx: usize, turn_output: f64, dt: f64, config: &Config) {
+    /// 计算群体奖励：朝向与邻居均朝向一致 × 自身在移动 → 即时奖励
+    /// 状态量奖励，无漩涡稳定解；motion 守门员防止"全员静止"退化
+    fn compute_group_reward(&mut self, idx: usize, config: &Config) {
         let creature = &self.creatures[idx];
         let cx = creature.x;
         let cy = creature.y;
         let heading = creature.heading;
-        let prev_dist = creature.approach_nearest_dist;
-        let body_radius = (creature.energy.max(0.0) * 1.28).cbrt();
+        let speed_norm = (creature.current_speed / config.max_speed).clamp(0.0, 1.0);
 
-        // 找 vision_range 内最近存活生物
+        if speed_norm <= 0.0 {
+            return; // motion 守门员：静止不奖励
+        }
+
+        // vision_range 内邻居朝向的圆均值
         let nearby = self.creature_grid.query(cx, cy, config.vision_range);
-        let mut best_dist = f64::MAX;
-        let mut best_bearing = 0.0_f64;
-        let mut best_radius = 0.0_f64;
+        let mut sum_sin = 0.0;
+        let mut sum_cos = 0.0;
+        let mut n = 0usize;
         for &other_idx in &nearby {
             if other_idx == idx || !self.creatures[other_idx].alive {
                 continue;
             }
-            let other = &self.creatures[other_idx];
-            let dx = other.x - cx;
-            let dy = other.y - cy;
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist > 0.0 && dist < best_dist {
-                best_dist = dist;
-                best_bearing = dy.atan2(dx);
-                best_radius = (other.energy.max(0.0) * 1.28).cbrt();
-            }
+            let h = self.creatures[other_idx].heading;
+            sum_sin += h.sin();
+            sum_cos += h.cos();
+            n += 1;
         }
-
-        // 更新距离缓存
-        self.creatures[idx].approach_nearest_dist = best_dist;
-
-        if best_dist >= f64::MAX || prev_dist >= f64::MAX {
-            return; // 无邻居或首帧，跳过
-        }
-
-        // 已到达跟随最优距离以内，不再奖励靠近（避免绕圈）
-        let optimal_dist = 2.5 * (body_radius + best_radius);
-        if best_dist <= optimal_dist {
+        if n == 0 {
             return;
         }
 
-        // 条件A：转向方向与同伴方位一致
-        let heading_to_bearing = angle_diff(best_bearing, heading);
-        let turn_align = turn_output * heading_to_bearing; // >0 = 朝同伴转
+        let mean_heading = sum_sin.atan2(sum_cos);
+        let align = (1.0 + (heading - mean_heading).cos()) * 0.5; // ∈ [0, 1]
 
-        // 条件B：距离在缩小
-        let approach_speed = (prev_dist - best_dist) / dt; // >0 = 在靠近
-
-        if turn_align > 0.0 && approach_speed > 0.0 {
-            let align_factor = turn_align.min(1.0);
-            let speed_factor = (approach_speed / config.max_speed).min(1.0);
-            self.creatures[idx].physio.pleasure_group += align_factor * speed_factor;
+        let reward = align * speed_norm;
+        if reward > 0.0 {
+            self.creatures[idx].physio.pleasure_group += reward;
             self.reward_counts[2] += 1;
         }
     }

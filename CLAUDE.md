@@ -158,7 +158,8 @@ cargo clippy          # 代码检查
   - 框架：`PhysioState` 帧内缓冲（世界注入），`PhysioGene` 各通道敏感度（可演化）
   - 通道 1：**能量吸收快乐**（pleasure_energy）—— 摄食吸收 `+absorbed/initial_energy`，面板 `reward_energy_enabled` 控制
   - 通道 2：**痕迹快乐**（pleasure_trail）—— 吃痕迹 `+absorbed/initial_energy` + 主动释放痕迹 `+extra/initial_energy`，面板 `reward_trail_enabled` 控制
-  - 通道 3：**主动靠近快乐**（pleasure_group）—— 每帧检测：转向输出方向与最近生物方位一致（turn_output × heading_to_bearing > 0）且距离在缩小（prev_dist > dist）时，`reward = clamp(turn_align, 0, 1) × clamp(approach_speed/max_speed, 0, 1)`；缓存 `approach_nearest_dist` 用于帧间距离变化计算；面板 `reward_group_enabled` 控制
+  - 通道 3：**群体快乐**（pleasure_group）—— 状态量奖励，公式 `reward = align × motion`：`align = (1 + cos(self.heading - mean_heading_neighbors)) / 2`（与 vision_range 内邻居朝向圆均值的一致度），`motion = current_speed / max_speed`（自身在移动）。两因子相乘，无邻居或静止则为 0；面板 `reward_group_enabled` 控制
+    - **设计动机**：旧版本是"距离一阶导奖励"（朝向邻居 + 距离缩小），存在漩涡稳定解（互相绕圈反复触发奖励）。新版本改为状态量（朝向 + 移动），群体相互绕圈时双方朝向反向 → align→0，自然消除漩涡；motion 守门员防止"全员静止 align=1"退化解
   - 学习路径：`total_reward = Σ(通道值 × 敏感度)` → eligibility trace × total_reward × hebbian_sign × hebbian_rate → Δw
   - **Bridge 模式下奖励信号通过 `NeuralBridge.send_reward()` 延迟一帧发送给神经线程**，在下一批 tick 前对正确的 SpikingNetwork 实例调用 `apply_physiology`；Legacy 模式下直接在 world 线程本地调用
   - 三通道独立开关（能量/痕迹/集体），任一通道开启即有奖励驱动学习

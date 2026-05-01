@@ -41,9 +41,13 @@ eligibility_trace × total_reward × hebbian_sign × rate → Δw
 
 ### 集体快乐 (pleasure_group) ✅
 - **类比**：催产素 / 群居安全感
-- **触发**：跟随度 > 0.3 时每帧注入 `follow_level × 0.1`
+- **触发**：状态量奖励，每帧 `pleasure_group += align × motion`
+  - `align = (1 + cos(self.heading - mean_heading_neighbors)) / 2`，∈[0,1]，与 vision_range 内邻居朝向圆均值的一致度
+  - `motion = current_speed / max_speed`，∈[0,1]，自身在移动
+  - 无邻居或静止 → 0；漩涡（互相绕圈，朝向反向）→ align→0 自动失效
 - **开关**：`reward_group_enabled`（config，面板 checkbox 控制）
-- **驱动行为**：跟随族群、群居
+- **驱动行为**：与邻居同向迁徙，自然形成编队
+- **设计演化**：曾用"距离缩小 × 朝同伴转"距离一阶导奖励，但存在漩涡稳定解（互相绕圈反复触发奖励）。改为状态量后，绕圈双方朝向反向 → align→0 → 漩涡自然消除；motion 守门员防止"全员静止 align=1"退化解
 
 ---
 

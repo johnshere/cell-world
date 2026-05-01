@@ -6,11 +6,6 @@ use serde::{Deserialize, Serialize};
 use crate::config::Config;
 use crate::neural::{Genome, PhysioGene, SpikingNetwork};
 
-#[cfg(feature = "persistence")]
-fn default_max_f64() -> f64 {
-    f64::MAX
-}
-
 /// 生理状态缓冲（世界注入，帧内累积，apply 后清零）
 #[derive(Clone, Default)]
 pub struct PhysioState {
@@ -77,10 +72,6 @@ pub struct Creature {
 
     // 跟随度（指数平滑后的值，0~1）
     pub follow_level: f64,
-
-    // 上帧最近生物距离缓存（用于主动靠近奖励）
-    #[cfg_attr(feature = "persistence", serde(default = "default_max_f64"))]
-    pub approach_nearest_dist: f64,
 
     // 跟随度稀疏计算计时器（<=0 时重新计算）
     #[cfg_attr(feature = "persistence", serde(default))]
@@ -154,7 +145,6 @@ impl Creature {
             clan_hash: genome_hash,
             current_speed: 0.0,
             follow_level: 0.0,
-            approach_nearest_dist: f64::MAX,
             follow_update_timer: 0.0,
             follow_degree_cache: 0.0,
             group_duration: 0.0,
