@@ -482,6 +482,7 @@ initial_energy = 160.0
 # 火山
 volcano_interval = 30.0
 volcano_radius = 2300.0
+volcano_spread_bias = -0.3        # 粒子半径分布倾角（负值让外围更密）
 volcano_count = 35
 volcano_particle_energy = 185.0
 volcano_decay_rate = 0.001
@@ -497,7 +498,7 @@ volcano_energy_amplitude = 0.1
 
 # 熔岩流（溢流机制：等效液面梯度 + visited 防回弹）
 lava_count = 3                    # 每次火山喷发附带的熔岩流粒子数
-lava_spread_probability = 0.5         # 兼任两职：①熔岩死亡时分裂子粒子的概率 ②普通粒子落地簇生时每次伯努利掷骰的概率（每个落点掷 10 次，命中则在 15px 内追加同能量普通粒子，不杀伤、不再扩散）
+lava_spread_probability = 0.5         # 兼任两职：①熔岩死亡时分裂子粒子的概率 ②普通粒子落地簇生时每次伯努利掷骰的概率（每个落点掷 10 次，命中则在 150px 内追加同能量普通粒子，不杀伤、不再扩散）
 lava_max_chain_depth = 5          # 最大链式代数
 lava_level_per_particle = 0.5     # 等效液面系数（等效高度=地形+系数×n，n=区块粒子数）
 lava_decay_rate = 0.005           # 熔岩粒子独立衰减率（/秒）

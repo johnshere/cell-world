@@ -1067,6 +1067,14 @@ impl CellWorldApp {
                     1.0,
                     100.0..=5000.0,
                 );
+                changed |= config_drag_f64(
+                    ui,
+                    "火山粒子倾角",
+                    "负值让外围更密(默认-0.3)",
+                    &mut c.volcano_spread_bias,
+                    0.01,
+                    -1.0..=1.0,
+                );
                 changed |= config_drag_usize(
                     ui,
                     "火山粒子数",

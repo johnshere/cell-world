@@ -34,6 +34,9 @@ pub struct Config {
     pub volcano_interval: f64,
     /// 火山喷射半径
     pub volcano_radius: f64,
+    /// 火山粒子半径分布倾角（负值让外围更密，默认-0.3）
+    #[serde(default)]
+    pub volcano_spread_bias: f64,
     /// 每次喷发粒子数
     pub volcano_count: usize,
     /// 火山粒子能量

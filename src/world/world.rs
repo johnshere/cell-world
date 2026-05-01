@@ -489,9 +489,9 @@ impl World {
         let kill_r2 = config.volcano_kill_radius * config.volcano_kill_radius;
         for _ in 0..config.volcano_count {
             let angle = rng.gen_range(0.0..std::f64::consts::TAU);
-            // 线性分布：面密度从中心到外围自然递减
+            // 可调倾角线性分布：bias=0标准线性均匀，bias<0外围更密
             let u: f64 = rng.gen_range(0.0..1.0);
-            let r = u * config.volcano_radius;
+            let r = (u + config.volcano_spread_bias * (u - 0.5)).clamp(0.0, 1.0) * config.volcano_radius;
             let x = config.volcano_x + r * angle.cos();
             let y = config.volcano_y + r * angle.sin();
             let energy_id = self.next_energy_id;
@@ -523,7 +523,8 @@ impl World {
                 }
             }
             // 子粒子簇生：10 次伯努利掷骰，每次以 lava_spread_probability 概率
-            // 在落点 15px 内追加一个同能量普通粒子（不杀伤、不再扩散）
+            // 在落点 100px 内追加一个同能量普通粒子（不杀伤、不再扩散）
+            let splash_radius = 100.0;
             let splash_prob = config.lava_spread_probability.clamp(0.0, 1.0);
             for _ in 0..10 {
                 if !rng.gen_bool(splash_prob) {
@@ -531,7 +532,7 @@ impl World {
                 }
                 let cangle = rng.gen_range(0.0..std::f64::consts::TAU);
                 let cu: f64 = rng.gen_range(0.0..1.0);
-                let cr = cu * 15.0;
+                let cr = cu * splash_radius;
                 let cx = x + cr * cangle.cos();
                 let cy = y + cr * cangle.sin();
                 let cid = self.next_energy_id;
@@ -658,7 +659,8 @@ impl World {
 
         for _ in 0..max_depth {
             // 当前区块模拟 +1 粒子后的等效高度（粒子固定贡献 1 单位地形，不随 lpp 放大）
-            let cur_h = Self::effective_chunk_height(terrain, cur_cx, cur_cy, chunk_count, lpp, 0) + 1.0;
+            let cur_h =
+                Self::effective_chunk_height(terrain, cur_cx, cur_cy, chunk_count, lpp, 0) + 1.0;
 
             // 找 8 邻居中有效高度最低的（不含 extra）
             let mut lowest_h = f64::MAX;
@@ -1181,7 +1183,8 @@ impl World {
                 config,
             );
             move_cost = distance
-                * config.move_cost * 0.00001
+                * config.move_cost
+                * 0.00001
                 * radius_cubed
                 * actual_speed
                 * (1.0 - follow_discount)
@@ -1301,10 +1304,7 @@ impl World {
             let nearby_trails = self.trail_grid.query(cx, cy, mouth_outer_r);
             for &trail_idx in &nearby_trails {
                 let trail = &self.trail_points[trail_idx];
-                if trail.alive
-                    && trail.creator_id != my_id
-                    && trail.clan_hash == my_clan_hash
-                {
+                if trail.alive && trail.creator_id != my_id && trail.clan_hash == my_clan_hash {
                     let dx = trail.x - cx;
                     let dy = trail.y - cy;
                     if dx * dx + dy * dy <= mouth_outer_r_sq {
@@ -1458,7 +1458,7 @@ impl World {
             )
         } else {
             // 无性繁殖：年龄 +2n（惩罚独立繁殖）
-            self.creatures[idx].age += reproduce_age_cost * 2.0;
+            self.creatures[idx].age += reproduce_age_cost * 3.0;
             self.creatures[idx].reproduce(
                 creature_id,
                 self.creatures[idx].x + offset_x,
@@ -1744,8 +1744,8 @@ impl World {
         let volcano_interval = config.current_volcano_interval(self.time);
         let volcano_rate = if volcano_interval > 0.0 {
             let splash_expectation = 10.0 * config.lava_spread_probability.clamp(0.0, 1.0);
-            let total_count = config.volcano_count as f64 * (1.0 + splash_expectation)
-                + config.lava_count as f64;
+            let total_count =
+                config.volcano_count as f64 * (1.0 + splash_expectation) + config.lava_count as f64;
             config.current_volcano_energy(self.time) * total_count / volcano_interval
         } else {
             0.0
