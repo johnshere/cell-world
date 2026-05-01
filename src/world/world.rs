@@ -489,9 +489,18 @@ impl World {
         let kill_r2 = config.volcano_kill_radius * config.volcano_kill_radius;
         for _ in 0..config.volcano_count {
             let angle = rng.gen_range(0.0..std::f64::consts::TAU);
-            // 可调倾角线性分布：bias=0标准线性均匀，bias<0外围更密
+            // 半径上线性 PDF：p(r) = (1 - bias·(2r/R - 1)) / R, bias∈[-1,1]
+            // bias<0 外围更密，bias>0 中心更密，bias=0 半径均匀；反 CDF 采样
             let u: f64 = rng.gen_range(0.0..1.0);
-            let r = (u + config.volcano_spread_bias * (u - 0.5)).clamp(0.0, 1.0) * config.volcano_radius;
+            let k = -config.volcano_spread_bias;
+            let s = if k.abs() < 1e-9 {
+                u
+            } else {
+                let one_minus_k = 1.0 - k;
+                let disc = one_minus_k * one_minus_k + 4.0 * k * u;
+                (-one_minus_k + disc.max(0.0).sqrt()) / (2.0 * k)
+            };
+            let r = s.clamp(0.0, 1.0) * config.volcano_radius;
             let x = config.volcano_x + r * angle.cos();
             let y = config.volcano_y + r * angle.sin();
             let energy_id = self.next_energy_id;
