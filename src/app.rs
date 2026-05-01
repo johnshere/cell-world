@@ -10,6 +10,7 @@ use eframe::egui;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::mpsc;
+use std::sync::{Arc, RwLock};
 
 /// 帧级性能统计
 #[derive(Default)]
@@ -25,6 +26,8 @@ pub struct FramePerfStats {
 pub struct CellWorldApp {
     sim: SimHandle,
     config: Config,
+    /// MCP/外部读侧共享的 Config 视图。每次 GUI/快照恢复修改 config 后必须同步写入。
+    shared_config: Arc<RwLock<Config>>,
     canvas: WorldCanvas,
     panel: StatsPanel,
     store: Store,
@@ -110,12 +113,15 @@ impl CellWorldApp {
         // 启动模拟线程
         let sim = spawn_sim_thread(world, config.clone());
 
+        // 共享 Config 视图：MCP 与 GUI 共用，运行时配置变更同步到此 Arc
+        let shared_config = Arc::new(RwLock::new(config.clone()));
+
         // 如果指定了 --mcp，启动 MCP SSE 服务器（与 GUI 共享 sim 数据）
         if let Some(port) = mcp_port {
             crate::mcp::start_mcp_server(
                 port,
                 sim.snapshot_arc(),
-                std::sync::Arc::new(std::sync::RwLock::new(config.clone())),
+                Arc::clone(&shared_config),
                 sim.cmd_sender(),
             );
         }
@@ -128,6 +134,7 @@ impl CellWorldApp {
         Self {
             sim,
             config,
+            shared_config,
             canvas: WorldCanvas::new(initial_scale),
             panel: StatsPanel::new(),
             store,
@@ -852,6 +859,7 @@ impl CellWorldApp {
             if changed {
                 c.save();
                 self.sim.send(SimCommand::SetConfig(c.clone()));
+                *self.shared_config.write().unwrap() = c.clone();
             }
         }
     }
@@ -1227,6 +1235,7 @@ impl CellWorldApp {
             if changed {
                 c.save();
                 self.sim.send(SimCommand::SetConfig(c.clone()));
+                *self.shared_config.write().unwrap() = c.clone();
             }
         }
     }
@@ -1319,6 +1328,7 @@ impl eframe::App for CellWorldApp {
                         let name = self.archive_list[idx].name.clone();
                         if let Some(ws) = WorldSnapshot::load_from_dir(&name) {
                             self.config = ws.config.clone();
+                            *self.shared_config.write().unwrap() = self.config.clone();
                             self.sim.send(SimCommand::RestoreSnapshot(ws));
                             self.render_ctx_cache = None;
                             self.show_archive_list = false;
@@ -1690,6 +1700,7 @@ impl eframe::App for CellWorldApp {
             self.config.initial_speed = self.speed;
             self.config.save();
             self.sim.send(SimCommand::SetSpeed(self.speed));
+            *self.shared_config.write().unwrap() = self.config.clone();
         }
 
         // 暂停状态变化时同步到模拟线程
