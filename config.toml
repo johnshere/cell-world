@@ -1,9 +1,9 @@
 # 初始模拟速度
 initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 55
+min_creatures = 30
 # 最大生物数量（超过时禁止繁殖，0=不限制）
-max_creatures = 400
+max_creatures = 580
 # 初始能量
 initial_energy = 160.0
 # 初始世界缩放比例
@@ -19,21 +19,21 @@ volcano_interval = 25.0
 # 火山喷射半径
 volcano_radius = 5000.0
 # 火山粒子半径分布倾角（负值让外围更密，默认-0.3）
-volcano_spread_bias = -0.25
+volcano_spread_bias = -0.5
 # 每次喷发粒子数
-volcano_count = 10
+volcano_count = 40
 # 火山粒子能量
-volcano_particle_energy = 115.0
+volcano_particle_energy = 135.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
 volcano_interval_cycle = 1700.0
 # 火山间隔振幅比（0~0.9）
-volcano_interval_amplitude = 0.2
+volcano_interval_amplitude = 0.15
 # 火山能量正弦周期（秒）
 volcano_energy_cycle = 1350.0
 # 火山能量振幅比（0~0.9）
-volcano_energy_amplitude = 0.15
+volcano_energy_amplitude = 0.1
 
 # 火山粒子衰减率（每秒）
 volcano_decay_rate = 0.001
@@ -48,9 +48,9 @@ landing_damage_multiplier = 1.0
 # 每次火山喷发附带的熔岩流粒子数
 lava_count = 5
 # 熔岩粒子死亡时分裂第二个子粒子的概率
-lava_spread_probability = 0.75
+lava_spread_probability = 0.8
 # 最大链式代数
-lava_max_chain_depth = 3
+lava_max_chain_depth = 4
 # 每个粒子贡献的等效液面高度
 lava_level_per_particle = 4.0
 # 熔岩粒子周期性杀伤基础间隔（秒，火山口处）
@@ -74,7 +74,7 @@ bite_transfer_rate = 0.5
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
-energy_denominator = 25.0
+energy_denominator = 30.0
 # 散热下限（指数衰减底板）
 heat_floor = 0.03
 
@@ -84,12 +84,12 @@ age_metabolism_factor = 0.01
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗系数（面板值×0.00001×半径³ = 实际消耗）
-move_cost = 3.5
+move_cost = 7.5
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.99
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.035
+heat_dissipation_coefficient = 0.02
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -153,7 +153,7 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = false
-auto_spawn_interval = 10.0
+auto_spawn_interval = 5.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
@@ -161,10 +161,10 @@ terrain_slope_cost = 10.0
 # === 奖励通道开关 ===
 reward_energy_enabled = false
 reward_trail_enabled = true
-reward_group_enabled = true
+reward_group_enabled = false
 reproduce_cooldown = 0.0
 follow_optimal_angle = 0.5235987755982988
 follow_angle_width = 0.4363323129985824
 follow_max_level = 1.0
 follow_update_interval = 0.25
-particle_min_energy = 90.0
+particle_min_energy = 80.0

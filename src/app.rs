@@ -367,10 +367,16 @@ impl CellWorldApp {
     }
 
     fn auto_save_dominant(&mut self, world_time: f64) {
-        let candidate = match self.panel.stats().dominant_candidate.clone() {
+        let stats = self.panel.stats();
+        let candidate = match stats.dominant_candidate.clone() {
             Some(c) => c,
             None => return,
         };
+
+        // 生物总数低于50时不添加优势种
+        if stats.creature_count < 50 {
+            return;
+        }
 
         let version = env!("CARGO_PKG_VERSION");
         let candidate_fitness = Self::evolutionary_fitness(

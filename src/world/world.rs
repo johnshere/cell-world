@@ -1446,14 +1446,14 @@ impl World {
         self.next_creature_id += 1;
 
         let mut child = if let Some((mate_genome, mate_heading)) = mate {
-            // 有性繁殖：年龄 +n
-            self.creatures[idx].age += reproduce_age_cost;
-            let parent_age = self.creatures[idx].age;
+            // 有性繁殖：年龄 +n（先繁殖，用原age计算结构变异/发育时间，再加惩罚）
+            let parent_age_before = self.creatures[idx].age;
             let parent_maturation = self.creatures[idx].genome.maturation_time;
             let crossover_genome =
                 Genome::crossover(&self.creatures[idx].genome, &mate_genome, true);
-            let mut child_genome = crossover_genome.mutate(config, parent_age);
-            child_genome.maturation_time = (parent_age + parent_maturation) / 2.0;
+            let mut child_genome = crossover_genome.mutate(config, parent_age_before);
+            child_genome.maturation_time = (parent_age_before + parent_maturation) / 2.0;
+            self.creatures[idx].age += reproduce_age_cost;
             let child_heading = (heading + mate_heading) / 2.0;
             Creature::new(
                 creature_id,
@@ -1466,15 +1466,17 @@ impl World {
                 Some(child_heading),
             )
         } else {
-            // 无性繁殖：年龄 +2n（惩罚独立繁殖）
-            self.creatures[idx].age += reproduce_age_cost * 3.0;
-            self.creatures[idx].reproduce(
+            // 无性繁殖：年龄 +2n（惩罚独立繁殖，先繁殖用原age计算，再加惩罚）
+            let child = self.creatures[idx].reproduce(
                 creature_id,
                 self.creatures[idx].x + offset_x,
                 self.creatures[idx].y + offset_y,
                 child_energy,
                 config,
-            )
+            );
+            // 无性繁殖惩罚更重：age +2n，但子代用原始age计算发育时间
+            self.creatures[idx].age += reproduce_age_cost * 2.0;
+            child
         };
 
         // 计数繁殖类型
