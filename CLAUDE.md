@@ -158,8 +158,12 @@ cargo clippy          # 代码检查
   - 框架：`PhysioState` 帧内缓冲（世界注入），`PhysioGene` 各通道敏感度（可演化）
   - 通道 1：**能量吸收快乐**（pleasure_energy）—— 摄食吸收 `+absorbed/initial_energy`，面板 `reward_energy_enabled` 控制
   - 通道 2：**痕迹快乐**（pleasure_trail）—— 吃痕迹 `+absorbed/initial_energy` + 主动释放痕迹 `+extra/initial_energy`，面板 `reward_trail_enabled` 控制
-  - 通道 3：**群体快乐**（pleasure_group）—— 状态量奖励，公式 `reward = align × motion`：`align = (1 + cos(self.heading - mean_heading_neighbors)) / 2`（与 vision_range 内邻居朝向圆均值的一致度），`motion = current_speed / max_speed`（自身在移动）。两因子相乘，无邻居或静止则为 0；面板 `reward_group_enabled` 控制
-    - **设计动机**：旧版本是"距离一阶导奖励"（朝向邻居 + 距离缩小），存在漩涡稳定解（互相绕圈反复触发奖励）。新版本改为状态量（朝向 + 移动），群体相互绕圈时双方朝向反向 → align→0，自然消除漩涡；motion 守门员防止"全员静止 align=1"退化解
+  - 通道 3：**群体快乐**（pleasure_group）—— 状态量奖励，公式 `reward = polarization × self_persist × motion`：
+    - `polarization = |Σ单位朝向向量(自己+邻居)| / N` ∈[0,1]，Vicsek 极化序参量。**毛线球**（朝向随机相消）→0，**齐头并进**→1
+    - `self_persist = √(smoothed_dir_x² + smoothed_dir_y²)` ∈[0,1]，朝向 EWMA 模长（α=exp(-dt/τ)，τ=1s）。直走久了→1，持续转向（含绕圈）→<1
+    - `motion = current_speed / max_speed`，守门员防止"全员静止"退化
+    - 至少需要一个邻居才有奖励；面板 `reward_group_enabled` 控制
+    - **设计动机**：旧公式 `align = (1+cos(self.h - atan2(Σsin,Σcos)))/2` 抹掉了合矢量模长 → 毛线球凭 atan2 噪声方向蹭 ~0.5 平均奖励，等于在奖励混乱。新公式保留模长，毛线球向量相消 → reward=0，**演化压力主动逼向有共识方向的形态**。EWMA 时间维度天然惩罚原地打转/小圆周（朝向持续旋转 → 模长<1）。polarization 随同向人数单调增长，且 N 大时对一致性要求更严（统计显著性），符合"集体劲往一处使"直觉。锁定风险通过短 EWMA 窗口（~1s）+ 个体偶尔转向不影响群体 polarization（只是 self_persist 打折）来自然缓解
   - 学习路径：`total_reward = Σ(通道值 × 敏感度)` → eligibility trace × total_reward × hebbian_sign × hebbian_rate → Δw
   - **Bridge 模式下奖励信号通过 `NeuralBridge.send_reward()` 延迟一帧发送给神经线程**，在下一批 tick 前对正确的 SpikingNetwork 实例调用 `apply_physiology`；Legacy 模式下直接在 world 线程本地调用
   - 三通道独立开关（能量/痕迹/集体），任一通道开启即有奖励驱动学习

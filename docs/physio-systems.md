@@ -41,13 +41,17 @@ eligibility_trace × total_reward × hebbian_sign × rate → Δw
 
 ### 集体快乐 (pleasure_group) ✅
 - **类比**：催产素 / 群居安全感
-- **触发**：状态量奖励，每帧 `pleasure_group += align × motion`
-  - `align = (1 + cos(self.heading - mean_heading_neighbors)) / 2`，∈[0,1]，与 vision_range 内邻居朝向圆均值的一致度
+- **触发**：状态量奖励，每帧 `pleasure_group += polarization × self_persist × motion`
+  - `polarization = |Σ单位朝向向量(自己+邻居)| / N`，∈[0,1]，Vicsek 极化序参量。毛线球（朝向相消）→0，齐头并进→1
+  - `self_persist = √(smoothed_dir_x² + smoothed_dir_y²)`，∈[0,1]，朝向 EWMA 模长（α=exp(-dt/τ)，τ=1s）。直走久→1，持续转向→<1
   - `motion = current_speed / max_speed`，∈[0,1]，自身在移动
-  - 无邻居或静止 → 0；漩涡（互相绕圈，朝向反向）→ align→0 自动失效
+  - 无邻居或静止 → 0；毛线球 → polarization=0；原地打转/小圆周 → self_persist<1
 - **开关**：`reward_group_enabled`（config，面板 checkbox 控制）
-- **驱动行为**：与邻居同向迁徙，自然形成编队
-- **设计演化**：曾用"距离缩小 × 朝同伴转"距离一阶导奖励，但存在漩涡稳定解（互相绕圈反复触发奖励）。改为状态量后，绕圈双方朝向反向 → align→0 → 漩涡自然消除；motion 守门员防止"全员静止 align=1"退化解
+- **驱动行为**：群体共识方向迁徙，自然形成齐头并进编队
+- **设计演化**：
+  - **v1**：距离一阶导奖励（朝同伴转 + 距离缩小）→ 漩涡稳定解（互相绕圈反复触发）
+  - **v2**：`align × motion`，align 用 `atan2(Σsin, Σcos)` → 圆均值丢弃合矢量模长，**毛线球凭 atan2 噪声方向蹭 ~0.5 平均奖励**，等于在奖励混乱
+  - **v3（当前）**：用 Vicsek 极化保留模长 → 毛线球向量相消 → reward=0；EWMA 时间维度天然惩罚原地打转。polarization 随同向人数单调增长，N 大时统计显著性要求更严，符合"集体劲往一处使"直觉。短 EWMA 窗口（~1s）+ 个体偶尔转向不影响群体 polarization → 锁定风险被自然缓解
 
 ---
 

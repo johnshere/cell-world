@@ -205,7 +205,7 @@ cargo run
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `parent_id` | u64? | 父生物 ID |
-| `group_duration` | f64 | 持续结伴时长（秒） |
+| `heading_persist` | f64 | 朝向 EWMA 模长（∈[0,1]，直走→1，转向/绕圈→<1） |
 | `perception_cache` | `[f64; 20]` | 20 维感知输入 |
 | `physio` | `{pleasure_energy, pleasure_trail, pleasure_group}` | 本帧生理奖励 |
 | `mouth_cooldown_timer` | f64 | 嘴巴冷却计时 |

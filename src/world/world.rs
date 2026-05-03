@@ -981,13 +981,6 @@ impl World {
             let current = self.creatures[i].follow_level;
             self.creatures[i].follow_level += (target - current) * (rate * dt).min(1.0);
 
-            // 持续结伴时长累积（用于集体奖励爬升）
-            if self.creatures[i].follow_level > 0.1 {
-                self.creatures[i].group_duration += dt;
-            } else {
-                self.creatures[i].group_duration *= 0.95; // 离队后缓慢衰减
-            }
-
             // 冷却递减
             self.creatures[i].mouth_cooldown_timer -= dt;
 
@@ -1044,9 +1037,9 @@ impl World {
                 self.creatures[i].physio.clear();
                 self.execute_actions(i, &outputs.to_vec(), dt, config);
 
-                // 群体奖励：同向 × 在移动 → 即时奖励（无漩涡稳定解）
+                // 群体奖励：极化 × 朝向稳定 × 在移动（破毛线球，惩罚原地打转）
                 if config.reward_group_enabled {
-                    self.compute_group_reward(i, config);
+                    self.compute_group_reward(i, dt, config);
                 }
 
                 // 奖励信号通过 bridge 发送给神经线程（延迟一帧应用到正确的 SpikingNetwork）
@@ -1072,9 +1065,9 @@ impl World {
                 self.creatures[i].physio.clear();
                 self.execute_actions(i, &outputs, dt, config);
 
-                // 群体奖励：同向 × 在移动 → 即时奖励（无漩涡稳定解）
+                // 群体奖励：极化 × 朝向稳定 × 在移动（破毛线球，惩罚原地打转）
                 if config.reward_group_enabled {
-                    self.compute_group_reward(i, config);
+                    self.compute_group_reward(i, dt, config);
                 }
 
                 let total_reward = self.creatures[i]
@@ -1538,41 +1531,55 @@ impl World {
         None
     }
 
-    /// 计算群体奖励：朝向与邻居均朝向一致 × 自身在移动 → 即时奖励
-    /// 状态量奖励，无漩涡稳定解；motion 守门员防止"全员静止"退化
-    fn compute_group_reward(&mut self, idx: usize, config: &Config) {
-        let creature = &self.creatures[idx];
-        let cx = creature.x;
-        let cy = creature.y;
-        let heading = creature.heading;
-        let speed_norm = (creature.current_speed / config.max_speed).clamp(0.0, 1.0);
+    /// 计算群体奖励：Vicsek 极化 × 自身朝向稳定度 × 自身在移动
+    ///
+    /// - polarization = |Σ单位朝向向量(自己+邻居)| / N，∈[0,1]
+    ///   毛线球 → 0（向量相消）；齐头并进 → 1（向量同向叠加）
+    /// - self_persist = |朝向 EWMA 模长|，∈[0,1]
+    ///   直走久了→1；持续转向（含绕圈）→<1
+    /// - motion = self_speed / max_speed，守门员防止"全员静止"退化
+    ///
+    /// 三项乘积同时满足：同向人多→大、同向时间长→大、自己也在动；
+    /// 任一项塌陷则整体打折，毛线球与原地打转都拿不到奖励。
+    fn compute_group_reward(&mut self, idx: usize, dt: f64, config: &Config) {
+        let (cx, cy, heading, speed_norm, self_persist) = {
+            let c = &mut self.creatures[idx];
+            // EWMA 朝向：α = exp(-dt/τ)，τ=1s 记忆窗口
+            let alpha = (-dt / 1.0).exp();
+            let h = c.heading;
+            c.smoothed_dir_x = alpha * c.smoothed_dir_x + (1.0 - alpha) * h.cos();
+            c.smoothed_dir_y = alpha * c.smoothed_dir_y + (1.0 - alpha) * h.sin();
+            let persist =
+                (c.smoothed_dir_x * c.smoothed_dir_x + c.smoothed_dir_y * c.smoothed_dir_y).sqrt();
+            let speed = (c.current_speed / config.max_speed).clamp(0.0, 1.0);
+            (c.x, c.y, h, speed, persist)
+        };
 
         if speed_norm <= 0.0 {
             return; // motion 守门员：静止不奖励
         }
 
-        // vision_range 内邻居朝向的圆均值
         let nearby = self.creature_grid.query(cx, cy, config.vision_range);
-        let mut sum_sin = 0.0;
-        let mut sum_cos = 0.0;
-        let mut n = 0usize;
+        let mut sum_vx = heading.cos();
+        let mut sum_vy = heading.sin();
+        let mut total = 1usize; // 含自己
+        let mut neighbor_count = 0usize;
         for &other_idx in &nearby {
             if other_idx == idx || !self.creatures[other_idx].alive {
                 continue;
             }
             let h = self.creatures[other_idx].heading;
-            sum_sin += h.sin();
-            sum_cos += h.cos();
-            n += 1;
+            sum_vx += h.cos();
+            sum_vy += h.sin();
+            total += 1;
+            neighbor_count += 1;
         }
-        if n == 0 {
-            return;
+        if neighbor_count == 0 {
+            return; // 没邻居就没群体可言
         }
 
-        let mean_heading = sum_sin.atan2(sum_cos);
-        let align = (1.0 + (heading - mean_heading).cos()) * 0.5; // ∈ [0, 1]
-
-        let reward = align * speed_norm;
+        let polarization = (sum_vx * sum_vx + sum_vy * sum_vy).sqrt() / (total as f64);
+        let reward = polarization * self_persist * speed_norm;
         if reward > 0.0 {
             self.creatures[idx].physio.pleasure_group += reward;
             self.reward_counts[2] += 1;

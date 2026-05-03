@@ -81,9 +81,12 @@ pub struct Creature {
     #[cfg_attr(feature = "persistence", serde(default))]
     pub follow_degree_cache: f64,
 
-    // 持续结伴时长（秒），用于集体奖励累积
+    // 朝向 EWMA 平滑向量（用于"自身朝向稳定多久"度量）
+    // |smoothed_dir| ∈ [0,1]：直走久了→1，转弯/绕圈→<1
     #[cfg_attr(feature = "persistence", serde(default))]
-    pub group_duration: f64,
+    pub smoothed_dir_x: f64,
+    #[cfg_attr(feature = "persistence", serde(default))]
+    pub smoothed_dir_y: f64,
 
     // 感知结果缓存（20维：左眼8 + 右眼8 + 自身1 + 地形1 + 发光感知2）
     // 扫描眼逐帧增量更新，必须持久化
@@ -147,7 +150,8 @@ impl Creature {
             follow_level: 0.0,
             follow_update_timer: 0.0,
             follow_degree_cache: 0.0,
-            group_duration: 0.0,
+            smoothed_dir_x: heading.cos(),
+            smoothed_dir_y: heading.sin(),
             perception_cache: [0.0; 20],
             last_outputs: [0.0; 8],
             eye_scan_offset: [0.0; 2],

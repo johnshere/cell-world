@@ -557,7 +557,8 @@ fn call_get_creature(state: &Arc<AppState>, args: &Value) -> Value {
         "clan_hash": creature.clan_hash,
         "current_speed": creature.current_speed,
         "follow_level": creature.follow_level,
-        "group_duration": creature.group_duration,
+        "heading_persist": (creature.smoothed_dir_x * creature.smoothed_dir_x
+            + creature.smoothed_dir_y * creature.smoothed_dir_y).sqrt(),
         "light_intensity": creature.light_intensity,
         "perception_cache": creature.perception_cache,
         "last_outputs": creature.last_outputs,
