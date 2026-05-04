@@ -937,6 +937,22 @@ impl World {
                     follow_degree_raw
                 };
 
+                // vision_range 内活邻居数（用于孤独代价判定，不含自己）
+                let neighbor_count = if alive {
+                    creature_grid_ref.query_into(
+                        creature.x,
+                        creature.y,
+                        config.vision_range,
+                        &mut creature_buf,
+                    );
+                    creature_buf
+                        .iter()
+                        .filter(|&&j| j != i && creatures_ref[j].alive)
+                        .count()
+                } else {
+                    0
+                };
+
                 PerceptionResult {
                     creature_idx: i,
                     perception_cache,
@@ -945,6 +961,7 @@ impl World {
                     energy_after_metabolism: energy,
                     alive,
                     follow_degree,
+                    neighbor_count,
                 }
             })
             .collect();
@@ -966,7 +983,12 @@ impl World {
             self.creatures[i].perception_cache = result.perception_cache;
             self.creatures[i].eye_scan_offset = result.eye_scan_offset;
             self.creatures[i].light_scan_offset = result.light_scan_offset;
-            self.creatures[i].age += dt;
+
+            // 孤独代价：vision_range 内无活邻居 → age 加速 solitude_penalty 倍
+            // 与无性繁殖代价共用同一个系数，统一压制"独立行为"
+            let lonely = result.neighbor_count == 0;
+            let age_factor = if lonely { config.solitude_penalty } else { 1.0 };
+            self.creatures[i].age += dt * age_factor;
 
             // 跟随度稀疏计算计时器
             self.creatures[i].follow_update_timer -= dt;
@@ -1467,8 +1489,9 @@ impl World {
                 child_energy,
                 config,
             );
-            // 无性繁殖惩罚更重：age +2n，但子代用原始age计算发育时间
-            self.creatures[idx].age += reproduce_age_cost * 2.0;
+            // 无性繁殖惩罚更重：age += base × solitude_penalty（默认 3，即 +150 vs 有性 +50）
+            // 与孤独年龄加速共用一个 config，统一压制"独立行为"
+            self.creatures[idx].age += reproduce_age_cost * config.solitude_penalty;
             child
         };
 
@@ -2061,6 +2084,8 @@ struct PerceptionResult {
     energy_after_metabolism: f64,
     alive: bool,
     follow_degree: f64,
+    /// vision_range 内活邻居数（不含自己）；用于孤独代价判定
+    neighbor_count: usize,
 }
 
 /// 纯函数：计算 vision_range 内的周围能量密度（只读空间索引）

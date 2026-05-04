@@ -162,6 +162,14 @@ terrain_slope_cost = 10.0
 reward_energy_enabled = false
 reward_trail_enabled = true
 reward_group_enabled = false
+
+# === 反孤立代价（统一系数）===
+# 同时控制：
+#   - 无性繁殖年龄代价 = 50 × solitude_penalty（默认 3 即 +150；vs 有性 +50）
+#   - 孤独生命的年龄加速倍率（vision_range 内无活邻居 → age 增速 ×solitude_penalty）
+# 设为 1.0 则两个机制都退化为无惩罚
+solitude_penalty = 3.0
+
 reproduce_cooldown = 0.0
 follow_optimal_angle = 0.5235987755982988
 follow_angle_width = 0.4363323129985824

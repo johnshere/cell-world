@@ -248,6 +248,14 @@ pub struct Config {
     /// 集体行为奖励（跟随+群居散热）
     #[serde(default)]
     pub reward_group_enabled: bool,
+
+    // === 反孤立代价（统一系数）===
+    /// 独立行为代价倍率：同时控制
+    /// - 无性繁殖年龄代价 = reproduce_age_cost × solitude_penalty（vs 有性 ×1）
+    /// - 孤独生命的年龄加速倍率（vision_range 内无邻居 → age 增速 ×solitude_penalty）
+    /// 默认 3.0，设为 1.0 则两个机制都退化为无惩罚
+    #[serde(default = "default_solitude_penalty")]
+    pub solitude_penalty: f64,
 }
 
 fn default_true() -> bool {
@@ -256,6 +264,10 @@ fn default_true() -> bool {
 
 fn default_terrain_slope_cost() -> f64 {
     2.0
+}
+
+fn default_solitude_penalty() -> f64 {
+    3.0
 }
 
 fn default_max_creatures() -> usize {

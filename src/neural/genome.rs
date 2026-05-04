@@ -210,13 +210,13 @@ enum ConnTarget {
 }
 
 impl Genome {
-    /// 输入维度 = 20
-    /// 左眼 [0..7]: 扫描角归一化, 目标接近度, 目标能量, 实体类型(0/0.33/0.67/1.0), 基因相似度(生物)/同族(痕迹), 能量密度, 朝向差, 速度差
-    /// 右眼 [8..15]: 扫描角归一化, 目标接近度, 目标能量, 实体类型, 基因相似度/同族, 能量密度, 朝向差, 速度差
-    /// 自身 [16]: 能量(/2000)
-    /// 地形 [17]: 前方坡度方向
-    /// 发光感知 [18]: 扫描角归一化(-1~1)
-    /// 发光感知 [19]: 发光强度(0~1)
+    /// 输入维度 = 20，每种感官单侧投射，靠同源跨连让对侧使用：
+    /// 左眼 [0..7]: 扫描角, 接近度, 能量, 实体类型, 基因相似度/同族, 能量密度, 朝向差, 速度差   → block -1
+    /// 右眼 [8..15]: 扫描角, 接近度, 能量, 实体类型, 基因相似度/同族, 能量密度, 朝向差, 速度差   → block +1
+    /// 自身 [16]: 能量(/2000)                                                                  → block -3（内省）
+    /// 地形 [17]: 前方坡度方向                                                                 → block +3（外感觉）
+    /// 光语言 [18]: 扫描角归一化(-1~1)                                                          → block -2（"光耳"）
+    /// 光语言 [19]: 发光强度(0~1)                                                               → block -2（"光耳"）
     pub const INPUT_SIZE: usize = 20;
     /// 输出维度（固定8个）
     /// [0] 转向角  tanh(-1~1)                              block 25
@@ -226,7 +226,7 @@ impl Genome {
     /// [4] 繁殖阈值 sigmoid(0~1) → 映射到 20~200 能量        block -25
     /// [5] 子代能量比例 sigmoid(0~1) → 映射到 0.1~0.5        block -25
     /// [6] 痕迹强度 正半轴(0~1) → 映射到 0~0.3               block 25
-    /// [7] 发光强度 tanh→(v+1)/2 映射到 0~1, 量化一位小数     block 26
+    /// [7] 发光强度 tanh→(v+1)/2 映射到 0~1, 量化一位小数     block -26（光嘴/语言生成）
     pub const OUTPUT_SIZE: usize = 8;
 
     /// 创建最小基因组：Input → 感官区Block → 运动区Block → Output
@@ -264,12 +264,13 @@ impl Genome {
             next_id += 1;
         }
 
-        // 3. 创建感官区 Block 节点
-        let sensory_blocks: [(i8, std::ops::Range<usize>); 4] = [
+        // 3. 创建感官区 Block 节点（每种感官占一对镜像 abs 中的某一侧，靠同源跨连传到对侧）
+        let sensory_blocks: [(i8, std::ops::Range<usize>); 5] = [
             (-1, 0..8),    // 左眼 → Input 0~7
             (1, 8..16),    // 右眼 → Input 8~15
-            (0, 16..18),   // 体感 → Input 16(能量) + 17(地形)
-            (-2, 18..20),  // 发光感知 → Input 18(扫描角) + 19(强度)
+            (-3, 16..17),  // 自身能量（内省）→ Input 16
+            (3, 17..18),   // 地形感知（外感觉）→ Input 17
+            (-2, 18..20),  // 光语言（"光耳"）→ Input 18(方位) + 19(强度)
         ];
         let mut sensory_node_ids: Vec<(i8, usize)> = Vec::new(); // (block, node_id)
         for &(blk, ref input_range) in &sensory_blocks {
@@ -296,8 +297,9 @@ impl Genome {
             }
         }
 
-        // 4. 创建运动区 Block 节点：Block(25)运动, Block(-25)繁殖, Block(26)发光
-        let motor_blocks: [i8; 3] = [25, -25, 26];
+        // 4. 创建运动区 Block 节点：Block(25)运动, Block(-25)繁殖, Block(-26)光嘴
+        // 光嘴放 -26 跟光耳 -2 同侧，闭合语言通路（同侧前馈概率远高于跨半球）
+        let motor_blocks: [i8; 3] = [25, -25, -26];
         let mut motor_node_ids: Vec<(i8, usize)> = Vec::new();
         for &blk in &motor_blocks {
             let node_id = next_id;
@@ -626,7 +628,7 @@ impl Genome {
     }
 
     /// 获取节点的 block 编号（Input/Output 通过映射获取，Block 直接读取）
-    fn node_block(node: &NodeGene) -> i8 {
+    pub fn node_block(node: &NodeGene) -> i8 {
         match node.node_type {
             NodeType::Input => super::block::sensory_block_for_input(node.id),
             NodeType::Output => {
@@ -677,6 +679,9 @@ impl Genome {
     }
 
     /// 判断候选目标节点是否匹配指定的连接目标类别
+    ///
+    /// 跨半球前馈（CrossForwardOther）受同源约束：仅允许 |from|==|to| 的镜像点连接，
+    /// 仿胼胝体拓扑（左 V1↔右 V1，左 12↔右 12），禁止跨级跨半球（如 -3→+12）。
     fn matches_conn_target(from_blk: i8, to_node: &NodeGene, target: ConnTarget) -> bool {
         use super::block;
         let to_blk = Self::node_block(to_node);
@@ -690,7 +695,9 @@ impl Genome {
             ConnTarget::SameBlockProcessing => same_block && !to_is_output_layer,
             ConnTarget::SameBlockOutput => same_block && to_is_output_layer,
             ConnTarget::CrossForwardSame => !same_block && forward && same_side,
-            ConnTarget::CrossForwardOther => !same_block && forward && !same_side,
+            ConnTarget::CrossForwardOther => {
+                !same_block && forward && !same_side && block::is_homotopic(from_blk, to_blk)
+            }
             ConnTarget::CrossFeedback => !same_block && !forward,
         }
     }

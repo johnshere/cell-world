@@ -346,6 +346,16 @@ fn handle_tools_list() -> Value {
                     "properties": { "paused": { "type": "boolean" } },
                     "required": ["paused"]
                 }
+            },
+            {
+                "name": "validate_brain_topology",
+                "description": "校验生物脑拓扑约束（block!=0、跨半球同源、前馈方向）。无 id 则校验全部生物。返回违规列表",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "number", "description": "可选：单个生物 ID。省略则全部校验" }
+                    }
+                }
             }
         ]
     })
@@ -371,6 +381,7 @@ fn handle_tools_call(params: &Value, state: &Arc<AppState>) -> Value {
         "get_config" => call_get_config(state),
         "get_terrain_info" => call_get_terrain_info(state, args),
         "set_paused" => call_set_paused(state, args),
+        "validate_brain_topology" => call_validate_brain_topology(state, args),
         _ => json!({
             "content": [{"type": "text", "text": format!("Unknown tool: {}", name)}],
             "isError": true
@@ -514,6 +525,14 @@ fn call_get_creature(state: &Arc<AppState>, args: &Value) -> Value {
         None => return err_text(&format!("Creature not found: {}", id)),
     };
 
+    // 计算 vision_range 内活邻居数（用于孤独判定）
+    let vision_range = state.config.read().unwrap().vision_range;
+    let neighbor_count_in_vision = snap.creatures.iter()
+        .filter(|c| c.id != creature.id && c.alive)
+        .filter(|c| dist_sq(c.x, c.y, creature.x, creature.y) <= vision_range * vision_range)
+        .count();
+    let is_lonely = neighbor_count_in_vision == 0;
+
     let genome = &creature.genome;
     let nodes: Vec<Value> = genome.nodes.iter().map(|n| {
         json!({
@@ -557,6 +576,8 @@ fn call_get_creature(state: &Arc<AppState>, args: &Value) -> Value {
         "clan_hash": creature.clan_hash,
         "current_speed": creature.current_speed,
         "follow_level": creature.follow_level,
+        "neighbor_count_in_vision": neighbor_count_in_vision,
+        "is_lonely": is_lonely,
         "heading_persist": (creature.smoothed_dir_x * creature.smoothed_dir_x
             + creature.smoothed_dir_y * creature.smoothed_dir_y).sqrt(),
         "light_intensity": creature.light_intensity,
@@ -850,6 +871,94 @@ fn call_set_paused(state: &Arc<AppState>, args: &Value) -> Value {
     let time = state.snapshot.read().unwrap().time;
 
     let data = json!({ "ok": true, "was_paused": was_paused, "time": time });
+    json!({
+        "content": [{ "type": "text", "text": serde_json::to_string(&data).unwrap_or_default() }]
+    })
+}
+
+/// 校验单个生物 genome 拓扑约束，返回违规列表
+fn check_topology_violations(creature: &Creature) -> Vec<Value> {
+    use crate::neural::Genome;
+    let mut violations = Vec::new();
+    let genome = &creature.genome;
+
+    // 1. 节点 block 不应为 0（block 0 已弃用）
+    for node in &genome.nodes {
+        let blk = Genome::node_block(node);
+        if blk == 0 {
+            violations.push(json!({
+                "type": "block_zero_used",
+                "node_id": node.id,
+                "detail": format!("{:?}", node.node_type)
+            }));
+        }
+    }
+
+    // 2. 连接拓扑约束
+    for conn in &genome.connections {
+        if !conn.enabled {
+            continue;
+        }
+        let from_node = genome.nodes.iter().find(|n| n.id == conn.in_node);
+        let to_node = genome.nodes.iter().find(|n| n.id == conn.out_node);
+        let (Some(fnode), Some(tnode)) = (from_node, to_node) else {
+            violations.push(json!({
+                "type": "dangling_connection",
+                "in_node": conn.in_node,
+                "out_node": conn.out_node
+            }));
+            continue;
+        };
+        let f = Genome::node_block(fnode);
+        let t = Genome::node_block(tnode);
+
+        // 跨半球必须同源（|from| == |to|）
+        let cross_hemi = (f > 0) != (t > 0);
+        if cross_hemi && f.unsigned_abs() != t.unsigned_abs() {
+            violations.push(json!({
+                "type": "cross_hemisphere_not_homotopic",
+                "in_node": conn.in_node,
+                "out_node": conn.out_node,
+                "from_block": f,
+                "to_block": t
+            }));
+        }
+    }
+
+    violations
+}
+
+fn call_validate_brain_topology(state: &Arc<AppState>, args: &Value) -> Value {
+    let snap = state.snapshot.read().unwrap();
+    let id_filter = args.get("id").and_then(|v| v.as_u64());
+
+    let mut report = Vec::new();
+    let mut total_checked = 0usize;
+    let mut total_violations = 0usize;
+
+    for creature in snap.creatures.iter() {
+        if let Some(id) = id_filter {
+            if creature.id != id { continue; }
+        }
+        total_checked += 1;
+        let v = check_topology_violations(creature);
+        if !v.is_empty() {
+            total_violations += v.len();
+            report.push(json!({
+                "creature_id": creature.id,
+                "violation_count": v.len(),
+                "violations": v
+            }));
+        }
+    }
+
+    let data = json!({
+        "checked": total_checked,
+        "creatures_with_violations": report.len(),
+        "total_violations": total_violations,
+        "report": report
+    });
+
     json!({
         "content": [{ "type": "text", "text": serde_json::to_string(&data).unwrap_or_default() }]
     })

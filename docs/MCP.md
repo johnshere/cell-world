@@ -205,6 +205,8 @@ cargo run
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `parent_id` | u64? | 父生物 ID |
+| `neighbor_count_in_vision` | usize | vision_range 内的活邻居数（不含自己） |
+| `is_lonely` | bool | 是否孤独（neighbor_count_in_vision == 0），孤独则 age 加速 solitude_penalty 倍 |
 | `heading_persist` | f64 | 朝向 EWMA 模长（∈[0,1]，直走→1，转向/绕圈→<1） |
 | `perception_cache` | `[f64; 20]` | 20 维感知输入 |
 | `physio` | `{pleasure_energy, pleasure_trail, pleasure_group}` | 本帧生理奖励 |
@@ -366,6 +368,37 @@ cargo run
 | `time` | f64 | 当前模拟时间 |
 
 > 暂停后 sim 线程停止更新，`SimSnapshot` 冻结。恢复后从断点继续。
+
+---
+
+### `validate_brain_topology` — 校验脑拓扑约束（invariant 检查）
+
+**参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `id` | u64 | 否 | 单个生物 ID。省略则校验全部存活生物 |
+
+**校验项**：
+- 节点 block != 0（block 0 已弃用）
+- 跨半球连接必须同源 `|from_blk| == |to_blk|`（仿胼胝体镜像拓扑）
+- 连接两端节点存在（非悬空）
+
+**返回值**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `checked` | usize | 实际校验的生物数 |
+| `creatures_with_violations` | usize | 至少有一项违规的生物数 |
+| `total_violations` | usize | 违规总条数 |
+| `report` | `[{creature_id, violation_count, violations: [{type, ...}]}]` | 违规详情列表 |
+
+**violation type 取值**：
+- `block_zero_used`：节点占用了 block 0
+- `cross_hemisphere_not_homotopic`：跨半球连接非同源（|from| ≠ |to|）
+- `dangling_connection`：连接引用了不存在的节点
+
+理想情况下 `total_violations` 始终为 0。出现违规说明拓扑约束被破坏（可能是代码 bug 或基因变异路径绕过约束）。
 
 ---
 
