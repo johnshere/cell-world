@@ -532,18 +532,26 @@ impl World {
                 }
             }
             // 子粒子簇生：10 次伯努利掷骰，每次以 lava_spread_probability 概率
-            // 在落点 100px 内追加一个同能量普通粒子（不杀伤、不再扩散）
-            let splash_radius = 100.0;
+            // 在落点周围梭形区域（长 200 / 短 20）内追加一个同能量普通粒子
+            // 长轴方向 = 火山中心 → 落点的径向（沿粒子被甩出的轨迹延伸）
+            let splash_half_len = 100.0;
+            let splash_half_width = 10.0;
             let splash_prob = config.lava_spread_probability.clamp(0.0, 1.0);
+            let dir_x = angle.cos();
+            let dir_y = angle.sin();
             for _ in 0..10 {
                 if !rng.gen_bool(splash_prob) {
                     continue;
                 }
+                // 椭圆均匀采样：单位圆 sqrt(u) 半径 → 缩放到 (半长, 半宽)
                 let cangle = rng.gen_range(0.0..std::f64::consts::TAU);
                 let cu: f64 = rng.gen_range(0.0..1.0);
-                let cr = cu * splash_radius;
-                let cx = x + cr * cangle.cos();
-                let cy = y + cr * cangle.sin();
+                let cr = cu.sqrt();
+                let local_x = cr * cangle.cos() * splash_half_len;
+                let local_y = cr * cangle.sin() * splash_half_width;
+                // 把本地坐标系旋转到径向：local_x 轴 → (dir_x, dir_y)
+                let cx = x + local_x * dir_x - local_y * dir_y;
+                let cy = y + local_x * dir_y + local_y * dir_x;
                 let cid = self.next_energy_id;
                 self.next_energy_id += 1;
                 self.energy_particles.push(EnergyParticle::new(
