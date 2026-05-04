@@ -604,6 +604,14 @@ impl CellWorldApp {
                     0.01,
                     0.01..=0.5,
                 );
+                changed |= config_drag_f64(
+                    ui,
+                    "反孤立系数",
+                    "统一控制无性繁殖代价倍率(50×n) + 孤独年龄加速倍率；1.0=无惩罚，越大越压聚集",
+                    &mut c.solitude_penalty,
+                    0.1,
+                    1.0..=10.0,
+                );
                 changed |= ui.checkbox(&mut c.reward_energy_enabled, "能量奖励").changed();
                 changed |= ui.checkbox(&mut c.reward_trail_enabled, "痕迹奖励").changed();
                 changed |= ui.checkbox(&mut c.reward_group_enabled, "集体奖励").changed();
