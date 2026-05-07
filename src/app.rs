@@ -606,8 +606,16 @@ impl CellWorldApp {
                 );
                 changed |= config_drag_f64(
                     ui,
-                    "反孤立系数",
-                    "统一控制无性繁殖代价倍率(50×n) + 孤独年龄加速倍率；1.0=无惩罚，越大越压聚集",
+                    "无性变异缩放",
+                    "无性繁殖权重变异率缩放(其余7类创新变异完全禁用)；1.0=无差异化，0.0=完全克隆",
+                    &mut c.asexual_mutation_scale,
+                    0.05,
+                    0.0..=1.0,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "孤独系数",
+                    "孤独生命(vision_range内无活邻居)年龄加速倍率；1.0=无惩罚，越大越压聚集",
                     &mut c.solitude_penalty,
                     0.1,
                     1.0..=10.0,

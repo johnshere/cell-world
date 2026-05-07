@@ -139,6 +139,10 @@ neural_tick_rate = 600.0
 # 变异率（全局常量，不再是基因组内可演化基因）
 # base/block 两类变异共享此触发概率
 mutation_rate = 0.1
+# 无性繁殖权重变异率缩放系数（仅作用于权重微调）
+# 无性繁殖中其余 7 类创新变异（add_connection/add_node/Layer/Block/block_probs/learning/physio/enable切换）完全禁用
+# 默认 0.4 ≈ 近似克隆；1.0=无差异化，0.0=完全克隆
+asexual_mutation_scale = 0.4
 base_metabolism = 0.025
 max_speed = 20.0
 meteorite_interval = 0.0
@@ -164,10 +168,9 @@ reward_trail_enabled = true
 reward_group_enabled = true
 
 # === 反孤立代价（统一系数）===
-# 同时控制：
-#   - 无性繁殖年龄代价 = 50 × solitude_penalty（默认 3 即 +150；vs 有性 +50）
-#   - 孤独生命的年龄加速倍率（vision_range 内无活邻居 → age 增速 ×solitude_penalty）
-# 设为 1.0 则两个机制都退化为无惩罚
+# 控制孤独生命的年龄加速倍率（vision_range 内无活邻居 → age 增速 ×solitude_penalty）
+# 设为 1.0 则退化为无惩罚
+# 注：繁殖年龄代价已统一为 +50，与有性/无性无关；本系数不再作用于繁殖
 solitude_penalty = 10.0
 
 reproduce_cooldown = 0.0

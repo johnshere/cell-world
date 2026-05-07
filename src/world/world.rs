@@ -1474,7 +1474,7 @@ impl World {
             let parent_maturation = self.creatures[idx].genome.maturation_time;
             let crossover_genome =
                 Genome::crossover(&self.creatures[idx].genome, &mate_genome, true);
-            let mut child_genome = crossover_genome.mutate(config, parent_age_before);
+            let mut child_genome = crossover_genome.mutate(config, parent_age_before, true);
             child_genome.maturation_time = (parent_age_before + parent_maturation) / 2.0;
             self.creatures[idx].age += reproduce_age_cost;
             let child_heading = (heading + mate_heading) / 2.0;
@@ -1497,9 +1497,8 @@ impl World {
                 child_energy,
                 config,
             );
-            // 无性繁殖惩罚更重：age += base × solitude_penalty（默认 3，即 +150 vs 有性 +50）
-            // 与孤独年龄加速共用一个 config，统一压制"独立行为"
-            self.creatures[idx].age += reproduce_age_cost * config.solitude_penalty;
+            // 与有性繁殖一致 +50（先前 ×solitude_penalty 的额外惩罚已移除，差异化交由 mutation/能量等其它机制承担）
+            self.creatures[idx].age += reproduce_age_cost;
             child
         };
 
@@ -1510,21 +1509,27 @@ impl World {
             self.action_counts[3] += 1;
         }
 
-        // 种族颜色继承：与源头基因比较，相似度 >= 阈值则同族，否则建新族
+        // 种族颜色继承：
+        //   有性繁殖 → 与源头基因比较相似度，<阈值则建新族（基因创新登记新族）
+        //   无性繁殖 → 强制继承父代 clan，永远不开新族（无性家系无创新带宽）
         let parent_clan = self.creatures[idx].clan_hash;
-        let is_same_clan = if let Some(founder_genome) = self.clan_genomes.get(&parent_clan) {
-            founder_genome.similarity(&child.genome) >= config.species_similarity_threshold
+        if is_sexual {
+            let is_same_clan = if let Some(founder_genome) = self.clan_genomes.get(&parent_clan) {
+                founder_genome.similarity(&child.genome) >= config.species_similarity_threshold
+            } else {
+                // 源头基因已丢失，回退为与父代比较
+                self.creatures[idx].genome.similarity(&child.genome)
+                    >= config.species_similarity_threshold
+            };
+            if is_same_clan {
+                child.clan_hash = parent_clan;
+            } else {
+                // 建新族，记录源头基因
+                self.clan_genomes
+                    .insert(child.clan_hash, child.genome.clone());
+            }
         } else {
-            // 源头基因已丢失，回退为与父代比较
-            self.creatures[idx].genome.similarity(&child.genome)
-                >= config.species_similarity_threshold
-        };
-        if is_same_clan {
             child.clan_hash = parent_clan;
-        } else {
-            // 建新族，记录源头基因
-            self.clan_genomes
-                .insert(child.clan_hash, child.genome.clone());
         }
 
         self.notify_born(&child);

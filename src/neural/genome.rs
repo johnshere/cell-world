@@ -388,9 +388,17 @@ impl Genome {
 
     /// 变异（base/block 两类共享 config.mutation_rate）
     /// parent_age: 父代繁殖时的年龄，用于发育期调制结构变异概率
-    pub fn mutate(&self, conf: &Config, parent_age: f64) -> Self {
+    /// is_sexual: 是否为有性繁殖。无性繁殖只允许权重微调（rate × asexual_mutation_scale），
+    ///   不进行 add_connection / add_node / enable 切换 / SNN 参数 / Layer / Block 迁移 /
+    ///   block_probs / learning / physio 这 7 类"创新型"变异——演化创新带宽收归有性繁殖
+    pub fn mutate(&self, conf: &Config, parent_age: f64, is_sexual: bool) -> Self {
         let base_rate = conf.mutation_rate;
         let block_rate = conf.mutation_rate;
+        let weight_rate = if is_sexual {
+            base_rate
+        } else {
+            base_rate * conf.asexual_mutation_scale
+        };
         let mut rng = rand::thread_rng();
         let mut child = self.clone();
 
@@ -403,9 +411,9 @@ impl Genome {
         // 结构变异调制因子：幼年活跃(2x)，成年后衰减
         let structure_factor = 2.0 * (-p).exp();
 
-        // 权重变异（不受发育期影响）
+        // 权重变异（不受发育期影响）；无性繁殖时 rate 按 asexual_mutation_scale 缩放
         for conn in &mut child.connections {
-            if rng.gen::<f64>() < base_rate {
+            if rng.gen::<f64>() < weight_rate {
                 if rng.gen::<f64>() < 0.9 {
                     // 微调
                     conn.weight += rng.gen_range(-0.5..0.5);
@@ -417,69 +425,74 @@ impl Genome {
             }
         }
 
-        // 添加连接变异（受发育期调制）
-        if rng.gen::<f64>() < base_rate * structure_factor {
-            child.mutate_add_connection(conf);
-        }
-
-        // 添加节点变异（受发育期调制）
-        if rng.gen::<f64>() < base_rate * structure_factor {
-            child.mutate_add_node(base_rate);
-        }
-
-        // 禁用/启用连接变异
-        if rng.gen::<f64>() < base_rate {
-            if let Some(conn) = child.connections.choose_mut(&mut rng) {
-                conn.enabled = !conn.enabled;
+        // 以下 7 类"创新型"变异仅在有性繁殖时发生
+        if is_sexual {
+            // 添加连接变异（受发育期调制）
+            if rng.gen::<f64>() < base_rate * structure_factor {
+                child.mutate_add_connection(conf);
             }
-        }
 
-        // SNN 参数变异 + Layer 变异（使用 base_rate）
-        for node in &mut child.nodes {
-            if !matches!(node.node_type, NodeType::Block(_)) {
-                continue;
+            // 添加节点变异（受发育期调制）
+            if rng.gen::<f64>() < base_rate * structure_factor {
+                child.mutate_add_node(base_rate);
             }
-            // SNN 参数
+
+            // 禁用/启用连接变异
             if rng.gen::<f64>() < base_rate {
-                node.decay = (node.decay + rng.gen_range(-0.1..0.1)).clamp(0.0, 0.99);
+                if let Some(conn) = child.connections.choose_mut(&mut rng) {
+                    conn.enabled = !conn.enabled;
+                }
             }
-            if rng.gen::<f64>() < base_rate {
-                node.threshold = (node.threshold + rng.gen_range(-0.15..0.15)).clamp(0.0, 2.0);
-            }
-            if rng.gen::<f64>() < base_rate * 0.5 {
-                let delta: i8 = if rng.gen_bool(0.5) { 1 } else { -1 };
-                node.refractory_period = (node.refractory_period as i8 + delta).clamp(0, 5) as u8;
-            }
-            // Layer 变异：使用 base_rate
-            if rng.gen::<f64>() < base_rate {
-                node.layer = match node.layer {
-                    LayerType::Processing => LayerType::Output,
-                    LayerType::Output => LayerType::Processing,
-                };
-            }
-        }
 
-        // Block 变异（仅联合区节点可变，使用 block_rate）
-        for node in &mut child.nodes {
-            if let NodeType::Block(ref mut blk) = node.node_type {
-                if super::block::is_association(*blk) && rng.gen::<f64>() < block_rate {
-                    let delta: i8 = rng.gen_range(-2..=2);
-                    let new_blk = (*blk + delta).clamp(-24, 24);
-                    if super::block::is_association(new_blk) {
-                        *blk = new_blk;
+            // SNN 参数变异 + Layer 变异（使用 base_rate）
+            for node in &mut child.nodes {
+                if !matches!(node.node_type, NodeType::Block(_)) {
+                    continue;
+                }
+                // SNN 参数
+                if rng.gen::<f64>() < base_rate {
+                    node.decay = (node.decay + rng.gen_range(-0.1..0.1)).clamp(0.0, 0.99);
+                }
+                if rng.gen::<f64>() < base_rate {
+                    node.threshold =
+                        (node.threshold + rng.gen_range(-0.15..0.15)).clamp(0.0, 2.0);
+                }
+                if rng.gen::<f64>() < base_rate * 0.5 {
+                    let delta: i8 = if rng.gen_bool(0.5) { 1 } else { -1 };
+                    node.refractory_period =
+                        (node.refractory_period as i8 + delta).clamp(0, 5) as u8;
+                }
+                // Layer 变异：使用 base_rate
+                if rng.gen::<f64>() < base_rate {
+                    node.layer = match node.layer {
+                        LayerType::Processing => LayerType::Output,
+                        LayerType::Output => LayerType::Processing,
+                    };
+                }
+            }
+
+            // Block 变异（仅联合区节点可变，使用 block_rate）
+            for node in &mut child.nodes {
+                if let NodeType::Block(ref mut blk) = node.node_type {
+                    if super::block::is_association(*blk) && rng.gen::<f64>() < block_rate {
+                        let delta: i8 = rng.gen_range(-2..=2);
+                        let new_blk = (*blk + delta).clamp(-24, 24);
+                        if super::block::is_association(new_blk) {
+                            *blk = new_blk;
+                        }
                     }
                 }
             }
+
+            // block_probs变异（使用 block_rate）
+            child.mutate_block_probs_gene(block_rate);
+
+            // learning基因变异（使用 base_rate）
+            child.mutate_learning_gene(base_rate);
+
+            // 生理基因变异（使用 base_rate）
+            child.mutate_physio_gene(base_rate);
         }
-
-        // block_probs变异（使用 block_rate）
-        child.mutate_block_probs_gene(block_rate);
-
-        // learning基因变异（使用 base_rate）
-        child.mutate_learning_gene(base_rate);
-
-        // 生理基因变异（使用 base_rate）
-        child.mutate_physio_gene(base_rate);
 
         child.rebuild_sorted_cache();
         child

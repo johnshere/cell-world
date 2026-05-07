@@ -177,9 +177,9 @@ impl Creature {
         Self::new(id, x, y, energy, genome, 0, None, None)
     }
 
-    /// 繁殖产生子代（代数+1，parent_id = 自己的 id）
+    /// 繁殖产生子代（代数+1，parent_id = 自己的 id）；此函数为无性路径，传 is_sexual=false
     pub fn reproduce(&self, id: u64, x: f64, y: f64, energy: f64, conf: &Config) -> Self {
-        let mut child_genome = self.genome.mutate(conf, self.age);
+        let mut child_genome = self.genome.mutate(conf, self.age, false);
         // 子代发育时间 = (父代年龄 + 父代发育时间) / 2
         child_genome.maturation_time = (self.age + self.genome.maturation_time) / 2.0;
         Self::new(

@@ -233,6 +233,12 @@ pub struct Config {
     #[serde(default = "default_mutation_rate")]
     pub mutation_rate: f64,
 
+    /// 无性繁殖权重变异率缩放系数（仅作用于权重微调那一类；其余 7 类创新变异在无性繁殖中完全禁用）
+    /// 默认 0.4 → 无性后代权重变异概率 = mutation_rate × 0.4，约等于近似克隆
+    /// 设为 1.0 退化为无差异化，设为 0.0 则完全克隆
+    #[serde(default = "default_asexual_mutation_scale")]
+    pub asexual_mutation_scale: f64,
+
     // === 地形 ===
     /// 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
     #[serde(default = "default_terrain_slope_cost")]
@@ -340,6 +346,9 @@ fn default_neural_tick_rate() -> f64 {
 }
 fn default_mutation_rate() -> f64 {
     0.15
+}
+fn default_asexual_mutation_scale() -> f64 {
+    0.4
 }
 fn default_particle_min_energy() -> f64 {
     100.0
