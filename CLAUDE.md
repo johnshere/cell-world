@@ -149,8 +149,8 @@ cargo clippy          # 代码检查
 - **落地杀伤**: 火山喷发粒子落地时砸死半径内生物（volcano_kill_radius）
 - **火山粒子分布**: 半径上线性 PDF，反 CDF 采样：`p(r) = (1 - bias·(2r/R - 1)) / R`，bias∈[-1,1]，bias<0 外围更密、bias>0 中心更密、bias=0 半径均匀。求解 `u = (1-k)s + k·s²`（k=-bias），得 `s = (-(1-k)+√((1-k)²+4ku))/(2k)`，k=0 退化为 s=u
 - **咬合系统**: 咬合力=|mouth|（mouth<-0.1 触发），伤害=战力比 ×bite_transfer_rate(0.8)，无额外咬消耗，冷却 1s；喂食机制已移除，能量分享通过痕迹实现
-- **反孤立代价（统一系数 `solitude_penalty`，默认 3.0）**: 同时控制两个机制，统一压制"独立行为/反社交"策略
-  - **繁殖年龄惩罚**：有性繁殖 age+50（基数），无性繁殖 age+50×solitude_penalty（默认 +150）
+- **反孤立代价（`solitude_penalty`，默认 3.0）**: 仅作用于孤独年龄加速，不再作用于繁殖
+  - **繁殖年龄惩罚**：有性/无性繁殖 age 都 +50（统一基数，差异化交由 mutation/能量等机制承担）
   - **孤独年龄加速**：vision_range 内无活邻居 → age 增速 ×solitude_penalty（孤独生命老化加速 3 倍）
   - 设为 1.0 退化为无惩罚；越大越压聚集；与 group_reward 协同（reward 是神经学习压力，这是物理选择压力）
 - **战力系统**: 战力 = f(能量, 速度, 同族援助)，咬时攻方乘咬合力；同族援助范围=vision_range
@@ -184,6 +184,13 @@ cargo clippy          # 代码检查
   - **不再是基因组内可演化基因**（`MutationGene` 已删除）
   - 原因：自适应变异率在稳定环境下必然塌到下界，拖累演化
   - 想调节探索强度直接改 config
+- **有性 vs 无性繁殖差异化（演化创新带宽收归有性）**:
+  - 通过 `Genome::mutate(conf, parent_age, is_sexual)` 第三参数控制
+  - **无性繁殖**：仅保留权重微调一类变异，且 rate × `asexual_mutation_scale`（默认 0.4）→ 近似克隆
+  - **有性繁殖**：完整 8 类变异（add_connection/add_node/enable切换/SNN参数/Layer/Block 编号迁移/block_probs/learning/physio）
+  - **clan_hash 继承**：无性强制继承父代 clan，**新族只能由有性创建**——种群"族多样性"反映的是真实基因创新事件
+  - 设计意图：让大脑结构升级、学习/生理参数演化、新族建立这三件事**只能**通过找配偶发生；无性退化为"环境稳定期压榨当前最优"的兜底策略
+  - 配置：`asexual_mutation_scale = 1.0` 退化为无差异化；`= 0.0` 完全克隆
 - **发育时间基因（maturation_time）**: 控制结构变异（add_connection/add_node）的活跃窗口
   - 存储在 `Genome.maturation_time`（f64，单位=模拟秒），初代=5000.0
   - 繁殖遗传：`child.maturation_time = (parent.age + parent.maturation_time) / 2`（取发起繁殖方，覆盖 crossover 的原子选取）
