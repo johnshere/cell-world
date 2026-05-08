@@ -1409,9 +1409,8 @@ impl World {
             let actual_damage = damage.min(self.creatures[other_idx].energy);
 
             // 咬合效率 = 1 - 基因相似度：相似度越高获取越少，渐变而非悬崖
-            let similarity = self.creatures[idx]
-                .genome
-                .similarity(&self.creatures[other_idx].genome);
+            let similarity =
+                self.get_similarity(&self.creatures[idx], &self.creatures[other_idx]);
             let efficiency = 1.0 - similarity;
             self.creatures[other_idx].energy -= actual_damage;
             self.creatures[idx].energy += actual_damage * config.bite_transfer_rate * efficiency;
@@ -1434,9 +1433,8 @@ impl World {
                 continue;
             }
             // 按基因相似度加权援助：相似度越高援助越大，渐变过渡
-            let similarity = self.creatures[creature_idx]
-                .genome
-                .similarity(&self.creatures[other_idx].genome);
+            let similarity =
+                self.get_similarity(&self.creatures[creature_idx], &self.creatures[other_idx]);
             total += self.creatures[other_idx].energy * similarity;
         }
         total
@@ -1562,7 +1560,7 @@ impl World {
             // 交配阈值 = 聚类阈值 × 0.9，允许跨 clan 基因流
             // 聚类严格（0.95）、交配宽松（0.855），打破演化停滞
             if dist < config.contact_range
-                && creature.genome.similarity(&other.genome)
+                && self.get_similarity(creature, other)
                     >= config.species_similarity_threshold * 0.9
             {
                 return Some((other.genome.clone(), other.heading));
