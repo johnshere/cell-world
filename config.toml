@@ -3,7 +3,7 @@ initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
 min_creatures = 30
 # 最大生物数量（超过时禁止繁殖，0=不限制）
-max_creatures = 400
+max_creatures = 555
 # 初始能量
 initial_energy = 160.0
 # 初始世界缩放比例
@@ -19,11 +19,11 @@ volcano_interval = 25.0
 # 火山喷射半径
 volcano_radius = 5000.0
 # 火山粒子半径分布倾角（负值让外围更密，默认-0.3）
-volcano_spread_bias = -0.3
+volcano_spread_bias = -0.4
 # 每次喷发粒子数
 volcano_count = 20
 # 火山粒子能量
-volcano_particle_energy = 170.0
+volcano_particle_energy = 145.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -80,16 +80,16 @@ heat_floor = 0.03
 
 # === 代谢 ===
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
-age_metabolism_factor = 0.03
+age_metabolism_factor = 0.025
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗系数（面板值×0.00001×半径³ = 实际消耗）
-move_cost = 2.5
+move_cost = 1.5
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.99
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.025
+heat_dissipation_coefficient = 0.015
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -157,7 +157,7 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = false
-auto_spawn_interval = 1.0
+auto_spawn_interval = 2.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
@@ -165,17 +165,17 @@ terrain_slope_cost = 10.0
 # === 奖励通道开关 ===
 reward_energy_enabled = false
 reward_trail_enabled = true
-reward_group_enabled = false
+reward_group_enabled = true
 
 # === 反孤立代价（统一系数）===
 # 控制孤独生命的年龄加速倍率（vision_range 内无活邻居 → age 增速 ×solitude_penalty）
 # 设为 1.0 则退化为无惩罚
 # 注：繁殖年龄代价已统一为 +50，与有性/无性无关；本系数不再作用于繁殖
-solitude_penalty = 10.0
+solitude_penalty = 40.0
 
 reproduce_cooldown = 0.0
 follow_optimal_angle = 0.5235987755982988
 follow_angle_width = 0.4363323129985824
 follow_max_level = 1.0
 follow_update_interval = 0.25
-particle_min_energy = 130.0
+particle_min_energy = 30.0
