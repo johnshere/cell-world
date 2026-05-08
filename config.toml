@@ -3,7 +3,7 @@ initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
 min_creatures = 30
 # 最大生物数量（超过时禁止繁殖，0=不限制）
-max_creatures = 555
+max_creatures = 666
 # 初始能量
 initial_energy = 160.0
 # 初始世界缩放比例
@@ -21,9 +21,9 @@ volcano_radius = 5000.0
 # 火山粒子半径分布倾角（负值让外围更密，默认-0.3）
 volcano_spread_bias = -0.4
 # 每次喷发粒子数
-volcano_count = 20
+volcano_count = 55
 # 火山粒子能量
-volcano_particle_energy = 145.0
+volcano_particle_energy = 188.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
