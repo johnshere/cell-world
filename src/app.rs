@@ -267,9 +267,10 @@ impl CellWorldApp {
             );
         }
 
-        // 追加 sim update 分段耗时日志
+        // 追加 sim update 分段耗时日志（create=true 保证文件不存在时自动创建）
         if let Ok(mut file) = OpenOptions::new()
             .write(true)
+            .create(true)
             .append(true)
             .open("docs/sim_perf.log")
         {
