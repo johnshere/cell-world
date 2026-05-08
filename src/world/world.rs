@@ -1030,6 +1030,7 @@ impl World {
         // ========== 阶段2b: 同步执行神经批 ==========
         // 每次 update 固定 snn_ticks 个 tick，加速仅增加 update 频率，保证结果与倍速无关
         let snn_ticks = (config.neural_tick_rate * dt).round().max(1.0) as usize;
+        let snn_start = Instant::now();
         let output_map: FxHashMap<u64, ([f64; 8], u64)> = if has_bridge {
             let outputs = self
                 .neural_bridge
@@ -1043,8 +1044,10 @@ impl World {
         } else {
             FxHashMap::default()
         };
+        let snn_time = snn_start.elapsed().as_secs_f64() * 1000.0;
 
         // ========== 阶段2c: 串行动作执行 ==========
+        let actions_start = Instant::now();
         for result in &perception_results {
             let i = result.creature_idx;
             if !self.creatures[i].alive {
@@ -1111,6 +1114,7 @@ impl World {
                 }
             }
         }
+        let actions_time = actions_start.elapsed().as_secs_f64() * 1000.0;
 
         // 算力能量扣除（在计时区间外，避免递归膨胀）
         if config.compute_energy_factor > 0.0 {
@@ -1136,8 +1140,8 @@ impl World {
 
         let total_time = total_start.elapsed().as_secs_f64() * 1000.0;
         self.perf_stats.perceive_ms = perceive_time;
-        self.perf_stats.snn_ms = 0.0;
-        self.perf_stats.actions_ms = 0.0;
+        self.perf_stats.snn_ms = snn_time;
+        self.perf_stats.actions_ms = actions_time;
         self.perf_stats.total_ms = total_time;
         self.perf_stats.creature_count = alive_count;
 

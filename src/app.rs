@@ -204,6 +204,23 @@ impl CellWorldApp {
                 let _ = writeln!(file, "| 时间 | FPS | 生物 | 面板ms | 聚类ms | 渲染ms | egui | 帧总ms | 感知ms | 网络ms |");
                 let _ = writeln!(file, "|------|-----|------|--------|--------|--------|------|--------|--------|--------|");
             }
+            // sim update 分段耗时日志（用于定位 CPU/GPU 瓶颈）
+            if let Ok(mut file) = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open("docs/sim_perf.log")
+            {
+                let _ = writeln!(file, "# Cell World sim update 分段耗时日志\n");
+                let _ = writeln!(file, "字段说明：");
+                let _ = writeln!(file, "  - perceive_ms: 阶段1 感知并行（rayon par_iter）");
+                let _ = writeln!(file, "  - snn_ms: 阶段2b 同步等 GPU/CPU 神经批（含同步往返开销）");
+                let _ = writeln!(file, "  - actions_ms: 阶段2c 串行动作执行 + reward 计算");
+                let _ = writeln!(file, "  - total_ms: world.update 总耗时");
+                let _ = writeln!(file, "  - 判读: snn 占大头=GPU同步瓶颈; actions 占大头=CPU串行瓶颈\n");
+                let _ = writeln!(file, "| 时间 | 生物 | perceive_ms | snn_ms | actions_ms | total_ms | snn占比 | actions占比 |");
+                let _ = writeln!(file, "|------|------|-------------|--------|------------|----------|---------|-------------|");
+            }
             self.log_initialized = true;
         }
 
@@ -247,6 +264,29 @@ impl CellWorldApp {
                 fperf.frame_total_ms,
                 perf.perceive_ms,
                 perf.snn_ms
+            );
+        }
+
+        // 追加 sim update 分段耗时日志
+        if let Ok(mut file) = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open("docs/sim_perf.log")
+        {
+            let total = perf.total_ms.max(0.0001);
+            let snn_pct = perf.snn_ms / total * 100.0;
+            let act_pct = perf.actions_ms / total * 100.0;
+            let _ = writeln!(
+                file,
+                "| {:.0} | {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.1}% | {:.1}% |",
+                stats.time,
+                perf.creature_count,
+                perf.perceive_ms,
+                perf.snn_ms,
+                perf.actions_ms,
+                perf.total_ms,
+                snn_pct,
+                act_pct
             );
         }
 
