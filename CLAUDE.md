@@ -98,7 +98,7 @@ cargo clippy          # 代码检查
 - **GPU 批内单次 readback（C 方案）**: Bridge + GPU 模式的关键优化
   - Shader（`snn_tick.wgsl`）：binding 0-6 前向推理 + `7=eligibility_traces (f32 read_write)` + `8=learning_params (GpuLearningParams read)`
   - 批开始：CPU 清零 spike_counts + first_outputs GPU 缓冲
-  - 批内每个 tick：write_tick_index → 独立 submit 一次 dispatch（ping-pong bind group 预构建）
+  - 批内 N 个 tick **合并到单个 encoder + 一次 submit**（`dispatch_batch`）：每个 tick 之前用 `encoder.copy_buffer_to_buffer` 把预填表 `tick_index_bank_buf` 的第 i 项拷到 `tick_params_buf`，然后 begin_compute_pass + dispatch（ping-pong bind group 交替）。wgpu 在 compute_pass 之间自动插入 buffer barrier，节点状态依赖与 N 次独立 submit 二进制等价；driver/syscall 调度开销由 N 次降为 1 次（snn 段实测从 ~5ms 降到 ~1ms）
   - Shader 行为：tick 0 写直读输出到 first_outputs；所有 tick 内发放的输出节点 `atomicAdd(&spike_counts[out])`
   - Shader 学习：每 tick 每非输入节点更新 eligibility trace（`trace *= (1-decay)`，pre&post co-fired 则 `trace += 1.0`，使用 `nodes_prev` fired 状态）
   - 批末尾：一次 `copy_buffer_to_buffer` 把 spike_counts + first_outputs 连续拷到 staging，`map_async` + `Maintain::Wait` 一次性读回

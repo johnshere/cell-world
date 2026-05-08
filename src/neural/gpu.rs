@@ -28,6 +28,11 @@ mod inner {
     const TRACES_BYTES: u64 = (TRACES_TOTAL * 4) as u64; // 262144 = 256KB
     const LEARNING_PARAMS_BYTES: u64 = (MAX_CREATURES * 16) as u64; // 8192 = 8KB
 
+    /// tick_index 预填表的容量上限（最多支持单批 64 个 tick）
+    /// 实际 snn_ticks = neural_tick_rate × dt，默认 10，64 留充足余量
+    const TICK_BANK_CAPACITY: usize = 64;
+    const TICK_BANK_BYTES: u64 = (TICK_BANK_CAPACITY * TICK_PARAMS_BYTES as usize) as u64;
+
     /// GPU 探测结果
     pub enum GpuProbeResult {
         Suitable {
@@ -263,8 +268,11 @@ mod inner {
         spike_counts_buf: wgpu::Buffer,
         first_outputs_buf: wgpu::Buffer,
 
-        // uniform：tick_index
+        // uniform：tick_index（dispatch 当前读取的）
         tick_params_buf: wgpu::Buffer,
+        // 预填的 tick_index 表（device-local 只读），合并 dispatch 时
+        // 通过 encoder.copy_buffer_to_buffer 在 GPU 时间线上把第 i 项搬到 tick_params_buf
+        tick_index_bank_buf: wgpu::Buffer,
 
         // 回读 staging：连续存放 spike_counts(14336) + first_outputs(14336)
         staging_buf: wgpu::Buffer,
@@ -397,6 +405,25 @@ mod inner {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
+            // 预填 tick_index bank：[0,0,0,0, 1,0,0,0, 2,0,0,0, ...]
+            // 用 mapped_at_creation 同步写入，避免依赖后续 submit
+            let tick_index_bank_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("tick_index_bank"),
+                size: TICK_BANK_BYTES,
+                usage: wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: true,
+            });
+            {
+                let mut view = tick_index_bank_buf.slice(..).get_mapped_range_mut();
+                let u32_view: &mut [u32] = bytemuck::cast_slice_mut(&mut view);
+                for i in 0..TICK_BANK_CAPACITY {
+                    u32_view[i * 4] = i as u32;
+                    u32_view[i * 4 + 1] = 0;
+                    u32_view[i * 4 + 2] = 0;
+                    u32_view[i * 4 + 3] = 0;
+                }
+            }
+            tick_index_bank_buf.unmap();
             let staging_buf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("staging"),
                 size: STAGING_BYTES,
@@ -464,6 +491,7 @@ mod inner {
                 spike_counts_buf,
                 first_outputs_buf,
                 tick_params_buf,
+                tick_index_bank_buf,
                 staging_buf,
                 eligibility_traces_buf,
                 learning_params_buf,
@@ -760,14 +788,16 @@ mod inner {
                 .write_buffer(&self.first_outputs_buf, 0, &self.zero_counter_bytes);
         }
 
-        /// 写入当前 tick_index 到 uniform
+        /// 写入当前 tick_index 到 uniform（单 tick 路径专用；批处理走 dispatch_batch）
+        #[allow(dead_code)]
         fn write_tick_index(&mut self, tick_index: u32) {
             let data = [tick_index, 0u32, 0u32, 0u32];
             self.queue
                 .write_buffer(&self.tick_params_buf, 0, bytemuck::cast_slice(&data));
         }
 
-        /// 执行一个 GPU tick（独立 submit）
+        /// 执行一个 GPU tick（独立 submit，保留作单 tick 调试用，正常路径走 dispatch_batch）
+        #[allow(dead_code)]
         pub fn dispatch_tick(&mut self, tick_index: u32) {
             self.write_tick_index(tick_index);
 
@@ -796,6 +826,58 @@ mod inner {
 
             self.queue.submit(Some(encoder.finish()));
             self.ping = !self.ping;
+        }
+
+        /// 把 tick_count 个 dispatch 合并到一个 encoder 一次 submit
+        /// 通过 encoder.copy_buffer_to_buffer 在 GPU 时间线内交替更新 tick_index_buf：
+        ///   copy(bank[i] → tick_params) → compute_pass(读 tick_params + ping/pong nodes)
+        /// wgpu 在 compute_pass 之间自动插入 buffer barrier，
+        /// 节点 ping-pong 状态依赖与 10 次独立 submit 完全等价
+        pub fn dispatch_batch(&mut self, tick_count: usize) {
+            assert!(
+                tick_count <= TICK_BANK_CAPACITY,
+                "tick_count {} exceeds TICK_BANK_CAPACITY {}",
+                tick_count,
+                TICK_BANK_CAPACITY
+            );
+
+            let workgroups = ((MAX_CREATURES * MAX_NODES + 63) / 64) as u32;
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("snn-batch"),
+                });
+
+            for i in 0..tick_count {
+                // 把 bank[i] 拷到 tick_params（GPU 时间线内有序）
+                encoder.copy_buffer_to_buffer(
+                    &self.tick_index_bank_buf,
+                    (i as u64) * TICK_PARAMS_BYTES,
+                    &self.tick_params_buf,
+                    0,
+                    TICK_PARAMS_BYTES,
+                );
+
+                let bind_group = if self.ping {
+                    &self.bind_group_ping
+                } else {
+                    &self.bind_group_pong
+                };
+
+                {
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("snn-batch-pass"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(&self.pipeline);
+                    pass.set_bind_group(0, bind_group, &[]);
+                    pass.dispatch_workgroups(workgroups, 1, 1);
+                }
+
+                self.ping = !self.ping;
+            }
+
+            self.queue.submit(Some(encoder.finish()));
         }
 
         /// 阻塞读回 spike_counts + first_outputs（批结束时调用一次）
@@ -996,10 +1078,8 @@ mod inner {
             // 2. 清零 GPU 端计数器（spike_counts + first_outputs）
             self.gpu.clear_counters();
 
-            // 3. 执行 N 个 tick
-            for i in 0..n {
-                self.gpu.dispatch_tick(i as u32);
-            }
+            // 3. 一次提交执行 N 个 tick（合并 submit，driver 调度开销由 N 次降为 1 次）
+            self.gpu.dispatch_batch(n);
 
             // 4. 批末尾一次性读回
             self.gpu.readback_all_blocking();
