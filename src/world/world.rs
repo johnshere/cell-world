@@ -947,11 +947,12 @@ impl World {
 
                 // vision_range 内活邻居数（用于孤独代价判定，不含自己）
                 let neighbor_count = if alive {
-                    creature_grid_ref.query_into(
+                    creature_grid_ref.query_circle_into(
                         creature.x,
                         creature.y,
                         config.vision_range,
                         &mut creature_buf,
+                        |j| (creatures_ref[j].x, creatures_ref[j].y),
                     );
                     creature_buf
                         .iter()
@@ -1238,17 +1239,13 @@ impl World {
                 let cy = self.creatures[creature_idx].y;
                 let creature_radius = (self.creatures[creature_idx].energy * 1.28).cbrt();
                 let suppress_radius = config.trail_suppress_radius;
-                let sr2 = suppress_radius * suppress_radius;
-                let nearby_trails = self.trail_grid.query(cx, cy, suppress_radius);
-                let has_nearby_trail = nearby_trails.iter().any(|&ti| {
-                    let t = &self.trail_points[ti];
-                    if !t.alive {
-                        return false;
-                    }
-                    let tdx = t.x - cx;
-                    let tdy = t.y - cy;
-                    tdx * tdx + tdy * tdy <= sr2
+                let trail_points = &self.trail_points;
+                let nearby_trails = self.trail_grid.query_circle(cx, cy, suppress_radius, |i| {
+                    (trail_points[i].x, trail_points[i].y)
                 });
+                let has_nearby_trail = nearby_trails
+                    .iter()
+                    .any(|&ti| self.trail_points[ti].alive);
                 if !has_nearby_trail {
                     // 基础痕迹：移动消耗（已扣除，无额外开销）
                     let mut trail_energy = move_cost;
@@ -1305,31 +1302,31 @@ impl World {
         // 锥形吸收区域：从身体中心到嘴巴弧线外缘，heading ± 25° 扇形
         let mouth_outer_r = mouth_arc_r + mouth_stroke * 0.5;
         let half_arc: f64 = 0.4363; // 25° ≈ 0.4363 rad（与渲染一致）
-        let mouth_outer_r_sq = mouth_outer_r * mouth_outer_r;
 
         // 接触食物自动吸收（锥形区域判定，不受冷却限制）
-        let nearby_energy = self.energy_grid.query(cx, cy, mouth_outer_r);
+        let energy_particles_ref = &self.energy_particles;
+        let nearby_energy = self.energy_grid.query_circle(cx, cy, mouth_outer_r, |i| {
+            (energy_particles_ref[i].x, energy_particles_ref[i].y)
+        });
         for &particle_idx in &nearby_energy {
             if self.energy_particles[particle_idx].alive {
                 let px = self.energy_particles[particle_idx].x;
                 let py = self.energy_particles[particle_idx].y;
                 let dx = px - cx;
                 let dy = py - cy;
-                if dx * dx + dy * dy <= mouth_outer_r_sq {
-                    let angle_diff = (dy.atan2(dx) - heading)
-                        .sin()
-                        .atan2((dy.atan2(dx) - heading).cos());
-                    if angle_diff.abs() <= half_arc {
-                        let energy = self.energy_particles[particle_idx].consume();
-                        self.creatures[idx].energy += energy;
-                        if config.reward_energy_enabled {
-                            self.creatures[idx].physio.pleasure_energy +=
-                                energy / config.initial_energy;
-                            self.reward_counts[0] += 1;
-                        }
-                        self.action_counts[1] += 1;
-                        break;
+                let angle_diff = (dy.atan2(dx) - heading)
+                    .sin()
+                    .atan2((dy.atan2(dx) - heading).cos());
+                if angle_diff.abs() <= half_arc {
+                    let energy = self.energy_particles[particle_idx].consume();
+                    self.creatures[idx].energy += energy;
+                    if config.reward_energy_enabled {
+                        self.creatures[idx].physio.pleasure_energy +=
+                            energy / config.initial_energy;
+                        self.reward_counts[0] += 1;
                     }
+                    self.action_counts[1] += 1;
+                    break;
                 }
             }
         }
@@ -1337,26 +1334,27 @@ impl World {
         // 接触痕迹点自动吸收（锥形区域判定，不受冷却限制，自己的痕迹除外）
         if !self.trail_disabled {
             let my_id = self.creatures[idx].id;
-            let nearby_trails = self.trail_grid.query(cx, cy, mouth_outer_r);
+            let trail_points_ref = &self.trail_points;
+            let nearby_trails = self.trail_grid.query_circle(cx, cy, mouth_outer_r, |i| {
+                (trail_points_ref[i].x, trail_points_ref[i].y)
+            });
             for &trail_idx in &nearby_trails {
                 let trail = &self.trail_points[trail_idx];
                 if trail.alive && trail.creator_id != my_id && trail.clan_hash == my_clan_hash {
                     let dx = trail.x - cx;
                     let dy = trail.y - cy;
-                    if dx * dx + dy * dy <= mouth_outer_r_sq {
-                        let angle_diff = (dy.atan2(dx) - heading)
-                            .sin()
-                            .atan2((dy.atan2(dx) - heading).cos());
-                        if angle_diff.abs() <= half_arc {
-                            let energy = self.trail_points[trail_idx].consume();
-                            self.creatures[idx].energy += energy;
-                            if config.reward_trail_enabled {
-                                self.creatures[idx].physio.pleasure_trail +=
-                                    energy / config.initial_energy;
-                                self.reward_counts[1] += 1;
-                            }
-                            break;
+                    let angle_diff = (dy.atan2(dx) - heading)
+                        .sin()
+                        .atan2((dy.atan2(dx) - heading).cos());
+                    if angle_diff.abs() <= half_arc {
+                        let energy = self.trail_points[trail_idx].consume();
+                        self.creatures[idx].energy += energy;
+                        if config.reward_trail_enabled {
+                            self.creatures[idx].physio.pleasure_trail +=
+                                energy / config.initial_energy;
+                            self.reward_counts[1] += 1;
                         }
+                        break;
                     }
                 }
             }
@@ -1373,6 +1371,7 @@ impl World {
         let mx = cx + heading.cos() * mouth_arc_r;
         let my = cy + heading.sin() * mouth_arc_r;
         let bite_query_range = mouth_stroke + config.contact_range;
+        // 动态阈值：实际过滤用 mouth_stroke + other_radius（每只生物半径不同），故只能粗筛
         let nearby_creatures = self.creature_grid.query(mx, my, bite_query_range);
         for &other_idx in &nearby_creatures {
             if other_idx == idx || !self.creatures[other_idx].alive {
@@ -1426,7 +1425,10 @@ impl World {
     fn compute_nearby_ally_energy(&self, creature_idx: usize, config: &Config) -> f64 {
         let cx = self.creatures[creature_idx].x;
         let cy = self.creatures[creature_idx].y;
-        let nearby = self.creature_grid.query(cx, cy, config.vision_range);
+        let creatures = &self.creatures;
+        let nearby = self.creature_grid.query_circle(cx, cy, config.vision_range, |i| {
+            (creatures[i].x, creatures[i].y)
+        });
         let mut total = 0.0;
         for &other_idx in &nearby {
             if other_idx == creature_idx || !self.creatures[other_idx].alive {
@@ -1541,9 +1543,13 @@ impl World {
 
     fn find_mate(&self, idx: usize, config: &Config) -> Option<(Genome, f64)> {
         let creature = &self.creatures[idx];
-        let nearby = self
-            .creature_grid
-            .query(creature.x, creature.y, config.contact_range);
+        let creatures = &self.creatures;
+        let nearby = self.creature_grid.query_circle(
+            creature.x,
+            creature.y,
+            config.contact_range,
+            |i| (creatures[i].x, creatures[i].y),
+        );
 
         for &other_idx in &nearby {
             if other_idx == idx || !self.creatures[other_idx].alive {
@@ -1556,12 +1562,10 @@ impl World {
             {
                 continue;
             }
-            let dist = ((other.x - creature.x).powi(2) + (other.y - creature.y).powi(2)).sqrt();
             // 交配阈值 = 聚类阈值 × 0.9，允许跨 clan 基因流
             // 聚类严格（0.95）、交配宽松（0.855），打破演化停滞
-            if dist < config.contact_range
-                && self.get_similarity(creature, other)
-                    >= config.species_similarity_threshold * 0.9
+            if self.get_similarity(creature, other)
+                >= config.species_similarity_threshold * 0.9
             {
                 return Some((other.genome.clone(), other.heading));
             }
@@ -1597,7 +1601,10 @@ impl World {
             return; // motion 守门员：静止不奖励
         }
 
-        let nearby = self.creature_grid.query(cx, cy, config.vision_range);
+        let creatures = &self.creatures;
+        let nearby = self.creature_grid.query_circle(cx, cy, config.vision_range, |i| {
+            (creatures[i].x, creatures[i].y)
+        });
         let mut sum_vx = heading.cos();
         let mut sum_vy = heading.sin();
         let mut total = 1usize; // 含自己
@@ -2123,7 +2130,9 @@ fn compute_nearby_energy_pure(
     let mut total = 0.0;
     const DIST_MIN_SQ: f64 = 0.01;
     // 粒子
-    energy_grid.query_into(x, y, range, energy_buf);
+    energy_grid.query_circle_into(x, y, range, energy_buf, |i| {
+        (energy_particles[i].x, energy_particles[i].y)
+    });
     for &idx in energy_buf.iter() {
         let p = &energy_particles[idx];
         if p.alive {
@@ -2136,7 +2145,9 @@ fn compute_nearby_energy_pure(
         }
     }
     // 生物
-    creature_grid.query_into(x, y, range, creature_buf);
+    creature_grid.query_circle_into(x, y, range, creature_buf, |i| {
+        (creatures[i].x, creatures[i].y)
+    });
     for &idx in creature_buf.iter() {
         let c = &creatures[idx];
         if c.alive && c.energy > 0.0 {
@@ -2150,7 +2161,9 @@ fn compute_nearby_energy_pure(
     }
     // 痕迹
     if !trail_disabled {
-        trail_grid.query_into(x, y, range, trail_buf);
+        trail_grid.query_circle_into(x, y, range, trail_buf, |i| {
+            (trail_points[i].x, trail_points[i].y)
+        });
         for &idx in trail_buf.iter() {
             let t = &trail_points[idx];
             if t.alive {
@@ -2247,7 +2260,9 @@ fn compute_perception_pure(
     ];
 
     // === 能量粒子 ===
-    energy_grid.query_into(cx, cy, eye_range, energy_buf);
+    energy_grid.query_circle_into(cx, cy, eye_range, energy_buf, |i| {
+        (energy_particles[i].x, energy_particles[i].y)
+    });
     for &idx in energy_buf.iter() {
         let particle = &energy_particles[idx];
         if !particle.alive {
@@ -2257,7 +2272,7 @@ fn compute_perception_pure(
         let dy = particle.y - cy;
         let dist_sq = dx * dx + dy * dy;
         let dist = dist_sq.sqrt();
-        if dist <= 0.0 || dist > eye_range {
+        if dist <= 0.0 {
             continue;
         }
         let angle = dy.atan2(dx);
@@ -2278,7 +2293,9 @@ fn compute_perception_pure(
 
     // === 痕迹点 ===
     if !trail_disabled {
-        trail_grid.query_into(cx, cy, eye_range, trail_buf);
+        trail_grid.query_circle_into(cx, cy, eye_range, trail_buf, |i| {
+            (trail_points[i].x, trail_points[i].y)
+        });
         for &idx in trail_buf.iter() {
             let trail = &trail_points[idx];
             if !trail.alive || trail.creator_id == creature.id {
@@ -2288,7 +2305,7 @@ fn compute_perception_pure(
             let dy = trail.y - cy;
             let dist_sq = dx * dx + dy * dy;
             let dist = dist_sq.sqrt();
-            if dist <= 0.0 || dist > eye_range {
+            if dist <= 0.0 {
                 continue;
             }
             let angle = dy.atan2(dx);
@@ -2315,7 +2332,9 @@ fn compute_perception_pure(
 
     // === 生物 ===
     let mut nearest_creature_idx: [Option<usize>; 2] = [None; 2];
-    creature_grid.query_into(cx, cy, eye_range, creature_buf);
+    creature_grid.query_circle_into(cx, cy, eye_range, creature_buf, |i| {
+        (creatures[i].x, creatures[i].y)
+    });
     for &idx in creature_buf.iter() {
         if idx == creature_idx {
             continue;
@@ -2328,7 +2347,7 @@ fn compute_perception_pure(
         let dy = other.y - cy;
         let dist_sq = dx * dx + dy * dy;
         let dist = dist_sq.sqrt();
-        if dist <= 0.0 || dist > eye_range {
+        if dist <= 0.0 {
             continue;
         }
         let angle = dy.atan2(dx);
@@ -2408,7 +2427,9 @@ fn compute_perception_pure(
         let mut best_intensity = 0.0_f64;
 
         // 复用 creature_buf（已被生物扫描填充，但这里需要重新查询全范围）
-        creature_grid.query_into(cx, cy, eye_range, creature_buf);
+        creature_grid.query_circle_into(cx, cy, eye_range, creature_buf, |i| {
+            (creatures[i].x, creatures[i].y)
+        });
         for &idx in creature_buf.iter() {
             if idx == creature_idx {
                 continue;
@@ -2420,7 +2441,7 @@ fn compute_perception_pure(
             let dx = other.x - cx;
             let dy = other.y - cy;
             let dist = (dx * dx + dy * dy).sqrt();
-            if dist <= 0.0 || dist > eye_range {
+            if dist <= 0.0 {
                 continue;
             }
             let angle = dy.atan2(dx);
@@ -2452,7 +2473,7 @@ fn compute_perception_pure(
         let dx = other.x - cx;
         let dy = other.y - cy;
         let dist = (dx * dx + dy * dy).sqrt();
-        if dist <= 0.0 || dist > eye_range {
+        if dist <= 0.0 {
             continue;
         }
 

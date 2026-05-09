@@ -233,7 +233,10 @@ cargo clippy          # 代码检查
    - 2c 串行动作执行 + 情绪信号收集 + apply_emotions
 5. 战力+咬合: `config.rs` → `combat_power()` 公式，`world.rs` → 咬时攻方战力 × 咬合力 vs 守方战力
 6. 周围能量: `world.rs` → `compute_nearby_energy_pure()` 查询 vision_range 内粒子+生物总能量
-7. 空间索引使用 FxHashMap，查询复用缓冲区避免分配（creature/energy 两套）
+7. 空间索引使用 FxHashMap，查询复用缓冲区避免分配。**双层 API**：
+   - 精筛 `query_circle` / `query_circle_into`（推荐）：返回真正在 range 圆内的实体，调用方传 `get_pos(idx) -> (x,y)` 闭包。一般场景请用此族——避免每个调用方各自重复写 dx²+dy² 过滤
+   - 粗筛 `query` / `query_into`：返回 bounding box 内的伪命中（含圆外角落），仅在调用方有"动态阈值"等无法用统一圆半径筛选的场景使用（目前仅咬合一处：实际过滤用 `mouth_stroke + other_radius`，每只生物半径不同）
+   - 历史教训：早期粗筛被当成精筛用，孤独判定/同族援助/群体奖励三处漏写 dist² 过滤，导致实际作用范围扩大到 7.5×R 方形 ≈ 18 倍面积。修复后强制用精筛 API 杜绝此类静默 bug
 8. 种族聚类: `calculate_clan_cache()` 每秒更新一次
 9. 神经后端切换: `config.toml` 的 `neural_backend = auto | cpu | gpu | legacy`；legacy 在 world 内直跑 CPU，其他通过 bridge 跑神经线程
 10. 所有复杂行为应是进化结果，避免硬编码
