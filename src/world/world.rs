@@ -412,7 +412,7 @@ impl World {
                 if !self.dominant_species.is_empty() && rng.gen_bool(0.5) {
                     let idx = rng.gen_range(0..self.dominant_species.len());
                     let candidate = self.dominant_species[idx].clone();
-                    self.spawn_from_template(config, &candidate.genome, config.initial_energy);
+                    self.spawn_from_template(config, &candidate.genome, config.initial_energy, 0);
                 } else {
                     self.spawn_creature(config);
                 }
@@ -447,7 +447,7 @@ impl World {
     }
 
     /// 从模板生成生物
-    pub fn spawn_from_template(&mut self, config: &Config, genome: &Genome, initial_energy: f64) {
+    pub fn spawn_from_template(&mut self, config: &Config, genome: &Genome, initial_energy: f64, generation: usize) {
         let mut rng = rand::thread_rng();
         let angle = rng.gen_range(0.0..std::f64::consts::TAU);
         let r = rng.gen_range(0.0_f64..1.0).sqrt() * config.volcano_radius * 0.8;
@@ -457,7 +457,7 @@ impl World {
 
         let creature_id = self.next_creature_id;
         self.next_creature_id += 1;
-        let creature = Creature::new(creature_id, x, y, energy, genome.clone(), 0, None, None);
+        let creature = Creature::new(creature_id, x, y, energy, genome.clone(), generation, None, None);
         self.notify_born(&creature);
         self.creatures.push(creature);
     }

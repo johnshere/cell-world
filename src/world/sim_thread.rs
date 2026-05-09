@@ -69,7 +69,7 @@ pub enum SimCommand {
     SetConfig(Config),
     SetViewport(f64, f64, f64, f64),
     SpawnCreature,
-    SpawnFromTemplate(Genome, f64),
+    SpawnFromTemplate(Genome, f64, usize),
     KillCreature(u64),
     SetTrailDisabled(bool),
     SetTrailSpawnPaused(bool),
@@ -188,8 +188,8 @@ fn sim_loop(
                     SimCommand::SpawnCreature => {
                         world.spawn_creature(&config);
                     }
-                    SimCommand::SpawnFromTemplate(genome, energy) => {
-                        world.spawn_from_template(&config, &genome, energy);
+                    SimCommand::SpawnFromTemplate(genome, energy, generation) => {
+                        world.spawn_from_template(&config, &genome, energy, generation);
                     }
                     SimCommand::KillCreature(id) => {
                         world.kill_creature(id);

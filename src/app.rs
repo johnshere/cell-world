@@ -484,6 +484,7 @@ impl CellWorldApp {
                 avg_energy: Some(candidate.avg_energy),
                 avg_age: Some(candidate.avg_age),
                 max_generation: Some(candidate.max_generation),
+                generation: Some(candidate.max_generation),
                 recorded_at: Some(time),
                 auto_recorded: Some(true),
                 file_time: None,
@@ -1840,6 +1841,7 @@ impl eframe::App for CellWorldApp {
                             self.sim.send(SimCommand::SpawnFromTemplate(
                                 template.genome.clone(),
                                 template.initial_energy,
+                                template.generation.unwrap_or(0),
                             ));
                         }
                     }
@@ -1870,6 +1872,7 @@ impl eframe::App for CellWorldApp {
                         avg_energy: None,
                         avg_age: None,
                         max_generation: None,
+                        generation: Some(creature.generation),
                         recorded_at: None,
                         auto_recorded: None,
                         file_time: None,
@@ -1913,6 +1916,7 @@ impl eframe::App for CellWorldApp {
                     avg_energy: None,
                     avg_age: None,
                     max_generation: None,
+                    generation: Some(representative.generation),
                     recorded_at: None,
                     auto_recorded: None,
                     file_time: None,

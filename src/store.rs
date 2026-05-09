@@ -54,6 +54,9 @@ pub struct CreatureTemplate {
     /// 最大世代
     #[serde(default)]
     pub max_generation: Option<usize>,
+    /// 保存时的代数（None=旧格式无记录，投放时从0开始）
+    #[serde(default)]
+    pub generation: Option<usize>,
     /// 记录时的世界时间
     #[serde(default)]
     pub recorded_at: Option<f64>,
