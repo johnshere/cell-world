@@ -90,6 +90,12 @@ cargo clippy          # 代码检查
   - UI ↔ sim：`mpsc::Sender<SimCommand>`（命令）+ `Arc<RwLock<SimSnapshot>>`（快照数据）
   - sim ↔ neural：`NeuralBridge` 内 `mpsc<TickRequest>`/`mpsc<TickResponse>`，`TickRequest` 携带 events + inputs + tick_count + rewards（上一帧奖励信号）
   - sim 墙钟节拍 = 1/30s（固定），每拍做 `speed × N` 次 `world.update(SIM_DT)`
+- **优势种数据流（1Hz 节拍）**: store 是磁盘权威，world.dominant_species 是 sim 线程的运行时副本
+  - sim 线程每秒一次：`world.refresh_dominant_candidate()` 跑 detect_dominant，结果写入 `world.dominant_candidate_cache`；`stats()` 只读取该缓存（不再每帧重算）
+  - 主线程每秒一次：`auto_save_dominant()` 评估并写盘到 `store`；同步 `SimCommand::UpdateDominantSpecies(store.dominant_species())` 把 store 全列表推给 sim 线程，sim 线程收到后赋给 `world.dominant_species`
+  - 启动时 `app.rs` 会先以 `world.dominant_species = store.dominant_species().clone()` 做一次性初始化，避免 sim 启动到首次秒级 tick 之间的"窗口空库"
+  - 节拍触发器：主线程 `last_dominant_sync` + sim 线程 `last_dominant_detect`，都用墙钟 `Instant`（不受加速影响）
+  - 副效应：清空/删除自动记录最坏滞后 1 秒生效；面板"优势种"卡片首秒可能显示"暂无"
 - **时间模型**: 固定步长 dt=1/30 模拟秒，加速通过每帧多次 update 实现；SNN 每次 update 固定 10 ticks（neural_tick_rate=300，`300 × 1/30 = 10 ticks/update`）
 - **加速语义主旨**: **加速只是更快获得结果，不影响结果**。任意倍速 v 下，给定初始状态 $S_0$ 和配置 $C$，运行 K 次 update 后的状态 $S_K$ 与 v 无关（二进制一致）
   - **Legacy 后端**（`neural_backend="legacy"`）：world.update 内直接调用 `brain.tick_multi(perception, 10)`，CPU SpikingNetwork 原子推进

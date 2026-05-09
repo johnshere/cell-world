@@ -101,6 +101,9 @@ pub struct World {
     /// 优势种库
     pub dominant_species: Vec<DominantCandidate>,
 
+    /// 当前优势种检测结果缓存（每秒由 sim_thread 刷新一次，stats() 直接读取）
+    pub dominant_candidate_cache: Option<DominantCandidate>,
+
     /// 自动投放定时器
     auto_spawn_timer: f64,
 
@@ -155,6 +158,7 @@ impl World {
             neural_bridge: None,
             clan_genomes: FxHashMap::default(),
             dominant_species: Vec::new(),
+            dominant_candidate_cache: None,
             auto_spawn_timer: 0.0,
             terrain: TerrainMap::default(),
         };
@@ -356,6 +360,7 @@ impl World {
             neural_bridge: None,
             clan_genomes,
             dominant_species,
+            dominant_candidate_cache: None,
             auto_spawn_timer: 0.0,
             terrain: TerrainMap::default(),
         }
@@ -412,7 +417,14 @@ impl World {
                 if !self.dominant_species.is_empty() && rng.gen_bool(0.5) {
                     let idx = rng.gen_range(0..self.dominant_species.len());
                     let candidate = self.dominant_species[idx].clone();
-                    self.spawn_from_template(config, &candidate.genome, config.initial_energy, 0);
+                    // 继承优势种的代数：与手动投放保持一致（手动投放传 template.generation，
+                    // 而 auto_save_dominant 把 template.generation 设为 max_generation）
+                    self.spawn_from_template(
+                        config,
+                        &candidate.genome,
+                        config.initial_energy,
+                        candidate.max_generation,
+                    );
                 } else {
                     self.spawn_creature(config);
                 }
@@ -1838,19 +1850,10 @@ impl World {
         clan_vec.sort_by(|a, b| b.1.cmp(&a.1));
         clan_vec.truncate(3);
 
-        // 优势种检测（仍使用祖先追溯模型）
+        // 优势种检测：每秒由 sim_thread 调用 refresh_dominant_candidate 刷新缓存，此处只读
+        // 注意：种族缓存仍在 stats() 内 ensure 一次，因为面板渲染要用 clan map（不只是 dominant）
         self.ensure_clan_cache(species_threshold);
-        let cache = self.clan_cache.borrow();
-        let cache = cache.as_ref().unwrap();
-        let creature_clan_map = cache.creature_clan_map.clone();
-
-        let dominant_candidate = self.detect_dominant(
-            &alive_creatures,
-            &creature_clan_map,
-            avg_energy,
-            max_generation,
-            config,
-        );
+        let dominant_candidate = self.dominant_candidate_cache.clone();
 
         WorldStats {
             time: self.time,
@@ -1880,6 +1883,41 @@ impl World {
             }
         }
         creature_species
+    }
+
+    /// 每秒一次：执行优势种检测并写入缓存
+    /// 由 sim_thread 主循环以 1Hz 频率调用；stats() 只读取缓存
+    pub fn refresh_dominant_candidate(&mut self, config: &Config) {
+        let species_threshold = config.species_similarity_threshold;
+        let alive_creatures: Vec<_> = self.creatures.iter().filter(|c| c.alive).collect();
+        if alive_creatures.is_empty() {
+            self.dominant_candidate_cache = None;
+            return;
+        }
+        let max_generation = alive_creatures
+            .iter()
+            .map(|c| c.generation)
+            .max()
+            .unwrap_or(0);
+        let creature_energy: f64 = alive_creatures.iter().map(|c| c.energy).sum();
+        let avg_energy = creature_energy / alive_creatures.len() as f64;
+
+        self.ensure_clan_cache(species_threshold);
+        let creature_clan_map = self
+            .clan_cache
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .creature_clan_map
+            .clone();
+
+        self.dominant_candidate_cache = self.detect_dominant(
+            &alive_creatures,
+            &creature_clan_map,
+            avg_energy,
+            max_generation,
+            config,
+        );
     }
 
     /// 优势种检测

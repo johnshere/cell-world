@@ -69,6 +69,8 @@ pub struct CellWorldApp {
     render_enabled: bool,
     // 快照捕获回调
     snapshot_capture_rx: Option<mpsc::Receiver<WorldSnapshot>>,
+    // 优势种秒级同步节拍（auto_save_dominant + 推送 store 列表给 sim）
+    last_dominant_sync: std::time::Instant,
 }
 
 impl CellWorldApp {
@@ -162,6 +164,8 @@ impl CellWorldApp {
             terrain_params: crate::world::TerrainParams::default(),
             render_enabled: true,
             snapshot_capture_rx: None,
+            // 初始倒推 1.1s，保证启动后第一帧立即触发首次同步
+            last_dominant_sync: now - std::time::Duration::from_millis(1100),
         }
     }
 }
@@ -1710,8 +1714,14 @@ impl eframe::App for CellWorldApp {
         // 每10秒记录一次日志
         self.log_stats(&snap);
 
-        // 自动保存优势种
-        self.auto_save_dominant(snap.time);
+        // 优势种秒级节拍：每秒一次 auto_save 写 store + 推送全列表给 sim 线程
+        if self.last_dominant_sync.elapsed() >= std::time::Duration::from_secs(1) {
+            self.last_dominant_sync = std::time::Instant::now();
+            self.auto_save_dominant(snap.time);
+            self.sim.send(SimCommand::UpdateDominantSpecies(
+                self.store.dominant_species(),
+            ));
+        }
 
         // 侧边栏面板
         let mut panel_action = PanelAction::default();

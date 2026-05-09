@@ -8,7 +8,7 @@ use super::{Creature, EnergyParticle, TerrainMap, TerrainParams, TrailPoint};
 use crate::config::Config;
 use crate::neural::Genome;
 use crate::snapshot::WorldSnapshot;
-use crate::world::world::{PerfStats, WorldStats};
+use crate::world::world::{DominantCandidate, PerfStats, WorldStats};
 use crate::world::World;
 
 /// 模拟步长：每次 update 推进固定 1/30 模拟秒，加速通过多次 update 实现
@@ -81,6 +81,8 @@ pub enum SimCommand {
     GenerateTerrain(TerrainParams),
     /// 重置世界：清空所有生物/粒子/痕迹，保留地形和配置，从头演化
     ResetWorld,
+    /// 主线程每秒一次推送 store 中的优势种全列表到 sim 线程
+    UpdateDominantSpecies(Vec<DominantCandidate>),
     Shutdown,
 }
 
@@ -158,6 +160,8 @@ fn sim_loop(
     let mut actual_speed_timer = Instant::now();
     let mut actual_speed_steps: u64 = 0;
     let mut actual_speed: f64 = 0.0;
+    // 优势种检测节拍：每秒一次（详见 CLAUDE.md "优势种数据流"）
+    let mut last_dominant_detect = Instant::now() - Duration::from_secs(2);
 
     // 导出初始快照
     export_snapshot(
@@ -243,6 +247,9 @@ fn sim_loop(
                         actual_speed_timer = Instant::now();
                         eprintln!("[sim] 世界已重置");
                     }
+                    SimCommand::UpdateDominantSpecies(list) => {
+                        world.dominant_species = list;
+                    }
                     SimCommand::Shutdown => return,
                 },
                 Err(mpsc::TryRecvError::Empty) => break,
@@ -269,6 +276,12 @@ fn sim_loop(
             actual_speed = actual_speed_steps as f64 * SIM_DT / elapsed;
             actual_speed_steps = 0;
             actual_speed_timer = Instant::now();
+        }
+
+        // 每秒一次：刷新优势种检测缓存（stats() 会读取该缓存）
+        if last_dominant_detect.elapsed() >= Duration::from_secs(1) {
+            last_dominant_detect = Instant::now();
+            world.refresh_dominant_candidate(&config);
         }
 
         // 导出快照
