@@ -1,9 +1,9 @@
 # 初始模拟速度
 initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 50
+min_creatures = 65
 # 最大生物数量（超过时禁止繁殖，0=不限制）
-max_creatures = 500
+max_creatures = 400
 # 初始能量
 initial_energy = 160.0
 # 初始世界缩放比例
@@ -19,11 +19,11 @@ volcano_interval = 30.0
 # 火山喷射半径
 volcano_radius = 5000.0
 # 火山粒子半径分布倾角（负值让外围更密，默认-0.3）
-volcano_spread_bias = -0.4
+volcano_spread_bias = -0.55
 # 每次喷发粒子数
 volcano_count = 20
 # 火山粒子能量
-volcano_particle_energy = 100.0
+volcano_particle_energy = 140.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -33,7 +33,7 @@ volcano_interval_amplitude = 0.15
 # 火山能量正弦周期（秒）
 volcano_energy_cycle = 1350.0
 # 火山能量振幅比（0~0.9）
-volcano_energy_amplitude = 0.1
+volcano_energy_amplitude = 0.15
 
 # 火山粒子衰减率（每秒）
 volcano_decay_rate = 0.001
@@ -84,12 +84,12 @@ age_metabolism_factor = 0.03
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗系数（面板值×0.00001×半径³ = 实际消耗）
-move_cost = 2.5
+move_cost = 1.0
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.99
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.025
+heat_dissipation_coefficient = 0.01
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -102,9 +102,9 @@ contact_range = 15.0
 
 # === 进化 ===
 # 初始连接数最小值
-initial_connections_min = 15
+initial_connections_min = 2
 # 初始连接数最大值
-initial_connections_max = 25
+initial_connections_max = 5
 # 种族相似度阈值（高于此值视为同一种族）
 species_similarity_threshold = 0.95
 
@@ -157,7 +157,7 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = false
-auto_spawn_interval = 2.0
+auto_spawn_interval = 3.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
