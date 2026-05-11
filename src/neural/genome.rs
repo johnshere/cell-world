@@ -762,7 +762,7 @@ impl Genome {
                 self.connections.push(ConnectionGene {
                     in_node: from_id,
                     out_node: to_id,
-                    weight: rng.gen_range(-1.0..1.0),
+                    weight: rng.gen_range(-0.1..0.1),
                     enabled: true,
                 });
             }
@@ -846,7 +846,7 @@ impl Genome {
                 self.connections.push(ConnectionGene {
                     in_node: from_id,
                     out_node: to_id,
-                    weight: rng.gen_range(-1.0..1.0),
+                    weight: rng.gen_range(-0.1..0.1),
                     enabled: true,
                 });
                 return;
@@ -899,13 +899,16 @@ impl Genome {
 
         let new_node_id = self.next_node_id;
         self.next_node_id += 1;
+        // 直读 pass-through 初始化：与基础大脑节点参数一致，确保 add_node 是中性变异
+        // （连接拓扑已按 NEAT 经典做法做中性插入：A→B=1, B→C=原A→C 权重）
+        // threshold/decay/refractory 仍是基因，由后续 mutate_snn_params 演化决定是否走脉冲
         self.nodes.push(NodeGene {
             id: new_node_id,
             node_type: NodeType::Block(new_block),
             layer: new_layer,
-            decay: rng.gen_range(0.5..0.95),
-            threshold: rng.gen_range(0.3..1.0),
-            refractory_period: rng.gen_range(1..=3),
+            decay: 0.0,
+            threshold: 0.0,
+            refractory_period: 0,
         });
 
         // 创建两个新连接
