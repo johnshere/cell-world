@@ -1038,14 +1038,14 @@ impl Genome {
             }
         }
 
-        // === 节点：按 id 孟德尔 ===
+        // === 节点：按 id 孟德尔（与连接对称：disjoint/excess 只从 fitter 取） ===
+        // 注意：weaker 独有节点不保留，避免成为孤儿节点
+        // （add_node 创新需要节点+连接共同传递；只有 fitter 当 self 时整套拓扑才完整继承）
         let weaker_nodes: std::collections::HashMap<usize, &NodeGene> =
             weaker.nodes.iter().map(|n| (n.id, n)).collect();
 
-        let mut node_ids: std::collections::HashSet<usize> = std::collections::HashSet::new();
         let mut child_nodes = Vec::new();
         for node in &fitter.nodes {
-            node_ids.insert(node.id);
             let picked = if let Some(&weaker_node) = weaker_nodes.get(&node.id) {
                 // 共有节点：整个 NodeGene 50/50 选一方
                 if rng.gen_bool(0.5) {
@@ -1057,13 +1057,6 @@ impl Genome {
                 node.clone()
             };
             child_nodes.push(picked);
-        }
-        // weaker 独有节点保留（避免基因流失）
-        for node in &weaker.nodes {
-            if !node_ids.contains(&node.id) {
-                node_ids.insert(node.id);
-                child_nodes.push(node.clone());
-            }
         }
 
         let next_node_id = fitter.next_node_id.max(weaker.next_node_id);
