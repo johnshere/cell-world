@@ -3,8 +3,14 @@ use rand::Rng;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::config::Config;
+
+/// 累计触发的 add_node 变异次数（含未存活到下一代的子代）
+pub static ADD_NODE_TRIGGERS: AtomicU64 = AtomicU64::new(0);
+/// 累计触发的 add_connection 变异次数
+pub static ADD_CONN_TRIGGERS: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(feature = "persistence")]
 use serde::{Deserialize, Serialize};
@@ -429,11 +435,13 @@ impl Genome {
         if is_sexual {
             // 添加连接变异（受发育期调制）
             if rng.gen::<f64>() < base_rate * structure_factor {
+                ADD_CONN_TRIGGERS.fetch_add(1, Ordering::Relaxed);
                 child.mutate_add_connection(conf);
             }
 
             // 添加节点变异（受发育期调制）
             if rng.gen::<f64>() < base_rate * structure_factor {
+                ADD_NODE_TRIGGERS.fetch_add(1, Ordering::Relaxed);
                 child.mutate_add_node(base_rate);
             }
 

@@ -77,6 +77,10 @@ pub struct CachedStats {
     pub avg_compute_ns: f64,
     pub avg_nodes: f64,
     pub avg_connections: f64,
+    pub max_nodes: usize,
+    pub max_connections: usize,
+    pub add_node_triggers: u64,
+    pub add_conn_triggers: u64,
 }
 
 /// 将秒数格式化为 d h m s
@@ -144,8 +148,14 @@ impl StatsPanel {
                 avg_compute_ns: snapshot.perf_stats.avg_compute_ns,
                 avg_nodes: 0.0,
                 avg_connections: 0.0,
+                max_nodes: 0,
+                max_connections: 0,
+                add_node_triggers: crate::neural::genome::ADD_NODE_TRIGGERS
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                add_conn_triggers: crate::neural::genome::ADD_CONN_TRIGGERS
+                    .load(std::sync::atomic::Ordering::Relaxed),
             };
-            // 计算存活生物的脑结构平均
+            // 计算存活生物的脑结构平均/最大
             let alive: Vec<_> = snapshot.creatures.iter().filter(|c| c.alive).collect();
             let n = alive.len();
             if n > 0 {
@@ -156,6 +166,16 @@ impl StatsPanel {
                     .sum();
                 self.cached_stats.avg_nodes = total_nodes as f64 / n as f64;
                 self.cached_stats.avg_connections = total_conns as f64 / n as f64;
+                self.cached_stats.max_nodes = alive
+                    .iter()
+                    .map(|c| c.genome.nodes.len())
+                    .max()
+                    .unwrap_or(0);
+                self.cached_stats.max_connections = alive
+                    .iter()
+                    .map(|c| c.genome.connections.iter().filter(|cn| cn.enabled).count())
+                    .max()
+                    .unwrap_or(0);
             }
             // 记录能量历史（总能量 + 生命能量 + 理论投放能量 + 生物数量）
             self.energy_history.push((
@@ -374,11 +394,21 @@ impl StatsPanel {
             });
         }
 
-        // 脑结构平均
+        // 脑结构平均/最大
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
-                "脑: 均节点:{:.0}  均连接:{:.0}",
-                self.cached_stats.avg_nodes, self.cached_stats.avg_connections
+                "脑: 均节点:{:.1}  最大节点:{}  均连接:{:.0}  最大连接:{}",
+                self.cached_stats.avg_nodes,
+                self.cached_stats.max_nodes,
+                self.cached_stats.avg_connections,
+                self.cached_stats.max_connections,
+            ));
+        });
+        // 结构变异触发计数（含未存活子代）
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!(
+                "结构变异触发: add_node={}  add_conn={}",
+                self.cached_stats.add_node_triggers, self.cached_stats.add_conn_triggers,
             ));
         });
 
