@@ -174,6 +174,11 @@ reward_group_enabled = true
 solitude_penalty = 30.0
 
 reproduce_cooldown = 0.0
+# 繁殖能量年龄代价系数（对称指数曲线 k）
+# 父辈消耗 = energy × ratio × exp(+k·p)，后辈得到 = energy × ratio × exp(-k·p)
+# p = age / maturation_time（发育度）；p=0 时无损耗，p>0 时损耗指数上升
+# 与 structure_factor 形成姊妹曲线；0.0 退化为 100% 转移
+reproduction_age_cost_rate = 0.4
 follow_optimal_angle = 0.5235987755982988
 follow_angle_width = 0.4363323129985824
 follow_max_level = 1.0
