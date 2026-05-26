@@ -1491,8 +1491,18 @@ impl World {
             return false;
         }
 
-        let child_energy = self.creatures[idx].energy * ratio;
-        self.creatures[idx].energy -= child_energy;
+        // 繁殖能量代价：对称指数曲线，p = age / maturation_time（发育度）
+        // 父辈消耗 = energy × ratio × exp(+k·p)，后辈得到 = energy × ratio × exp(-k·p)
+        // p=0 时双方=1（无损耗），p>0 时损耗指数上升；与 structure_factor 形成姊妹曲线
+        let mat = self.creatures[idx].genome.maturation_time.max(1.0);
+        let p = self.creatures[idx].age / mat;
+        let k = config.reproduction_age_cost_rate;
+        let take_factor = (k * p).exp();
+        let give_factor = (-k * p).exp();
+        let parent_energy = self.creatures[idx].energy;
+        let parent_cost = (parent_energy * ratio * take_factor).min(parent_energy);
+        let child_energy = (parent_energy * ratio * give_factor).min(parent_cost);
+        self.creatures[idx].energy -= parent_cost;
 
         let mut rng = rand::thread_rng();
         let heading = self.creatures[idx].heading;

@@ -212,6 +212,15 @@ pub struct Config {
     #[serde(default)]
     pub reproduce_cooldown: f64,
 
+    /// 繁殖能量年龄代价系数（对称指数曲线 k）
+    /// 父辈消耗 = energy × ratio × exp(+k·p)，后辈得到 = energy × ratio × exp(-k·p)
+    /// 其中 p = age / maturation_time（发育度）
+    /// p=0 时双方=1（无损耗），p>0 时损耗 = 2·sinh(k·p)·ratio·energy 指数上升
+    /// 与 structure_factor 形成姊妹曲线（同一时间坐标 p）
+    /// 设为 0.0 退化为当前 100% 转移行为
+    #[serde(default = "default_reproduction_age_cost_rate")]
+    pub reproduction_age_cost_rate: f64,
+
     // === 算力能量 ===
     /// 算力转能量系数（0.1s → 能量，内部除以1亿，0 = 禁用）
     #[serde(default)]
@@ -348,6 +357,9 @@ fn default_mutation_rate() -> f64 {
     0.15
 }
 fn default_asexual_mutation_scale() -> f64 {
+    0.4
+}
+fn default_reproduction_age_cost_rate() -> f64 {
     0.4
 }
 fn default_particle_min_energy() -> f64 {

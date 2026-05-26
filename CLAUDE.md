@@ -192,6 +192,15 @@ cargo clippy          # 代码检查
   - **Bridge 模式下奖励信号通过 `NeuralBridge.send_reward()` 延迟一帧发送给神经线程**，在下一批 tick 前对正确的 SpikingNetwork 实例调用 `apply_physiology`；Legacy 模式下直接在 world 线程本地调用
   - 三通道独立开关（能量/痕迹/集体），任一通道开启即有奖励驱动学习
 - **物理约束**: 存在消耗（基础代谢 × 年龄倍率+体温逸散）、繁殖成本（神经控制 10%~50%）、死亡条件（能量 ≤0）
+- **繁殖能量代价（发育度调制，姊妹曲线）**: 不再是 100% 转移，引入对称指数曲线
+  - `p = age / maturation_time`（发育度，与 structure_factor 共享同一时间坐标）
+  - 父辈消耗 = `energy × ratio × exp(+k·p)`，clamp 到 ≤ energy
+  - 后辈得到 = `energy × ratio × exp(-k·p)`，clamp 到 ≤ parent_cost
+  - 净损耗 = `2·sinh(k·p) × ratio × energy`，p=0 时为 0，p>0 时指数上升
+  - 配置 `reproduction_age_cost_rate`（k，默认 0.4），设为 0 退化为旧的 100% 转移
+  - 与 structure_factor (`2·exp(-p)`) 形成姊妹曲线：发育期是创新窗口（高变异+低代价），过了发育期是稳定期（低变异+高代价）
+  - 设计动机：当前 maturation_time heritage 公式 `(age+mat)/2` 只有 p=1 不动点，p<1 区 maturation 单向塌缩，让 add_node 触发率随种群"早熟漂移"持续衰减。新机制在 p>1 区施加能量惩罚（个体级强信号）+ heritage 反塌缩通道（代际级），形成动态稳态——maturation_time 不再塌到 0，繁殖年龄分布被压向 p ≤ 1，structure_factor 平均值从 ~0.865 提升至 ~1.26
+  - 关键性质：p=0 时双方倍率=1，**对幼年繁殖完全零干扰**，不破坏当前演化路径
 - **变异率（v2.5 改为全局常量）**: `config.mutation_rate` 单一字段（默认 0.15）
   - 同时作为 base/block 两类变异的触发概率
   - **不再是基因组内可演化基因**（`MutationGene` 已删除）
