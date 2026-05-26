@@ -6,5 +6,5 @@ pub mod slot_alloc;
 mod spiking;
 pub mod thread;
 
-pub use genome::{PhysioGene, Genome, ConnProbsGene};
+pub use genome::{ConnProbsGene, Genome, PhysioGene};
 pub use spiking::SpikingNetwork;

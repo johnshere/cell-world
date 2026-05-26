@@ -358,10 +358,10 @@ mod inner {
             let conns_size = (total_conns * std::mem::size_of::<GpuConnection>()) as u64;
             let meta_size = (MAX_CREATURES * std::mem::size_of::<GpuCreatureMeta>()) as u64;
 
-            let usage_storage_rw =
-                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC;
-            let usage_storage_r =
-                wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
+            let usage_storage_rw = wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC;
+            let usage_storage_r = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
 
             let nodes_buf_a = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("nodes_a"),
@@ -705,16 +705,14 @@ mod inner {
             let offset = (conn_base * std::mem::size_of::<GpuConnection>()) as u64;
             let data =
                 bytemuck::cast_slice(&self.connections_cpu[conn_base..conn_base + MAX_CONNS]);
-            self.queue
-                .write_buffer(&self.connections_buf, offset, data);
+            self.queue.write_buffer(&self.connections_buf, offset, data);
         }
 
         /// 上传指定 slot 的 traces 到 GPU（衰减写回后调用）
         fn upload_traces_slot(&mut self, slot: usize) {
             let trace_base = slot * MAX_CONNS;
             let offset = (trace_base * std::mem::size_of::<f32>()) as u64;
-            let data =
-                bytemuck::cast_slice(&self.traces_cpu[trace_base..trace_base + MAX_CONNS]);
+            let data = bytemuck::cast_slice(&self.traces_cpu[trace_base..trace_base + MAX_CONNS]);
             self.queue
                 .write_buffer(&self.eligibility_traces_buf, offset, data);
         }
@@ -930,11 +928,9 @@ mod inner {
             let mut spikes = [0u32; 8];
             let mut firsts = [0.0f32; 8];
             let base_bytes = slot * OUTPUTS_PER_CREATURE * 4;
-            let spike_src =
-                &self.last_raw[base_bytes..base_bytes + OUTPUTS_PER_CREATURE * 4];
+            let spike_src = &self.last_raw[base_bytes..base_bytes + OUTPUTS_PER_CREATURE * 4];
             let first_base = COUNTER_BYTES as usize + base_bytes;
-            let first_src =
-                &self.last_raw[first_base..first_base + OUTPUTS_PER_CREATURE * 4];
+            let first_src = &self.last_raw[first_base..first_base + OUTPUTS_PER_CREATURE * 4];
 
             for i in 0..8 {
                 spikes[i] = u32::from_le_bytes([

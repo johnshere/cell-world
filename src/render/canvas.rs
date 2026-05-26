@@ -196,7 +196,8 @@ impl WorldCanvas {
             let mut mesh = Mesh::default();
             mesh.vertices
                 .reserve(snapshot.trail_points.len().min(6000) * 4);
-            mesh.indices.reserve(snapshot.trail_points.len().min(6000) * 6);
+            mesh.indices
+                .reserve(snapshot.trail_points.len().min(6000) * 6);
 
             for trail in &snapshot.trail_points {
                 if !trail.alive {
@@ -260,8 +261,6 @@ impl WorldCanvas {
                 painter.circle_filled(volcano_pos, inner_r, volcano_color);
             }
         }
-
-
 
         // ===== 绘制生物 =====
         // 极低缩放时用批量 Mesh 渲染点
@@ -387,7 +386,12 @@ impl WorldCanvas {
     }
 
     /// 查找点击位置的实体
-    fn find_clicked_entity(&self, click_pos: Pos2, rect: Rect, snapshot: &SimSnapshot) -> Selection {
+    fn find_clicked_entity(
+        &self,
+        click_pos: Pos2,
+        rect: Rect,
+        snapshot: &SimSnapshot,
+    ) -> Selection {
         // 优先检测生物（因为生物更大更重要）
         for creature in &snapshot.creatures {
             if !creature.alive {
@@ -427,7 +431,10 @@ impl WorldCanvas {
                 }
             }
             Selection::Energy(id) => {
-                let found = snapshot.energy_particles.iter().any(|e| e.id == id && e.alive);
+                let found = snapshot
+                    .energy_particles
+                    .iter()
+                    .any(|e| e.id == id && e.alive);
                 if !found {
                     *selection = Selection::None;
                 }

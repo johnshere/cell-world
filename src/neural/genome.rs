@@ -272,11 +272,11 @@ impl Genome {
 
         // 3. 创建感官区 Block 节点（每种感官占一对镜像 abs 中的某一侧，靠同源跨连传到对侧）
         let sensory_blocks: [(i8, std::ops::Range<usize>); 5] = [
-            (-1, 0..8),    // 左眼 → Input 0~7
-            (1, 8..16),    // 右眼 → Input 8~15
-            (-3, 16..17),  // 自身能量（内省）→ Input 16
-            (3, 17..18),   // 地形感知（外感觉）→ Input 17
-            (-2, 18..20),  // 光语言（"光耳"）→ Input 18(方位) + 19(强度)
+            (-1, 0..8),   // 左眼 → Input 0~7
+            (1, 8..16),   // 右眼 → Input 8~15
+            (-3, 16..17), // 自身能量（内省）→ Input 16
+            (3, 17..18),  // 地形感知（外感觉）→ Input 17
+            (-2, 18..20), // 光语言（"光耳"）→ Input 18(方位) + 19(强度)
         ];
         let mut sensory_node_ids: Vec<(i8, usize)> = Vec::new(); // (block, node_id)
         for &(blk, ref input_range) in &sensory_blocks {
@@ -462,8 +462,7 @@ impl Genome {
                     node.decay = (node.decay + rng.gen_range(-0.1..0.1)).clamp(0.0, 0.99);
                 }
                 if rng.gen::<f64>() < base_rate {
-                    node.threshold =
-                        (node.threshold + rng.gen_range(-0.15..0.15)).clamp(0.0, 2.0);
+                    node.threshold = (node.threshold + rng.gen_range(-0.15..0.15)).clamp(0.0, 2.0);
                 }
                 if rng.gen::<f64>() < base_rate * 0.5 {
                     let delta: i8 = if rng.gen_bool(0.5) { 1 } else { -1 };
@@ -617,8 +616,9 @@ impl Genome {
         let mut rng = rand::thread_rng();
 
         if rng.gen::<f64>() < rate {
-            self.physio.pleasure_energy_sensitivity =
-                (self.physio.pleasure_energy_sensitivity + rng.gen_range(-0.1..0.1)).clamp(0.0, 2.0);
+            self.physio.pleasure_energy_sensitivity = (self.physio.pleasure_energy_sensitivity
+                + rng.gen_range(-0.1..0.1))
+            .clamp(0.0, 2.0);
         }
         if rng.gen::<f64>() < rate {
             self.physio.pleasure_trail_sensitivity =

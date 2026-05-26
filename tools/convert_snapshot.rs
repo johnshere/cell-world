@@ -43,31 +43,38 @@ fn main() {
     let json: Value = serde_json::from_slice(&source_bytes).expect("JSON解析失败");
 
     // 提取元信息
-    let world_time = json.get("world_time")
+    let world_time = json
+        .get("world_time")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.0);
-    let creature_count = json.get("creatures")
+    let creature_count = json
+        .get("creatures")
         .and_then(|v| v.as_array())
         .map(|a| a.len())
         .unwrap_or(0);
-    let energy_count = json.get("energy_particles")
+    let energy_count = json
+        .get("energy_particles")
         .and_then(|v| v.as_array())
         .map(|a| a.len())
         .unwrap_or(0);
-    let trail_count = json.get("trail_points")
+    let trail_count = json
+        .get("trail_points")
         .and_then(|v| v.as_array())
         .map(|a| a.len())
         .unwrap_or(0);
 
     // 提取配置
     let config = json.get("config");
-    let config_energy_denominator = config.and_then(|c| c.get("energy_denominator"))
+    let config_energy_denominator = config
+        .and_then(|c| c.get("energy_denominator"))
         .and_then(|v| v.as_f64())
         .unwrap_or(100.0);
-    let config_heat_floor = config.and_then(|c| c.get("heat_floor"))
+    let config_heat_floor = config
+        .and_then(|c| c.get("heat_floor"))
         .and_then(|v| v.as_f64())
         .unwrap_or(0.05);
-    let config_heat_dissipation = config.and_then(|c| c.get("heat_dissipation_coefficient"))
+    let config_heat_dissipation = config
+        .and_then(|c| c.get("heat_dissipation_coefficient"))
         .and_then(|v| v.as_f64())
         .unwrap_or(0.024);
 
@@ -98,12 +105,20 @@ fn main() {
     // 直接压缩整个JSON作为data.json.gz
     let encoded = compress_gzip(&source_bytes);
     fs::write(format!("{}/data.json.gz", target_dir), &encoded).expect("写入data.json.gz失败");
-    println!("已生成: {}/data.json.gz (压缩后 {} bytes)", target_dir, encoded.len());
+    println!(
+        "已生成: {}/data.json.gz (压缩后 {} bytes)",
+        target_dir,
+        encoded.len()
+    );
 
     println!("\n转换完成!");
     println!("目标目录: {}", target_dir);
     println!("原始大小: {} bytes", original_size);
-    println!("压缩后: {} bytes ({:.1}%)", encoded.len(), 100.0 * encoded.len() as f64 / original_size as f64);
+    println!(
+        "压缩后: {} bytes ({:.1}%)",
+        encoded.len(),
+        100.0 * encoded.len() as f64 / original_size as f64
+    );
     println!("\n旧存档 snapshot.json 未删除，请手动处理。");
 }
 

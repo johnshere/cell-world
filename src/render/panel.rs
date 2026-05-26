@@ -81,6 +81,8 @@ pub struct CachedStats {
     pub max_connections: usize,
     pub add_node_triggers: u64,
     pub add_conn_triggers: u64,
+    /// 平均发育期（maturation_time）
+    pub avg_maturation_time: f64,
 }
 
 /// 将秒数格式化为 d h m s
@@ -154,6 +156,7 @@ impl StatsPanel {
                     .load(std::sync::atomic::Ordering::Relaxed),
                 add_conn_triggers: crate::neural::genome::ADD_CONN_TRIGGERS
                     .load(std::sync::atomic::Ordering::Relaxed),
+                avg_maturation_time: 0.0, // 下方覆盖真实值
             };
             // 计算存活生物的脑结构平均/最大
             let alive: Vec<_> = snapshot.creatures.iter().filter(|c| c.alive).collect();
@@ -176,6 +179,10 @@ impl StatsPanel {
                     .map(|c| c.genome.connections.iter().filter(|cn| cn.enabled).count())
                     .max()
                     .unwrap_or(0);
+                self.cached_stats.avg_maturation_time =
+                    alive.iter().map(|c| c.genome.maturation_time).sum::<f64>() / n as f64;
+            } else {
+                self.cached_stats.avg_maturation_time = 0.0;
             }
             // 记录能量历史（总能量 + 生命能量 + 理论投放能量 + 生物数量）
             self.energy_history.push((
@@ -288,8 +295,7 @@ impl StatsPanel {
         ui.horizontal(|ui| {
             // 同步批处理模型下，世界实际倍速就是唯一指标
             let speed_label = format!("FPS: {:.0} | 速度: {:.1}x", fps, actual_speed);
-            ui.label(speed_label)
-                .on_hover_text("世界实际达成的倍速");
+            ui.label(speed_label).on_hover_text("世界实际达成的倍速");
             ui.separator();
             ui.label(format!("×{:.2}", scale));
             ui.separator();
@@ -388,8 +394,13 @@ impl StatsPanel {
         if death.count > 0 {
             ui.horizontal_wrapped(|ui| {
                 ui.label(format!(
-                    "寿命: 均:{:.1}│中:{:.1}│最长:{:.1}│最短:{:.1}│死亡:{}",
-                    death.avg, death.median, death.max, death.min, death.count
+                    "寿命: 育均:{:.0}s│均:{:.1}│中:{:.1}│最长:{:.1}│最短:{:.1}│死亡:{}",
+                    self.cached_stats.avg_maturation_time,
+                    death.avg,
+                    death.median,
+                    death.max,
+                    death.min,
+                    death.total_deaths
                 ));
             });
         }
@@ -529,7 +540,8 @@ impl StatsPanel {
                                         .on_hover_text("查看目标偏好")
                                         .clicked()
                                     {
-                                        self.target_pref_view = Some(TargetPrefSource::Template(template.name.clone()));
+                                        self.target_pref_view =
+                                            Some(TargetPrefSource::Template(template.name.clone()));
                                         self.target_pref_genome = Some(template.genome.clone());
                                     }
                                 },
@@ -855,11 +867,18 @@ impl StatsPanel {
                     // 发育进度
                     let mat = creature.genome.maturation_time;
                     let dev_progress = if mat > 0.0 { creature.age / mat } else { 1.0 };
-                    let dev_label = if dev_progress < 1.0 { "发育中" } else { "成熟" };
+                    let dev_label = if dev_progress < 1.0 {
+                        "发育中"
+                    } else {
+                        "成熟"
+                    };
                     ui.horizontal(|ui| {
                         ui.label(format!(
                             "发育:{:.0}/{:.0}s ({:.0}% {})",
-                            creature.age.min(mat), mat, (dev_progress * 100.0).min(999.0), dev_label
+                            creature.age.min(mat),
+                            mat,
+                            (dev_progress * 100.0).min(999.0),
+                            dev_label
                         ));
                     });
                     ui.horizontal(|ui| {
@@ -892,11 +911,18 @@ impl StatsPanel {
                     ui.label("繁殖 (block -25)");
                     let threshold = 20.0 + (o[4] * 0.5 + 0.5).clamp(0.0, 1.0) * 180.0;
                     let child_ratio = 0.1 + (o[5] * 0.5 + 0.5).clamp(0.0, 1.0) * 0.4;
-                    let ready = if o[3] > 0.2 && creature.energy >= threshold { "Ready" } else { "" };
+                    let ready = if o[3] > 0.2 && creature.energy >= threshold {
+                        "Ready"
+                    } else {
+                        ""
+                    };
                     ui.horizontal(|ui| {
                         ui.label(format!(
                             "意愿:{:.2}  阈值:{:.0}  比例:{:.0}% {}",
-                            o[3], threshold, child_ratio * 100.0, ready
+                            o[3],
+                            threshold,
+                            child_ratio * 100.0,
+                            ready
                         ));
                     });
 
@@ -909,8 +935,18 @@ impl StatsPanel {
                     let p = &creature.perception_cache;
                     ui.horizontal(|ui| {
                         // 左眼最近目标
-                        let type_l = match p[3] as i32 { 0 => "-", _ if p[3] < 0.5 => "粒", _ if p[3] < 0.8 => "痕", _ => "生" };
-                        let type_r = match p[11] as i32 { 0 => "-", _ if p[11] < 0.5 => "粒", _ if p[11] < 0.8 => "痕", _ => "生" };
+                        let type_l = match p[3] as i32 {
+                            0 => "-",
+                            _ if p[3] < 0.5 => "粒",
+                            _ if p[3] < 0.8 => "痕",
+                            _ => "生",
+                        };
+                        let type_r = match p[11] as i32 {
+                            0 => "-",
+                            _ if p[11] < 0.5 => "粒",
+                            _ if p[11] < 0.8 => "痕",
+                            _ => "生",
+                        };
                         ui.label(format!(
                             "左眼[{}]近:{:.2}  右眼[{}]近:{:.2}",
                             type_l, p[1], type_r, p[9]
@@ -931,7 +967,12 @@ impl StatsPanel {
                     // ── 神经网络结构 ──
                     ui.separator();
                     let conn_count = creature.genome.connections.len();
-                    let enabled_count = creature.genome.connections.iter().filter(|c| c.enabled).count();
+                    let enabled_count = creature
+                        .genome
+                        .connections
+                        .iter()
+                        .filter(|c| c.enabled)
+                        .count();
                     let node_count = creature.genome.nodes.len();
                     let hidden = node_count.saturating_sub(
                         crate::neural::Genome::INPUT_SIZE + crate::neural::Genome::OUTPUT_SIZE,
@@ -942,7 +983,10 @@ impl StatsPanel {
                     ));
 
                     // 目标偏好基因（target_pref）
-                    let total_pref_entries: usize = creature.genome.conn_probs.values()
+                    let total_pref_entries: usize = creature
+                        .genome
+                        .conn_probs
+                        .values()
                         .map(|p| p.target_pref.len())
                         .sum();
                     if ui
@@ -1007,7 +1051,10 @@ impl StatsPanel {
                             .count();
                         let eff = th as f64 + lpp * count as f64;
                         ui.horizontal(|ui| {
-                            ui.label(format!("地形高:{}  区块粒子:{}  等效液面:{:.1}", th, count, eff));
+                            ui.label(format!(
+                                "地形高:{}  区块粒子:{}  等效液面:{:.1}",
+                                th, count, eff
+                            ));
                         });
                     }
                 }

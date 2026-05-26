@@ -53,21 +53,21 @@ pub fn is_forward(from: i8, to: i8) -> bool {
 /// Input 节点 id → 所属感官区 block 编号
 pub fn sensory_block_for_input(input_id: usize) -> i8 {
     match input_id {
-        0..=7 => -1,    // 左眼
-        8..=15 => 1,    // 右眼
-        16 => -3,       // 自身能量（内省）
-        17 => 3,        // 地形感知（外感觉）
-        18 | 19 => -2,  // 光语言两通道（不拆分，靠同源跨连传到 +2）
-        _ => -1,        // fallback（不再回退到 0）
+        0..=7 => -1,   // 左眼
+        8..=15 => 1,   // 右眼
+        16 => -3,      // 自身能量（内省）
+        17 => 3,       // 地形感知（外感觉）
+        18 | 19 => -2, // 光语言两通道（不拆分，靠同源跨连传到 +2）
+        _ => -1,       // fallback（不再回退到 0）
     }
 }
 
 /// Output 节点索引(0~7) → 所属运动区 block 编号
 pub fn motor_block_for_output(output_idx: usize) -> i8 {
     match output_idx {
-        0 | 1 | 2 | 6 => 25,  // 转向/速度/嘴/痕迹 → 运动
-        3 | 4 | 5 => -25,     // 繁殖意愿/阈值/子代比例 → 繁殖
-        7 => -26,             // 光嘴 → 跟光耳 -2 同侧，闭合语言通路
+        0 | 1 | 2 | 6 => 25, // 转向/速度/嘴/痕迹 → 运动
+        3 | 4 | 5 => -25,    // 繁殖意愿/阈值/子代比例 → 繁殖
+        7 => -26,            // 光嘴 → 跟光耳 -2 同侧，闭合语言通路
         _ => 25,
     }
 }
@@ -76,5 +76,9 @@ pub fn motor_block_for_output(output_idx: usize) -> i8 {
 /// 范围：|b| ∈ [1, 24]，含感官 abs（让 V1/A1 既接收 input 又能内部处理），不含 0
 pub fn random_association_block(side: i8, rng: &mut impl Rng) -> i8 {
     let abs = rng.gen_range(1..=24u8) as i8;
-    if side >= 0 { abs } else { -abs }
+    if side >= 0 {
+        abs
+    } else {
+        -abs
+    }
 }

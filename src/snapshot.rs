@@ -6,8 +6,7 @@ use rustc_hash::FxHashMap;
 use crate::config::Config;
 use crate::neural::{Genome, SpikingNetwork};
 use crate::world::{
-    Creature, DeathAgeStats, DominantCandidate, EnergyParticle, SpatialGrid, TrailPoint,
-    World,
+    Creature, DeathAgeStats, DominantCandidate, EnergyParticle, SpatialGrid, TrailPoint, World,
 };
 
 const SNAPSHOT_PATH: &str = "snapshot.json";
@@ -217,8 +216,8 @@ impl WorldSnapshot {
         };
 
         // 写入 meta.json
-        let meta_json = serde_json::to_string_pretty(&meta)
-            .map_err(|e| format!("序列化meta失败: {}", e))?;
+        let meta_json =
+            serde_json::to_string_pretty(&meta).map_err(|e| format!("序列化meta失败: {}", e))?;
         std::fs::write(format!("{}/meta.json", dir), meta_json)
             .map_err(|e| format!("写入meta.json失败: {}", e))?;
 
@@ -261,7 +260,8 @@ pub fn list_archives() -> Vec<ArchiveSummary> {
             if path.is_dir() && path.join("meta.json").exists() {
                 if let Ok(meta_json) = std::fs::read_to_string(path.join("meta.json")) {
                     if let Ok(meta) = serde_json::from_str::<ArchiveMeta>(&meta_json) {
-                        let name = path.file_name()
+                        let name = path
+                            .file_name()
                             .and_then(|n| n.to_str())
                             .unwrap_or("")
                             .to_string();

@@ -218,10 +218,16 @@ impl CellWorldApp {
                 let _ = writeln!(file, "# Cell World sim update 分段耗时日志\n");
                 let _ = writeln!(file, "字段说明：");
                 let _ = writeln!(file, "  - perceive_ms: 阶段1 感知并行（rayon par_iter）");
-                let _ = writeln!(file, "  - snn_ms: 阶段2b 同步等 GPU/CPU 神经批（含同步往返开销）");
+                let _ = writeln!(
+                    file,
+                    "  - snn_ms: 阶段2b 同步等 GPU/CPU 神经批（含同步往返开销）"
+                );
                 let _ = writeln!(file, "  - actions_ms: 阶段2c 串行动作执行 + reward 计算");
                 let _ = writeln!(file, "  - total_ms: world.update 总耗时");
-                let _ = writeln!(file, "  - 判读: snn 占大头=GPU同步瓶颈; actions 占大头=CPU串行瓶颈\n");
+                let _ = writeln!(
+                    file,
+                    "  - 判读: snn 占大头=GPU同步瓶颈; actions 占大头=CPU串行瓶颈\n"
+                );
                 let _ = writeln!(file, "| 时间 | 生物 | perceive_ms | snn_ms | actions_ms | total_ms | snn占比 | actions占比 |");
                 let _ = writeln!(file, "|------|------|-------------|--------|------------|----------|---------|-------------|");
             }
@@ -664,7 +670,7 @@ impl CellWorldApp {
                     "孤独生命(vision_range内无活邻居)年龄加速倍率；1.0=无惩罚，越大越压聚集",
                     &mut c.solitude_penalty,
                     0.1,
-                    1.0..=50.0,
+                    1.0..=1_000_000.0,
                 );
                 changed |= ui
                     .checkbox(&mut c.reward_energy_enabled, "能量奖励")

@@ -262,11 +262,7 @@ fn neural_thread_main(handle: BridgeServerHandle, backend: &str) {
 
         // 回传结果
         let outputs = executor.read_outputs();
-        if handle
-            .resp_tx
-            .send(TickResponse { outputs })
-            .is_err()
-        {
+        if handle.resp_tx.send(TickResponse { outputs }).is_err() {
             break;
         }
     }

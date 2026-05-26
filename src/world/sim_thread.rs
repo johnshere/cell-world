@@ -165,7 +165,7 @@ fn sim_loop(
 
     // 导出初始快照
     export_snapshot(
-        &world,
+        &mut world,
         &config,
         &snapshot,
         speed,
@@ -286,7 +286,7 @@ fn sim_loop(
 
         // 导出快照
         export_snapshot(
-            &world,
+            &mut world,
             &config,
             &snapshot,
             speed,
@@ -308,7 +308,7 @@ fn sim_loop(
 
 /// 从 World 导出 SimSnapshot 并写入共享内存
 fn export_snapshot(
-    world: &World,
+    world: &mut World,
     config: &Config,
     snapshot: &Arc<RwLock<SimSnapshot>>,
     target_speed: f64,

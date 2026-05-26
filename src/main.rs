@@ -52,5 +52,9 @@ fn parse_mcp_args() -> Option<u16> {
         i += 1;
     }
 
-    if mcp { Some(port) } else { None }
+    if mcp {
+        Some(port)
+    } else {
+        None
+    }
 }

@@ -63,13 +63,7 @@ impl EnergyParticle {
     }
 
     /// 创建熔岩流粒子
-    pub fn new_lava(
-        id: u64,
-        x: f64,
-        y: f64,
-        energy: f64,
-        chain_depth: u8,
-    ) -> Self {
+    pub fn new_lava(id: u64, x: f64, y: f64, energy: f64, chain_depth: u8) -> Self {
         Self {
             id,
             x,

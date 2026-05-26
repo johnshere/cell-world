@@ -9,8 +9,8 @@
 //! 设计原则：地形生成后**永久冻结**。后续 config.volcano_radius 调整不影响已生成区块；
 //! 若需重新生成需通过 TerrainMap::generate 显式调用。
 
-use serde::{Deserialize, Serialize};
 use rustc_hash::FxHashMap;
+use serde::{Deserialize, Serialize};
 
 /// 渲染网格 / 地形 chunk 的世界坐标边长（像素）。
 /// 渲染层、地形层及任何按格对齐的逻辑都应引用此常量。

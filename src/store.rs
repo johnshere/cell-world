@@ -122,7 +122,9 @@ impl Store {
             match (ta, tb) {
                 (Some(_), None) => std::cmp::Ordering::Less,
                 (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => b.recorded_at.unwrap_or(f64::NEG_INFINITY)
+                (None, None) => b
+                    .recorded_at
+                    .unwrap_or(f64::NEG_INFINITY)
                     .partial_cmp(&a.recorded_at.unwrap_or(f64::NEG_INFINITY))
                     .unwrap_or(std::cmp::Ordering::Equal),
                 (Some(a_time), Some(b_time)) => b_time.cmp(&a_time),
@@ -154,7 +156,9 @@ impl Store {
                 match (ta, tb) {
                     (Some(_), None) => std::cmp::Ordering::Less,
                     (None, Some(_)) => std::cmp::Ordering::Greater,
-                    (None, None) => b.recorded_at.unwrap_or(f64::NEG_INFINITY)
+                    (None, None) => b
+                        .recorded_at
+                        .unwrap_or(f64::NEG_INFINITY)
                         .partial_cmp(&a.recorded_at.unwrap_or(f64::NEG_INFINITY))
                         .unwrap_or(std::cmp::Ordering::Equal),
                     (Some(a_time), Some(b_time)) => b_time.cmp(&a_time),

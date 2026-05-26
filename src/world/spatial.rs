@@ -145,7 +145,13 @@ mod tests {
         g.insert(3, 9.99, 0.0); // 圆边缘内
         g.insert(4, 10.01, 0.0); // 圆边缘外
 
-        let positions = [(0.0, 0.0), (12.0, 12.0), (5.0, 5.0), (9.99, 0.0), (10.01, 0.0)];
+        let positions = [
+            (0.0, 0.0),
+            (12.0, 12.0),
+            (5.0, 5.0),
+            (9.99, 0.0),
+            (10.01, 0.0),
+        ];
         let mut buf = Vec::new();
         g.query_circle_into(0.0, 0.0, 10.0, &mut buf, |i| positions[i]);
         buf.sort();

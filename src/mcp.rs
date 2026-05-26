@@ -77,7 +77,11 @@ async fn sse_handler(
         .collect();
 
     let (tx, rx) = broadcast::channel::<String>(64);
-    state.sessions.write().unwrap().insert(session_id.clone(), tx);
+    state
+        .sessions
+        .write()
+        .unwrap()
+        .insert(session_id.clone(), tx);
 
     let sessions = state.sessions.clone();
     let sid = session_id.clone();
@@ -88,16 +92,20 @@ async fn sse_handler(
         (rx, false, sid, sessions, endpoint),
         |(mut rx, sent_endpoint, sid, sessions, endpoint)| async move {
             if !sent_endpoint {
-                let event = Event::default()
-                    .event("endpoint")
-                    .data(endpoint.clone());
-                Some((Ok::<_, Infallible>(event), (rx, true, sid, sessions, endpoint)))
+                let event = Event::default().event("endpoint").data(endpoint.clone());
+                Some((
+                    Ok::<_, Infallible>(event),
+                    (rx, true, sid, sessions, endpoint),
+                ))
             } else {
                 loop {
                     match rx.recv().await {
                         Ok(msg) => {
                             let event = Event::default().event("message").data(msg);
-                            return Some((Ok::<_, Infallible>(event), (rx, true, sid, sessions, endpoint)));
+                            return Some((
+                                Ok::<_, Infallible>(event),
+                                (rx, true, sid, sessions, endpoint),
+                            ));
                         }
                         Err(broadcast::error::RecvError::Closed) => return None,
                         Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -116,9 +124,7 @@ async fn sse_handler(
         session_id,
     };
 
-    Sse::new(cleanup).keep_alive(
-        KeepAlive::new().interval(std::time::Duration::from_secs(15)),
-    )
+    Sse::new(cleanup).keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)))
 }
 
 // ─── Messages Handler (POST) ─────────────────────────────────────────
@@ -395,13 +401,18 @@ fn call_get_stats(state: &Arc<AppState>) -> Value {
     let snap = state.snapshot.read().unwrap();
     let ws = &snap.world_stats;
 
-    let top_clans: Vec<Value> = ws.top_clans.iter().take(5).map(|(hash, count)| {
-        json!({
-            "hash": hash,
-            "count": count,
-            "ratio": *count as f64 / ws.creature_count.max(1) as f64
+    let top_clans: Vec<Value> = ws
+        .top_clans
+        .iter()
+        .take(5)
+        .map(|(hash, count)| {
+            json!({
+                "hash": hash,
+                "count": count,
+                "ratio": *count as f64 / ws.creature_count.max(1) as f64
+            })
         })
-    }).collect();
+        .collect();
 
     let dominant = ws.dominant_candidate.as_ref().map(|d| {
         json!({
@@ -472,9 +483,14 @@ fn call_get_performance(state: &Arc<AppState>) -> Value {
 
 fn call_get_creatures(state: &Arc<AppState>, args: &Value) -> Value {
     let snap = state.snapshot.read().unwrap();
-    let alive_only = args.get("alive_only").and_then(|v| v.as_bool()).unwrap_or(true);
+    let alive_only = args
+        .get("alive_only")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
 
-    let mut filtered: Vec<&Creature> = snap.creatures.iter()
+    let mut filtered: Vec<&Creature> = snap
+        .creatures
+        .iter()
         .filter(|c| !alive_only || c.alive)
         .filter(|c| filter_creature(c, args))
         .collect();
@@ -488,16 +504,24 @@ fn call_get_creatures(state: &Arc<AppState>, args: &Value) -> Value {
 
     // 排序
     let sort_by = args.get("sort_by").and_then(|v| v.as_str()).unwrap_or("id");
-    let desc = args.get("sort_desc").and_then(|v| v.as_bool()).unwrap_or(false);
+    let desc = args
+        .get("sort_desc")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     sort_creatures(&mut filtered, sort_by, desc);
 
     // 分页
     let (page, page_size) = parse_page(args);
     let total = filtered.len();
-    let pages = if page_size == 0 { 1 } else { (total as u32 + page_size - 1) / page_size };
+    let pages = if page_size == 0 {
+        1
+    } else {
+        (total as u32 + page_size - 1) / page_size
+    };
 
     let start = page as usize * page_size as usize;
-    let items: Vec<Value> = filtered.iter()
+    let items: Vec<Value> = filtered
+        .iter()
         .skip(start)
         .take(page_size as usize)
         .map(|c| creature_summary(c))
@@ -527,42 +551,55 @@ fn call_get_creature(state: &Arc<AppState>, args: &Value) -> Value {
 
     // 计算 vision_range 内活邻居数（用于孤独判定）
     let vision_range = state.config.read().unwrap().vision_range;
-    let neighbor_count_in_vision = snap.creatures.iter()
+    let neighbor_count_in_vision = snap
+        .creatures
+        .iter()
         .filter(|c| c.id != creature.id && c.alive)
         .filter(|c| dist_sq(c.x, c.y, creature.x, creature.y) <= vision_range * vision_range)
         .count();
     let is_lonely = neighbor_count_in_vision == 0;
 
     let genome = &creature.genome;
-    let nodes: Vec<Value> = genome.nodes.iter().map(|n| {
-        json!({
-            "id": n.id,
-            "neuron_type": format!("{:?}", n.node_type),
-            "block_id": format!("{:?}", n.node_type),
-            "layer": format!("{:?}", n.layer),
-            "decay": n.decay,
-            "threshold": n.threshold,
-            "refractory_period": n.refractory_period
+    let nodes: Vec<Value> = genome
+        .nodes
+        .iter()
+        .map(|n| {
+            json!({
+                "id": n.id,
+                "neuron_type": format!("{:?}", n.node_type),
+                "block_id": format!("{:?}", n.node_type),
+                "layer": format!("{:?}", n.layer),
+                "decay": n.decay,
+                "threshold": n.threshold,
+                "refractory_period": n.refractory_period
+            })
         })
-    }).collect();
+        .collect();
 
-    let connections: Vec<Value> = genome.connections.iter().map(|c| {
-        json!({
-            "in_node": c.in_node,
-            "out_node": c.out_node,
-            "weight": c.weight,
-            "enabled": c.enabled
+    let connections: Vec<Value> = genome
+        .connections
+        .iter()
+        .map(|c| {
+            json!({
+                "in_node": c.in_node,
+                "out_node": c.out_node,
+                "weight": c.weight,
+                "enabled": c.enabled
+            })
         })
-    }).collect();
+        .collect();
 
     let conn_projs: Value = {
         let mut map = serde_json::Map::new();
         for (blk, probs) in &genome.conn_probs {
-            map.insert(blk.to_string(), json!({
-                "proc": probs.proc,
-                "out": probs.out,
-                "target_pref": probs.target_pref
-            }));
+            map.insert(
+                blk.to_string(),
+                json!({
+                    "proc": probs.proc,
+                    "out": probs.out,
+                    "target_pref": probs.target_pref
+                }),
+            );
         }
         Value::Object(map)
     };
@@ -625,7 +662,9 @@ fn call_get_neighbors(state: &Arc<AppState>, args: &Value) -> Value {
     let radius = args.get("radius").and_then(|v| v.as_f64()).unwrap_or(100.0);
     let (page, page_size) = parse_page(args);
 
-    let mut neighbors: Vec<&Creature> = snap.creatures.iter()
+    let mut neighbors: Vec<&Creature> = snap
+        .creatures
+        .iter()
         .filter(|c| c.id != id && c.alive)
         .filter(|c| dist_sq(c.x, c.y, target.x, target.y) <= radius * radius)
         .collect();
@@ -637,11 +676,18 @@ fn call_get_neighbors(state: &Arc<AppState>, args: &Value) -> Value {
     });
 
     let total = neighbors.len();
-    let pages = if page_size == 0 { 1 } else { (total as u32 + page_size - 1) / page_size };
+    let pages = if page_size == 0 {
+        1
+    } else {
+        (total as u32 + page_size - 1) / page_size
+    };
     let start = page as usize * page_size as usize;
-    let items: Vec<Value> = neighbors.iter()
-        .skip(start).take(page_size as usize)
-        .map(|c| creature_summary(c)).collect();
+    let items: Vec<Value> = neighbors
+        .iter()
+        .skip(start)
+        .take(page_size as usize)
+        .map(|c| creature_summary(c))
+        .collect();
 
     let data = json!({
         "creature_id": id, "radius": radius,
@@ -656,14 +702,27 @@ fn call_get_neighbors(state: &Arc<AppState>, args: &Value) -> Value {
 
 fn call_get_energy_particles(state: &Arc<AppState>, args: &Value) -> Value {
     let snap = state.snapshot.read().unwrap();
-    let lava_only = args.get("lava_only").and_then(|v| v.as_bool()).unwrap_or(false);
+    let lava_only = args
+        .get("lava_only")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
-    let mut filtered: Vec<&EnergyParticle> = snap.energy_particles.iter()
+    let mut filtered: Vec<&EnergyParticle> = snap
+        .energy_particles
+        .iter()
         .filter(|p| p.alive)
         .filter(|p| !lava_only || p.lava)
         .filter(|p| {
-            if let Some(v) = args.get("min_energy").and_then(|v| v.as_f64()) { if p.energy < v { return false; } }
-            if let Some(v) = args.get("max_energy").and_then(|v| v.as_f64()) { if p.energy > v { return false; } }
+            if let Some(v) = args.get("min_energy").and_then(|v| v.as_f64()) {
+                if p.energy < v {
+                    return false;
+                }
+            }
+            if let Some(v) = args.get("max_energy").and_then(|v| v.as_f64()) {
+                if p.energy > v {
+                    return false;
+                }
+            }
             true
         })
         .collect();
@@ -671,17 +730,25 @@ fn call_get_energy_particles(state: &Arc<AppState>, args: &Value) -> Value {
     apply_spatial_filter(&mut filtered, args, |p| (p.x, p.y));
     let (page, page_size) = parse_page(args);
     let total = filtered.len();
-    let pages = if page_size == 0 { 1 } else { (total as u32 + page_size - 1) / page_size };
+    let pages = if page_size == 0 {
+        1
+    } else {
+        (total as u32 + page_size - 1) / page_size
+    };
     let start = page as usize * page_size as usize;
 
-    let items: Vec<Value> = filtered.iter()
-        .skip(start).take(page_size as usize)
-        .map(|p| json!({
-            "id": p.id, "x": p.x, "y": p.y,
-            "energy": p.energy, "initial_energy": p.initial_energy,
-            "lava": p.lava, "chain_depth": p.chain_depth,
-            "source": "Volcano"
-        }))
+    let items: Vec<Value> = filtered
+        .iter()
+        .skip(start)
+        .take(page_size as usize)
+        .map(|p| {
+            json!({
+                "id": p.id, "x": p.x, "y": p.y,
+                "energy": p.energy, "initial_energy": p.initial_energy,
+                "lava": p.lava, "chain_depth": p.chain_depth,
+                "source": "Volcano"
+            })
+        })
         .collect();
 
     json!({
@@ -695,12 +762,26 @@ fn call_get_energy_particles(state: &Arc<AppState>, args: &Value) -> Value {
 fn call_get_trails(state: &Arc<AppState>, args: &Value) -> Value {
     let snap = state.snapshot.read().unwrap();
 
-    let mut filtered: Vec<&TrailPoint> = snap.trail_points.iter()
+    let mut filtered: Vec<&TrailPoint> = snap
+        .trail_points
+        .iter()
         .filter(|t| t.alive)
         .filter(|t| {
-            if let Some(v) = args.get("clan_hash").and_then(|v| v.as_u64()) { if t.clan_hash != v { return false; } }
-            if let Some(v) = args.get("min_energy").and_then(|v| v.as_f64()) { if t.energy < v { return false; } }
-            if let Some(v) = args.get("max_energy").and_then(|v| v.as_f64()) { if t.energy > v { return false; } }
+            if let Some(v) = args.get("clan_hash").and_then(|v| v.as_u64()) {
+                if t.clan_hash != v {
+                    return false;
+                }
+            }
+            if let Some(v) = args.get("min_energy").and_then(|v| v.as_f64()) {
+                if t.energy < v {
+                    return false;
+                }
+            }
+            if let Some(v) = args.get("max_energy").and_then(|v| v.as_f64()) {
+                if t.energy > v {
+                    return false;
+                }
+            }
             true
         })
         .collect();
@@ -708,16 +789,24 @@ fn call_get_trails(state: &Arc<AppState>, args: &Value) -> Value {
     apply_spatial_filter(&mut filtered, args, |t| (t.x, t.y));
     let (page, page_size) = parse_page(args);
     let total = filtered.len();
-    let pages = if page_size == 0 { 1 } else { (total as u32 + page_size - 1) / page_size };
+    let pages = if page_size == 0 {
+        1
+    } else {
+        (total as u32 + page_size - 1) / page_size
+    };
     let start = page as usize * page_size as usize;
 
-    let items: Vec<Value> = filtered.iter()
-        .skip(start).take(page_size as usize)
-        .map(|t| json!({
-            "x": t.x, "y": t.y,
-            "energy": t.energy, "initial_energy": t.initial_energy,
-            "clan_hash": t.clan_hash, "creator_id": t.creator_id, "age": t.age
-        }))
+    let items: Vec<Value> = filtered
+        .iter()
+        .skip(start)
+        .take(page_size as usize)
+        .map(|t| {
+            json!({
+                "x": t.x, "y": t.y,
+                "energy": t.energy, "initial_energy": t.initial_energy,
+                "clan_hash": t.clan_hash, "creator_id": t.creator_id, "age": t.age
+            })
+        })
         .collect();
 
     json!({
@@ -734,15 +823,20 @@ fn call_get_clans(state: &Arc<AppState>) -> Value {
 
     let mut clan_data: HashMap<u64, (usize, f64, f64, usize, u64)> = HashMap::new();
     for c in &snap.creatures {
-        if !c.alive { continue; }
-        let entry = clan_data.entry(c.clan_hash).or_insert((0, 0.0, 0.0, 0, c.id));
+        if !c.alive {
+            continue;
+        }
+        let entry = clan_data
+            .entry(c.clan_hash)
+            .or_insert((0, 0.0, 0.0, 0, c.id));
         entry.0 += 1;
         entry.1 += c.energy;
         entry.2 += c.age;
         entry.3 = entry.3.max(c.generation);
     }
 
-    let mut clans: Vec<Value> = clan_data.into_iter()
+    let mut clans: Vec<Value> = clan_data
+        .into_iter()
         .map(|(hash, (count, total_e, total_a, max_gen, rep_id))| {
             json!({
                 "hash": hash,
@@ -753,9 +847,15 @@ fn call_get_clans(state: &Arc<AppState>) -> Value {
                 "max_generation": max_gen,
                 "representative_id": rep_id
             })
-        }).collect();
+        })
+        .collect();
 
-    clans.sort_by(|a, b| b["count"].as_u64().unwrap_or(0).cmp(&a["count"].as_u64().unwrap_or(0)));
+    clans.sort_by(|a, b| {
+        b["count"]
+            .as_u64()
+            .unwrap_or(0)
+            .cmp(&a["count"].as_u64().unwrap_or(0))
+    });
 
     json!({
         "content": [{ "type": "text", "text": serde_json::to_string(&clans).unwrap_or_default() }]
@@ -773,23 +873,33 @@ fn call_get_dominant_species(state: &Arc<AppState>) -> Value {
         }
     };
 
-    let nodes: Vec<Value> = candidate.genome.nodes.iter().map(|n| {
-        json!({
-            "id": n.id,
-            "neuron_type": format!("{:?}", n.node_type),
-            "layer": format!("{:?}", n.layer),
-            "decay": n.decay,
-            "threshold": n.threshold,
-            "refractory_period": n.refractory_period
+    let nodes: Vec<Value> = candidate
+        .genome
+        .nodes
+        .iter()
+        .map(|n| {
+            json!({
+                "id": n.id,
+                "neuron_type": format!("{:?}", n.node_type),
+                "layer": format!("{:?}", n.layer),
+                "decay": n.decay,
+                "threshold": n.threshold,
+                "refractory_period": n.refractory_period
+            })
         })
-    }).collect();
+        .collect();
 
-    let connections: Vec<Value> = candidate.genome.connections.iter().map(|c| {
-        json!({
-            "in_node": c.in_node, "out_node": c.out_node,
-            "weight": c.weight, "enabled": c.enabled
+    let connections: Vec<Value> = candidate
+        .genome
+        .connections
+        .iter()
+        .map(|c| {
+            json!({
+                "in_node": c.in_node, "out_node": c.out_node,
+                "weight": c.weight, "enabled": c.enabled
+            })
         })
-    }).collect();
+        .collect();
 
     let data = json!({
         "genome_hash": candidate.genome.hash(),
@@ -828,8 +938,10 @@ fn call_get_terrain_info(state: &Arc<AppState>, args: &Value) -> Value {
     let t = &snap.terrain;
 
     // 有点坐标：查单点
-    if let (Some(x), Some(y)) = (args.get("x").and_then(|v| v.as_f64()),
-                                  args.get("y").and_then(|v| v.as_f64())) {
+    if let (Some(x), Some(y)) = (
+        args.get("x").and_then(|v| v.as_f64()),
+        args.get("y").and_then(|v| v.as_f64()),
+    ) {
         let height = t.height_at(x, y);
         let data = json!({
             "is_generated": t.is_generated(),
@@ -865,7 +977,11 @@ fn call_set_paused(state: &Arc<AppState>, args: &Value) -> Value {
     let was_paused = state.mcp_paused.load(Ordering::Relaxed);
     state.mcp_paused.store(paused, Ordering::Relaxed);
 
-    let cmd = if paused { SimCommand::Pause } else { SimCommand::Resume };
+    let cmd = if paused {
+        SimCommand::Pause
+    } else {
+        SimCommand::Resume
+    };
     let _ = state.cmd_tx.send(cmd);
 
     let time = state.snapshot.read().unwrap().time;
@@ -938,7 +1054,9 @@ fn call_validate_brain_topology(state: &Arc<AppState>, args: &Value) -> Value {
 
     for creature in snap.creatures.iter() {
         if let Some(id) = id_filter {
-            if creature.id != id { continue; }
+            if creature.id != id {
+                continue;
+            }
         }
         total_checked += 1;
         let v = check_topology_violations(creature);
@@ -1001,7 +1119,10 @@ fn handle_resources_read(params: &Value, state: &Arc<AppState>) -> Value {
         }
     };
 
-    let text = result["content"][0]["text"].as_str().unwrap_or("").to_string();
+    let text = result["content"][0]["text"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
 
     json!({
         "contents": [{
@@ -1035,19 +1156,25 @@ fn filter_creature(c: &Creature, args: &Value) -> bool {
         ($key:ident, $field:expr, $cmp:ident) => {
             if let Some(v) = args.get(stringify!($key)).and_then(|v| v.as_f64()) {
                 let f = $field as f64;
-                if !(f.$cmp(&v)) { return false; }
+                if !(f.$cmp(&v)) {
+                    return false;
+                }
             }
         };
         (int $key:ident, $field:expr, $cmp:ident) => {
             if let Some(v) = args.get(stringify!($key)).and_then(|v| v.as_u64()) {
                 let f = $field as u64;
-                if !(f.$cmp(&v)) { return false; }
+                if !(f.$cmp(&v)) {
+                    return false;
+                }
             }
         };
     }
 
     if let Some(v) = args.get("clan_hash").and_then(|v| v.as_u64()) {
-        if c.clan_hash != v { return false; }
+        if c.clan_hash != v {
+            return false;
+        }
     }
 
     check!(min_energy, c.energy, ge);
@@ -1088,7 +1215,11 @@ fn parse_rect(args: &Value) -> Option<(f64, f64, f64, f64)> {
 
 fn parse_page(args: &Value) -> (u32, u32) {
     let page = args.get("page").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    let size = args.get("page_size").and_then(|v| v.as_u64()).unwrap_or(20).min(200) as u32;
+    let size = args
+        .get("page_size")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(20)
+        .min(200) as u32;
     (page, size)
 }
 
@@ -1122,7 +1253,11 @@ fn sort_creatures(list: &mut Vec<&Creature>, field: &str, desc: bool) {
             _ => Some(a.id.cmp(&b.id)),
         }
         .unwrap_or(std::cmp::Ordering::Equal);
-        if desc { ord.reverse() } else { ord }
+        if desc {
+            ord.reverse()
+        } else {
+            ord
+        }
     });
 }
 

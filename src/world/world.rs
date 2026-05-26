@@ -69,11 +69,16 @@ pub struct World {
     // 死亡年龄统计
     death_ages: Vec<f64>,
     death_age_sum: f64,
+    death_stats_dirty: bool,
     pub death_age_stats: DeathAgeStats,
+    total_deaths: usize,
 
     // 种族缓存（祖先追溯模型）
     clan_cache: RefCell<Option<ClanCache>>,
     clan_cache_time: RefCell<f64>,
+    /// 族长追溯缓存：creature_id → leader_id，避免每帧 O(generation) 链式查找
+    /// 在 ensure_clan_cache 重建时清空
+    clan_leader_cache: RefCell<FxHashMap<u64, u64>>,
 
     // 空间查询缓冲区（已迁移到 rayon 线程局部变量，保留字段兼容快照）
     #[allow(dead_code)]
@@ -145,9 +150,12 @@ impl World {
             reward_counts: [0; 3],
             death_ages: Vec::new(),
             death_age_sum: 0.0,
+            death_stats_dirty: false,
             death_age_stats: DeathAgeStats::default(),
+            total_deaths: 0,
             clan_cache: RefCell::new(None),
             clan_cache_time: RefCell::new(-999.0),
+            clan_leader_cache: RefCell::new(FxHashMap::default()),
             creature_query_buf: Vec::new(),
             energy_query_buf: Vec::new(),
             trail_query_buf: Vec::new(),
@@ -347,9 +355,12 @@ impl World {
             reward_counts: [0; 3],
             death_ages,
             death_age_sum,
+            death_stats_dirty: true,
+            total_deaths: death_age_stats.total_deaths,
             death_age_stats,
             clan_cache: RefCell::new(None),
             clan_cache_time: RefCell::new(-999.0),
+            clan_leader_cache: RefCell::new(FxHashMap::default()),
             creature_query_buf: Vec::new(),
             energy_query_buf: Vec::new(),
             trail_query_buf: Vec::new(),
@@ -459,7 +470,13 @@ impl World {
     }
 
     /// 从模板生成生物
-    pub fn spawn_from_template(&mut self, config: &Config, genome: &Genome, initial_energy: f64, generation: usize) {
+    pub fn spawn_from_template(
+        &mut self,
+        config: &Config,
+        genome: &Genome,
+        initial_energy: f64,
+        generation: usize,
+    ) {
         let mut rng = rand::thread_rng();
         let angle = rng.gen_range(0.0..std::f64::consts::TAU);
         let r = rng.gen_range(0.0_f64..1.0).sqrt() * config.volcano_radius * 0.8;
@@ -469,7 +486,16 @@ impl World {
 
         let creature_id = self.next_creature_id;
         self.next_creature_id += 1;
-        let creature = Creature::new(creature_id, x, y, energy, genome.clone(), generation, None, None);
+        let creature = Creature::new(
+            creature_id,
+            x,
+            y,
+            energy,
+            genome.clone(),
+            generation,
+            None,
+            None,
+        );
         self.notify_born(&creature);
         self.creatures.push(creature);
     }
@@ -1255,9 +1281,7 @@ impl World {
                 let nearby_trails = self.trail_grid.query_circle(cx, cy, suppress_radius, |i| {
                     (trail_points[i].x, trail_points[i].y)
                 });
-                let has_nearby_trail = nearby_trails
-                    .iter()
-                    .any(|&ti| self.trail_points[ti].alive);
+                let has_nearby_trail = nearby_trails.iter().any(|&ti| self.trail_points[ti].alive);
                 if !has_nearby_trail {
                     // 基础痕迹：移动消耗（已扣除，无额外开销）
                     let mut trail_energy = move_cost;
@@ -1420,8 +1444,7 @@ impl World {
             let actual_damage = damage.min(self.creatures[other_idx].energy);
 
             // 咬合效率 = 1 - 基因相似度：相似度越高获取越少，渐变而非悬崖
-            let similarity =
-                self.get_similarity(&self.creatures[idx], &self.creatures[other_idx]);
+            let similarity = self.get_similarity(&self.creatures[idx], &self.creatures[other_idx]);
             let efficiency = 1.0 - similarity;
             self.creatures[other_idx].energy -= actual_damage;
             self.creatures[idx].energy += actual_damage * config.bite_transfer_rate * efficiency;
@@ -1438,9 +1461,11 @@ impl World {
         let cx = self.creatures[creature_idx].x;
         let cy = self.creatures[creature_idx].y;
         let creatures = &self.creatures;
-        let nearby = self.creature_grid.query_circle(cx, cy, config.vision_range, |i| {
-            (creatures[i].x, creatures[i].y)
-        });
+        let nearby = self
+            .creature_grid
+            .query_circle(cx, cy, config.vision_range, |i| {
+                (creatures[i].x, creatures[i].y)
+            });
         let mut total = 0.0;
         for &other_idx in &nearby {
             if other_idx == creature_idx || !self.creatures[other_idx].alive {
@@ -1556,12 +1581,11 @@ impl World {
     fn find_mate(&self, idx: usize, config: &Config) -> Option<(Genome, f64)> {
         let creature = &self.creatures[idx];
         let creatures = &self.creatures;
-        let nearby = self.creature_grid.query_circle(
-            creature.x,
-            creature.y,
-            config.contact_range,
-            |i| (creatures[i].x, creatures[i].y),
-        );
+        let nearby =
+            self.creature_grid
+                .query_circle(creature.x, creature.y, config.contact_range, |i| {
+                    (creatures[i].x, creatures[i].y)
+                });
 
         for &other_idx in &nearby {
             if other_idx == idx || !self.creatures[other_idx].alive {
@@ -1576,9 +1600,7 @@ impl World {
             }
             // 交配阈值 = 聚类阈值 × 0.9，允许跨 clan 基因流
             // 聚类严格（0.95）、交配宽松（0.855），打破演化停滞
-            if self.get_similarity(creature, other)
-                >= config.species_similarity_threshold * 0.9
-            {
+            if self.get_similarity(creature, other) >= config.species_similarity_threshold * 0.9 {
                 return Some((other.genome.clone(), other.heading));
             }
         }
@@ -1614,9 +1636,11 @@ impl World {
         }
 
         let creatures = &self.creatures;
-        let nearby = self.creature_grid.query_circle(cx, cy, config.vision_range, |i| {
-            (creatures[i].x, creatures[i].y)
-        });
+        let nearby = self
+            .creature_grid
+            .query_circle(cx, cy, config.vision_range, |i| {
+                (creatures[i].x, creatures[i].y)
+            });
         let mut sum_vx = heading.cos();
         let mut sum_vy = heading.sin();
         let mut total = 1usize; // 含自己
@@ -1723,27 +1747,22 @@ impl World {
             if !creature.alive {
                 had_deaths = true;
                 self.notify_died(creature.id);
+                self.total_deaths += 1;
                 let age = creature.age;
-                let pos = self.death_ages.partition_point(|&x| x < age);
-                self.death_ages.insert(pos, age);
+                self.death_ages.push(age);
                 self.death_age_sum += age;
+                const MAX_DEATH_AGES: usize = 10_000;
+                if self.death_ages.len() > MAX_DEATH_AGES {
+                    let excess = self.death_ages.len() - MAX_DEATH_AGES;
+                    let removed: f64 = self.death_ages.drain(0..excess).sum();
+                    self.death_age_sum -= removed;
+                }
+                self.death_stats_dirty = true;
             }
         }
 
         if had_deaths {
-            let n = self.death_ages.len();
-            let median = if n % 2 == 0 {
-                (self.death_ages[n / 2 - 1] + self.death_ages[n / 2]) / 2.0
-            } else {
-                self.death_ages[n / 2]
-            };
-            self.death_age_stats = DeathAgeStats {
-                count: n,
-                avg: self.death_age_sum / n as f64,
-                median,
-                min: self.death_ages[0],
-                max: self.death_ages[n - 1],
-            };
+            self.death_stats_dirty = true;
         }
 
         // 死亡生物的痕迹点也消失（HashSet 单次遍历，避免 O(D×T) 嵌套循环）
@@ -1798,9 +1817,56 @@ impl World {
         }
     }
 
+    /// 惰性重算死亡年龄统计（cleanup 仅标记脏位，stats() 首次读时触发）
+    /// 使用 quickselect 求中位数 O(n)，避免全排序 O(n log n)
+    fn recompute_death_stats(&mut self) {
+        self.death_stats_dirty = false;
+        let n = self.death_ages.len();
+        if n == 0 {
+            return;
+        }
+        // 单次遍历求 min/max（O(n)，death_ages 上限 10000 条）
+        let mut min = f64::MAX;
+        let mut max = 0.0_f64;
+        for &v in &self.death_ages {
+            if v < min {
+                min = v;
+            }
+            if v > max {
+                max = v;
+            }
+        }
+        // 使用 select_nth_unstable_by 求中位数（O(n) 平均）
+        let median = if n % 2 == 0 {
+            let (_, m1, rest) = self
+                .death_ages
+                .select_nth_unstable_by(n / 2 - 1, |a, b| a.partial_cmp(b).unwrap());
+            let (_, m2, _) = rest.select_nth_unstable_by(0, |a, b| a.partial_cmp(b).unwrap());
+            (*m1 + *m2) / 2.0
+        } else {
+            let (_, m, _) = self
+                .death_ages
+                .select_nth_unstable_by(n / 2, |a, b| a.partial_cmp(b).unwrap());
+            *m
+        };
+        self.death_age_stats = DeathAgeStats {
+            count: n,
+            avg: self.death_age_sum / n as f64,
+            median,
+            min,
+            max,
+            total_deaths: self.total_deaths,
+        };
+    }
+
     // ========== 统计 ==========
 
-    pub fn stats(&self, species_threshold: f64, config: &Config) -> WorldStats {
+    pub fn stats(&mut self, species_threshold: f64, config: &Config) -> WorldStats {
+        // 死亡统计惰性更新：放在最前面，避免与后续 alive_creatures 借用冲突
+        if self.death_stats_dirty {
+            self.recompute_death_stats();
+        }
+
         let alive_creatures: Vec<_> = self.creatures.iter().filter(|c| c.alive).collect();
         let max_generation = alive_creatures
             .iter()
@@ -2056,6 +2122,9 @@ impl World {
             };
         }
 
+        // 清空族长追溯缓存（生物死亡/出生后缓存变脏，重建时重置）
+        self.clan_leader_cache.borrow_mut().clear();
+
         // 建立 creature ID -> 局部索引映射
         let mut id_to_local: FxHashMap<u64, usize> =
             FxHashMap::with_capacity_and_hasher(n, Default::default());
@@ -2085,6 +2154,11 @@ impl World {
     ) -> u64 {
         let creature = alive_creatures[local_idx];
 
+        // 查缓存（id → leader_id），避免重复走祖先链
+        if let Some(&leader_id) = self.clan_leader_cache.borrow().get(&creature.id) {
+            return leader_id;
+        }
+
         // 向上走，找最老的活祖先
         let mut ancestor_local = local_idx;
         let mut depth = 0;
@@ -2105,7 +2179,7 @@ impl World {
             }
         }
 
-        if ancestor_local == local_idx {
+        let leader_id = if ancestor_local == local_idx {
             // 自己就是最老活祖先 → 自立门户
             creature.id
         } else {
@@ -2116,7 +2190,12 @@ impl World {
             } else {
                 creature.id // 变异过大 → 自立门户
             }
-        }
+        };
+
+        self.clan_leader_cache
+            .borrow_mut()
+            .insert(creature.id, leader_id);
+        leader_id
     }
 }
 
@@ -2555,6 +2634,7 @@ pub struct DeathAgeStats {
     pub median: f64,
     pub max: f64,
     pub min: f64,
+    pub total_deaths: usize,
 }
 
 #[derive(Clone, Default)]
