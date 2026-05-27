@@ -966,19 +966,29 @@ impl CellWorldApp {
             let t_max = history.last().unwrap().0;
             let t_range = (t_max - t_min).max(1.0);
 
-            // 左Y轴：能量范围
+            // 左Y轴：能量范围（仅 total + creature 能量，排除 theoretical_energy 避免尺
+            // 度主导）
             let (e_min, e_max) = history.iter().fold(
                 (f64::MAX, f64::MIN),
-                |(lo, hi), &(_, total, creature, particle_init, _)| {
-                    (
-                        lo.min(total).min(creature).min(particle_init),
-                        hi.max(total).max(creature).max(particle_init),
-                    )
+                |(lo, hi), &(_, total, creature, _, _)| {
+                    (lo.min(total).min(creature), hi.max(total).max(creature))
                 },
             );
-            let e_min = e_min * 0.9;
-            let e_max = e_max * 1.1;
+            let e_margin = (e_max - e_min).max(1.0) * 0.05;
+            let e_min = e_min - e_margin;
+            let e_max = e_max + e_margin;
             let e_range = (e_max - e_min).max(1.0);
+
+            // 右Y轴：theoretical_energy 独立范围
+            let (ti_min, ti_max) = history
+                .iter()
+                .fold((f64::MAX, f64::MIN), |(lo, hi), &(_, _, _, ti, _)| {
+                    (lo.min(ti), hi.max(ti))
+                });
+            let ti_margin = (ti_max - ti_min).max(1.0) * 0.05;
+            let ti_min = ti_min - ti_margin;
+            let ti_max = ti_max + ti_margin;
+            let ti_range = (ti_max - ti_min).max(1.0);
 
             // 右Y轴：生物数量范围
             let (c_min, c_max) = history.iter().fold(
@@ -993,24 +1003,24 @@ impl CellWorldApp {
             let color_particle_init = egui::Color32::from_rgb(255, 180, 80);
             let color_count = egui::Color32::from_rgb(255, 100, 200);
 
-            // 绘制粒子理论总能量曲线
+            // 绘制粒子理论总能量曲线（右Y轴，独立尺度）
             let particle_init_pts: Vec<egui::Pos2> = history
                 .iter()
                 .map(|&(t, _, _, pi, _)| {
                     let x = rect.left() + ((t - t_min) / t_range * chart_width_f32 as f64) as f32;
                     let y =
-                        rect.bottom() - ((pi - e_min) / e_range * chart_height_f32 as f64) as f32;
+                        rect.bottom() - ((pi - ti_min) / ti_range * chart_height_f32 as f64) as f32;
                     egui::pos2(x, y.clamp(rect.top(), rect.bottom()))
                 })
                 .collect();
             for pair in particle_init_pts.windows(2) {
                 painter.line_segment(
                     [pair[0], pair[1]],
-                    egui::Stroke::new(1.5, color_particle_init),
+                    egui::Stroke::new(1.0, color_particle_init),
                 );
             }
             if let Some(&last) = particle_init_pts.last() {
-                painter.circle_filled(last, 3.0, color_particle_init);
+                painter.circle_filled(last, 2.5, color_particle_init);
             }
 
             // 绘制总能量曲线
@@ -1066,36 +1076,42 @@ impl CellWorldApp {
             }
 
             // 左Y轴标注
-            let label_color = egui::Color32::from_rgb(255, 255, 255);
             painter.text(
                 egui::pos2(rect.left() + 2.0, rect.top() + 2.0),
                 egui::Align2::LEFT_TOP,
-                format!("{:.0}", e_max),
+                format!("E:{:.0}", e_max),
                 egui::FontId::proportional(10.0),
-                label_color,
+                color_total,
             );
             painter.text(
                 egui::pos2(rect.left() + 2.0, rect.bottom() - 2.0),
                 egui::Align2::LEFT_BOTTOM,
-                format!("{:.0}", e_min),
+                format!("E:{:.0}", e_min),
                 egui::FontId::proportional(10.0),
-                label_color,
+                color_total,
             );
 
-            // 右Y轴标注
+            // 右Y轴标注：上方为理论投放能量（橙色），下方为生物数量（粉色）
             painter.text(
                 egui::pos2(rect.right() - 2.0, rect.top() + 2.0),
                 egui::Align2::RIGHT_TOP,
-                format!("{}", c_max),
+                format!("T:{:.0}", ti_max),
                 egui::FontId::proportional(10.0),
-                label_color,
+                color_particle_init,
+            );
+            painter.text(
+                egui::pos2(rect.right() - 2.0, rect.top() + 14.0),
+                egui::Align2::RIGHT_TOP,
+                format!("C:{}", c_max),
+                egui::FontId::proportional(10.0),
+                color_count,
             );
             painter.text(
                 egui::pos2(rect.right() - 2.0, rect.bottom() - 2.0),
                 egui::Align2::RIGHT_BOTTOM,
-                format!("{}", c_min),
+                format!("C:{}", c_min),
                 egui::FontId::proportional(10.0),
-                label_color,
+                color_count,
             );
         } else {
             painter.text(
@@ -1419,6 +1435,8 @@ impl eframe::App for CellWorldApp {
                             *self.shared_config.write().unwrap() = self.config.clone();
                             self.sim.send(SimCommand::RestoreSnapshot(ws));
                             self.render_ctx_cache = None;
+                            self.panel.energy_history.clear();
+                            self.panel.last_energy_time = -1.0;
                             self.show_archive_list = false;
                             self.archive_list.clear();
                             self.archive_selected = None;

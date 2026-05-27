@@ -2,6 +2,7 @@ use egui::Ui;
 use std::time::Instant;
 
 use super::canvas::species_to_color;
+use super::force_graph;
 use super::Selection;
 use crate::config::Config;
 use crate::snapshot::list_archives;
@@ -38,12 +39,20 @@ pub struct StatsPanel {
     pub templates_open: bool,
     /// 能量历史 (world_time, total_energy, creature_energy, theoretical_energy, creature_count)
     pub energy_history: Vec<(f64, f64, f64, f64, usize)>,
+    /// 上次记录能量历史时的 world_time（防止暂停时填充相同时间戳）
+    pub last_energy_time: f64,
     /// 重置确认弹框
     reset_confirm_open: bool,
     /// 查看目标偏好的来源（模板名或生物ID）
     target_pref_view: Option<TargetPrefSource>,
     /// 目标偏好窗口对应的基因组（克隆一份，避免生命周期问题）
     target_pref_genome: Option<crate::neural::Genome>,
+    /// 力导图弹框：查看来源
+    force_graph_view: Option<TargetPrefSource>,
+    /// 力导图弹框：对应的基因组
+    force_graph_genome: Option<crate::neural::Genome>,
+    /// 力导图状态（跨帧维护力模拟）
+    pub force_graph_state: super::force_graph::ForceGraphState,
 }
 
 /// 目标偏好查看窗口的数据来源
@@ -116,9 +125,13 @@ impl StatsPanel {
             energy_settings_open: false,
             templates_open: false,
             energy_history: Vec::new(),
+            last_energy_time: -1.0,
             reset_confirm_open: false,
             target_pref_view: None,
             target_pref_genome: None,
+            force_graph_view: None,
+            force_graph_genome: None,
+            force_graph_state: super::force_graph::ForceGraphState::new(),
         }
     }
 
@@ -184,14 +197,17 @@ impl StatsPanel {
             } else {
                 self.cached_stats.avg_maturation_time = 0.0;
             }
-            // 记录能量历史（总能量 + 生命能量 + 理论投放能量 + 生物数量）
-            self.energy_history.push((
-                stats.time,
-                stats.total_energy,
-                stats.creature_energy,
-                stats.theoretical_energy,
-                stats.creature_count,
-            ));
+            // 记录能量历史（跳过暂停时相同时间戳，防止 X 轴塌缩）
+            if (stats.time - self.last_energy_time).abs() > 0.001 {
+                self.last_energy_time = stats.time;
+                self.energy_history.push((
+                    stats.time,
+                    stats.total_energy,
+                    stats.creature_energy,
+                    stats.theoretical_energy,
+                    stats.creature_count,
+                ));
+            }
             // 按时间裁剪：只保留最近30分钟
             let cutoff = stats.time - 1800.0;
             if let Some(pos) = self
@@ -289,6 +305,9 @@ impl StatsPanel {
         // 目标偏好弹框（独立显示，不依赖任何 tab）
         self.render_target_pref_window(ui);
 
+        // 力导图弹框（独立显示）
+        self.render_force_graph_window(ui);
+
         ui.separator();
 
         // FPS、缩放和时间
@@ -369,7 +388,7 @@ impl StatsPanel {
         };
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
-                "行为: 移动:{}│吸收:{}│咬:{}│繁殖(无性{}/有性{})",
+                "行为: 移动:{}│吸收:{}│咬:{}│近1万次繁殖(无性{}/有性{})",
                 format_count(acts[0]),
                 format_count(acts[1]),
                 format_count(acts[2]),
@@ -544,6 +563,16 @@ impl StatsPanel {
                                             Some(TargetPrefSource::Template(template.name.clone()));
                                         self.target_pref_genome = Some(template.genome.clone());
                                     }
+                                    if ui
+                                        .small_button("🔗")
+                                        .on_hover_text("查看脑拓扑力导图")
+                                        .clicked()
+                                    {
+                                        self.force_graph_view =
+                                            Some(TargetPrefSource::Template(template.name.clone()));
+                                        self.force_graph_genome = Some(template.genome.clone());
+                                        self.force_graph_state.init_from_genome(&template.genome);
+                                    }
                                 },
                             );
                         });
@@ -560,7 +589,8 @@ impl StatsPanel {
                         if let Some(age) = template.avg_age {
                             info_parts.push(format!("均龄:{:.0}s", age));
                         }
-                        if let Some(gen) = template.max_generation {
+                        let gen = template.generation.or(template.max_generation);
+                        if let Some(gen) = gen {
                             info_parts.push(format!("代:{}", gen));
                         }
                         if let Some(avg_e) = template.avg_energy {
@@ -782,6 +812,33 @@ impl StatsPanel {
             });
     }
 
+    /// 渲染力导图弹框（分组力导图可视化）
+    pub fn render_force_graph_window(&mut self, ui: &mut Ui) {
+        if self.force_graph_view.is_none() {
+            return;
+        }
+        let source = self.force_graph_view.clone();
+        let genome = self.force_graph_genome.clone();
+        let label = match &source {
+            Some(TargetPrefSource::Template(name)) => format!("模板: {}", name),
+            Some(TargetPrefSource::Creature(id)) => format!("生物ID: {}", id),
+            None => String::new(),
+        };
+
+        let genome = match genome.as_ref() {
+            Some(g) => g,
+            None => return,
+        };
+
+        let close =
+            force_graph::render_force_graph_window(ui, genome, &mut self.force_graph_state, &label);
+
+        if close {
+            self.force_graph_view = None;
+            self.force_graph_genome = None;
+        }
+    }
+
     pub fn render_selection(
         &mut self,
         ui: &mut Ui,
@@ -996,6 +1053,15 @@ impl StatsPanel {
                     {
                         self.target_pref_view = Some(TargetPrefSource::Creature(creature.id));
                         self.target_pref_genome = Some(creature.genome.clone());
+                    }
+                    if ui
+                        .button("脑拓扑力导图 🔗")
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                    {
+                        self.force_graph_view = Some(TargetPrefSource::Creature(creature.id));
+                        self.force_graph_genome = Some(creature.genome.clone());
+                        self.force_graph_state.init_from_genome(&creature.genome);
                     }
                 }
             }

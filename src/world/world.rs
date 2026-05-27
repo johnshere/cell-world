@@ -2,6 +2,7 @@ use rand::Rng;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::time::Instant;
 
 use super::{
@@ -22,6 +23,9 @@ pub struct PerfStats {
     pub creature_count: usize,
     pub avg_compute_ns: f64,
 }
+
+/// 繁殖滑动窗口大小
+const MAX_RECENT_REPRO: usize = 10_000;
 
 /// 世界
 pub struct World {
@@ -62,6 +66,9 @@ pub struct World {
 
     // 行为触发次数统计（5事件：移动/吸收/咬/无性繁殖/有性繁殖）
     pub action_counts: [usize; 5],
+
+    // 近1万次繁殖滑动窗口（true=有性, false=无性），用于面板统计
+    recent_repro_events: VecDeque<bool>,
 
     // 奖励触发次数统计（3通道：能量/痕迹/集体）
     pub reward_counts: [usize; 3],
@@ -147,6 +154,7 @@ impl World {
             similarity_cache: RefCell::new(FxHashMap::default()),
             cache_cleanup_timer: 0.0,
             action_counts: [0; 5],
+            recent_repro_events: VecDeque::new(),
             reward_counts: [0; 3],
             death_ages: Vec::new(),
             death_age_sum: 0.0,
@@ -352,6 +360,7 @@ impl World {
             similarity_cache: RefCell::new(FxHashMap::default()),
             cache_cleanup_timer: 0.0,
             action_counts,
+            recent_repro_events: VecDeque::new(),
             reward_counts: [0; 3],
             death_ages,
             death_age_sum,
@@ -1559,6 +1568,11 @@ impl World {
         } else {
             self.action_counts[3] += 1;
         }
+        // 滑动窗口：追踪最近1万次繁殖
+        self.recent_repro_events.push_back(is_sexual);
+        if self.recent_repro_events.len() > MAX_RECENT_REPRO {
+            self.recent_repro_events.pop_front();
+        }
 
         // 种族颜色继承：
         //   有性繁殖 → 与源头基因比较相似度，<阈值则建新族（基因创新登记新族）
@@ -1941,7 +1955,15 @@ impl World {
             theoretical_energy,
             max_generation,
             avg_energy,
-            action_counts: self.action_counts,
+            action_counts: {
+                let mut acts = self.action_counts;
+                // 繁殖统计替换为近1万次滑动窗口计数
+                let sexual = self.recent_repro_events.iter().filter(|&&s| s).count();
+                let asexual = self.recent_repro_events.len() - sexual;
+                acts[3] = asexual;
+                acts[4] = sexual;
+                acts
+            },
             reward_counts: self.reward_counts,
             death_age_stats: self.death_age_stats.clone(),
             clan_count,
@@ -2644,6 +2666,7 @@ pub struct DeathAgeStats {
     pub median: f64,
     pub max: f64,
     pub min: f64,
+    #[serde(default)]
     pub total_deaths: usize,
 }
 

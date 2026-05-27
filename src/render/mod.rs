@@ -1,4 +1,5 @@
 mod canvas;
+pub mod force_graph;
 mod panel;
 
 pub use canvas::{RenderContext, VisibleWorldBounds, WorldCanvas};
