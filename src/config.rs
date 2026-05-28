@@ -271,6 +271,14 @@ pub struct Config {
     /// 默认 3.0，设为 1.0 则两个机制都退化为无惩罚
     #[serde(default = "default_solitude_penalty")]
     pub solitude_penalty: f64,
+
+    // === 力导图 ===
+    /// 力导图水平锚定强度（左右半球横向拉扯力）
+    #[serde(default = "default_force_graph_h_anchor")]
+    pub force_graph_h_anchor: f64,
+    /// 力导图垂直锚定强度（感官/运动纵向拉扯力）
+    #[serde(default = "default_force_graph_v_anchor")]
+    pub force_graph_v_anchor: f64,
 }
 
 fn default_true() -> bool {
@@ -282,6 +290,14 @@ fn default_terrain_slope_cost() -> f64 {
 }
 
 fn default_solitude_penalty() -> f64 {
+    3.0
+}
+
+fn default_force_graph_h_anchor() -> f64 {
+    3.0
+}
+
+fn default_force_graph_v_anchor() -> f64 {
     3.0
 }
 

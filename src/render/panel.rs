@@ -239,7 +239,7 @@ impl StatsPanel {
         speed: &mut f64,
         paused: &mut bool,
         render_enabled: &mut bool,
-        _config: &mut Config,
+        config: &mut Config,
         _store: &Store,
     ) -> PanelAction {
         let mut action = PanelAction::default();
@@ -306,7 +306,7 @@ impl StatsPanel {
         self.render_target_pref_window(ui);
 
         // 力导图弹框（独立显示）
-        self.render_force_graph_window(ui);
+        self.render_force_graph_window(ui, config);
 
         ui.separator();
 
@@ -571,7 +571,6 @@ impl StatsPanel {
                                         self.force_graph_view =
                                             Some(TargetPrefSource::Template(template.name.clone()));
                                         self.force_graph_genome = Some(template.genome.clone());
-                                        self.force_graph_state.init_from_genome(&template.genome);
                                     }
                                 },
                             );
@@ -813,10 +812,15 @@ impl StatsPanel {
     }
 
     /// 渲染力导图弹框（分组力导图可视化）
-    pub fn render_force_graph_window(&mut self, ui: &mut Ui) {
+    /// `config` 用于读取力导图锚定强度配置（每次打开弹框时读取）
+    pub fn render_force_graph_window(&mut self, ui: &mut Ui, config: &Config) {
         if self.force_graph_view.is_none() {
             return;
         }
+        // 每次打开弹框从 config 读取锚定强度（允许运行时调节）
+        self.force_graph_state.h_anchor = config.force_graph_h_anchor;
+        self.force_graph_state.v_anchor = config.force_graph_v_anchor;
+
         let source = self.force_graph_view.clone();
         let genome = self.force_graph_genome.clone();
         let label = match &source {
@@ -1061,7 +1065,6 @@ impl StatsPanel {
                     {
                         self.force_graph_view = Some(TargetPrefSource::Creature(creature.id));
                         self.force_graph_genome = Some(creature.genome.clone());
-                        self.force_graph_state.init_from_genome(&creature.genome);
                     }
                 }
             }

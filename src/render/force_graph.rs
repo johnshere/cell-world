@@ -11,6 +11,7 @@
 use crate::neural::genome::{Genome, NodeGene, NodeType};
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 
 // ---------------------------------------------------------------------------
 // 力模拟状态（跨帧持久化）
@@ -30,6 +31,14 @@ pub struct ForceGraphState {
     scale: f32,
     /// 用户平移偏移
     offset: egui::Vec2,
+    /// 每个 block 节点的锚定目标位置（半球横向 + I/O 纵向）
+    anchor_targets: FxHashMap<usize, egui::Vec2>,
+    /// 水平锚定强度（左右拉扯），打开弹框时从 config 更新
+    pub h_anchor: f64,
+    /// 垂直锚定强度（上下拉扯），打开弹框时从 config 更新
+    pub v_anchor: f64,
+    /// 当前 genome 指纹（检测变更后自动重置布局）
+    genome_fingerprint: u64,
 }
 
 impl ForceGraphState {
@@ -41,48 +50,170 @@ impl ForceGraphState {
             settled: false,
             scale: 1.0,
             offset: egui::Vec2::ZERO,
+            anchor_targets: FxHashMap::default(),
+            h_anchor: 3.0,
+            v_anchor: 3.0,
+            genome_fingerprint: 0,
         }
     }
 
-    /// 从基因组初始化位置：按 block 分组呈弧形排布，同 block 节点聚在一起
-    pub fn init_from_genome(&mut self, genome: &Genome) {
+    /// 从基因组初始化：跳过 Input/Output 桩节点，
+    /// 根据左/右半球分配横向锚定、BFS 深度分配纵向锚定。
+    /// `canvas_size` 用于自适应布局跨度。
+    pub fn init_from_genome(&mut self, genome: &Genome, canvas_size: egui::Vec2) {
         self.positions.clear();
         self.velocities.clear();
+        self.anchor_targets.clear();
         self.temperature = 1.0;
         self.settled = false;
 
-        // 按 block 分组
-        let mut block_nodes: HashMap<i8, Vec<usize>> = HashMap::new();
-        for node in &genome.nodes {
-            let blk = blk_key(node);
-            block_nodes.entry(blk).or_default().push(node.id);
-        }
+        let radius = canvas_size.x.min(canvas_size.y).max(100.0) * 0.42;
+        let h_base = radius * 0.5; // 水平半球跨度
+        let v_base = radius * 0.65; // 垂直 I/O 跨度
 
-        let mut sorted_blocks: Vec<i8> = block_nodes.keys().copied().collect();
-        sorted_blocks.sort();
+        // 快速节点类型查询
+        let node_types: FxHashMap<usize, &NodeType> =
+            genome.nodes.iter().map(|n| (n.id, &n.node_type)).collect();
 
-        let radius = 180.0_f32;
-        for (i, blk) in sorted_blocks.iter().enumerate() {
-            let nodes = &block_nodes[blk];
-            let angle_base = (i as f32 / sorted_blocks.len() as f32) * std::f32::consts::TAU
-                - std::f32::consts::FRAC_PI_2;
-
-            let n = nodes.len();
-            // block 内节点在圆心角 ±10° 范围内散布
-            let spread = 0.17_f32;
-            for (j, &node_id) in nodes.iter().enumerate() {
-                let offset_angle = if n > 1 {
-                    (j as f32 / (n - 1) as f32 - 0.5) * spread
-                } else {
-                    0.0
-                };
-                let angle = angle_base + offset_angle;
-                let r = radius * (1.0 + (j as f32 % 3.0) * 0.08);
-                let pos = egui::pos2(angle.cos() * r, angle.sin() * r);
-                self.positions.insert(node_id, pos);
-                self.velocities.insert(node_id, egui::Vec2::ZERO);
+        // 构建出入邻接表（仅 block ↔ block，跳过桩节点）
+        let mut outgoing: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
+        let mut incoming: FxHashMap<usize, Vec<usize>> = FxHashMap::default();
+        for conn in &genome.connections {
+            if !conn.enabled {
+                continue;
+            }
+            let in_is_block = matches!(node_types.get(&conn.in_node), Some(NodeType::Block(_)));
+            let out_is_block = matches!(node_types.get(&conn.out_node), Some(NodeType::Block(_)));
+            if in_is_block && out_is_block {
+                outgoing
+                    .entry(conn.in_node)
+                    .or_default()
+                    .push(conn.out_node);
+                incoming
+                    .entry(conn.out_node)
+                    .or_default()
+                    .push(conn.in_node);
             }
         }
+
+        // BFS 前向：每个 block 节点离 Input 的最短距离
+        let mut in_dist: FxHashMap<usize, u32> = FxHashMap::default();
+        {
+            let mut q: VecDeque<usize> = VecDeque::new();
+            // 从直连 Input 的 block 节点开始
+            for conn in &genome.connections {
+                if !conn.enabled {
+                    continue;
+                }
+                if matches!(node_types.get(&conn.in_node), Some(NodeType::Input)) {
+                    if !in_dist.contains_key(&conn.out_node) {
+                        in_dist.insert(conn.out_node, 1);
+                        q.push_back(conn.out_node);
+                    }
+                }
+            }
+            while let Some(cur) = q.pop_front() {
+                let d = in_dist[&cur];
+                if let Some(outs) = outgoing.get(&cur) {
+                    for &next in outs {
+                        if !in_dist.contains_key(&next) {
+                            in_dist.insert(next, d + 1);
+                            q.push_back(next);
+                        }
+                    }
+                }
+            }
+        }
+
+        // BFS 反向：每个 block 节点离 Output 的最短距离
+        let mut out_dist: FxHashMap<usize, u32> = FxHashMap::default();
+        {
+            let mut q: VecDeque<usize> = VecDeque::new();
+            for conn in &genome.connections {
+                if !conn.enabled {
+                    continue;
+                }
+                if matches!(node_types.get(&conn.out_node), Some(NodeType::Output)) {
+                    if !out_dist.contains_key(&conn.in_node) {
+                        out_dist.insert(conn.in_node, 1);
+                        q.push_back(conn.in_node);
+                    }
+                }
+            }
+            while let Some(cur) = q.pop_front() {
+                let d = out_dist[&cur];
+                if let Some(ins) = incoming.get(&cur) {
+                    for &prev in ins {
+                        if !out_dist.contains_key(&prev) {
+                            out_dist.insert(prev, d + 1);
+                            q.push_back(prev);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 统计各 block 节点数（用于块内初始散布）
+        let mut block_counts: HashMap<i8, usize> = HashMap::new();
+        for node in &genome.nodes {
+            if let NodeType::Block(b) = node.node_type {
+                *block_counts.entry(b).or_insert(0) += 1;
+            }
+        }
+
+        // 仅处理 block 节点，跳过 Input/Output 桩
+        let mut block_idx: HashMap<i8, usize> = HashMap::new();
+        for node in &genome.nodes {
+            let b = match node.node_type {
+                NodeType::Block(b) => b,
+                _ => continue,
+            };
+            let id = node.id;
+            let idx = block_idx.entry(b).or_insert(0);
+            let blk_count = block_counts.get(&b).copied().unwrap_or(1);
+
+            // 横向：左半脑左拉，右半脑右拉，|blk| 深度越大略拉开
+            let sign = if b < 0 {
+                -1.0
+            } else if b > 0 {
+                1.0
+            } else {
+                0.0
+            };
+            let depth = b.unsigned_abs() as f32 / 26.0;
+            let tx = sign * h_base * (1.0 + depth * 0.3);
+
+            // 纵向：BFS 深度比率 → 离 Input 近则向上，离 Output 近则向下
+            // 使用 sqrt 非线性映射将中等深度的节点推向两端
+            let ty = match (in_dist.get(&id), out_dist.get(&id)) {
+                (Some(d_in), Some(d_out)) => {
+                    let bias = (*d_in as f32 - *d_out as f32) / (*d_in + *d_out) as f32;
+                    let pushed = bias.signum() * bias.abs().powf(0.45);
+                    pushed * v_base
+                }
+                (Some(_), None) => -v_base, // 仅可达 Input → 顶部
+                (None, Some(_)) => v_base,  // 仅可达 Output → 底部
+                (None, None) => 0.0,        // 孤立节点 → 居中
+            };
+
+            self.anchor_targets.insert(id, egui::vec2(tx, ty));
+
+            // 初始位置：锚定点附近小范围散布
+            let spread = 20.0_f32;
+            let angle = *idx as f32 * 2.399;
+            let r = if blk_count > 1 {
+                spread * (1.0 + (*idx % 3) as f32 * 0.2)
+            } else {
+                0.0
+            };
+            let pos = egui::pos2(tx + angle.cos() * r, ty + angle.sin() * r);
+            self.positions.insert(id, pos);
+            self.velocities.insert(id, egui::Vec2::ZERO);
+
+            *idx += 1;
+        }
+
+        self.genome_fingerprint = genome_fingerprint(genome);
     }
 
     /// 力模拟迭代（每帧在渲染前调用）
@@ -91,7 +222,7 @@ impl ForceGraphState {
             return;
         }
 
-        let k = 120.0_f64; // 理想边长
+        let k = 120.0_f64;
 
         for _ in 0..iterations {
             let node_ids: Vec<usize> = self.positions.keys().copied().collect();
@@ -157,7 +288,18 @@ impl ForceGraphState {
                 }
             }
 
-            // 4. 应用速度 + 阻尼
+            // 4. 全局锚定力：每个 block 节点拉向其半球×层深锚定目标
+            for (&id, &target) in &self.anchor_targets {
+                if let Some(pos) = self.positions.get(&id) {
+                    if let Some(vel) = self.velocities.get_mut(&id) {
+                        let delta = target - pos.to_vec2();
+                        vel.x += delta.x * self.h_anchor as f32 * self.temperature as f32;
+                        vel.y += delta.y * self.v_anchor as f32 * self.temperature as f32;
+                    }
+                }
+            }
+
+            // 5. 应用速度 + 阻尼
             let max_vel = k as f32 * 0.4;
             for id in &node_ids {
                 let vel = *self.velocities.get(id).unwrap();
@@ -177,12 +319,6 @@ impl ForceGraphState {
             self.settled = true;
         }
     }
-
-    /// 重置力模拟（重新收敛）
-    pub fn reset(&mut self) {
-        self.temperature = 1.0;
-        self.settled = false;
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -198,22 +334,44 @@ pub fn render_force_graph_window(
     state: &mut ForceGraphState,
     label: &str,
 ) -> bool {
-    let fixed_w = 620.0;
+    let fixed_w = 1860.0;
     let mut close = false;
 
     egui::Window::new(format!("脑拓扑: {}", label))
         .resizable(true)
-        .title_bar(true)
+        .title_bar(false)
         .default_width(fixed_w)
-        .min_width(400.0)
-        .min_height(320.0)
+        .min_width(1200.0)
+        .min_height(1100.0)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ui.ctx(), |ui| {
-            close = ui.button("× 关闭").clicked();
+            // 自定义标题栏（参考偏好弹框）
+            ui.horizontal(|ui| {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(format!("脑拓扑: {}", label)).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("x")
+                                    .size(12.0)
+                                    .color(egui::Color32::from_gray(200)),
+                            )
+                            .frame(false)
+                            .fill(egui::Color32::from_gray(50))
+                            .small(),
+                        )
+                        .clicked()
+                    {
+                        close = true;
+                    }
+                });
+            });
+            ui.separator();
 
             let available = ui.available_size();
-            let canvas_w = available.x.max(200.0);
-            let canvas_h = available.y.max(200.0);
+            let canvas_w = available.x.max(400.0);
+            let canvas_h = available.y.max(400.0);
 
             let (response, painter) = ui.allocate_painter(
                 egui::vec2(canvas_w, canvas_h),
@@ -227,14 +385,14 @@ pub fn render_force_graph_window(
             // 处理交互
             handle_interaction(state, &response, rect);
 
-            // 首次初始化或 rect 尺寸变化时重新布局
-            if !state.settled && state.positions.is_empty() {
-                state.init_from_genome(genome);
+            // 首次初始化或 genome 变更时重新布局
+            if state.positions.is_empty() || state.genome_fingerprint != genome_fingerprint(genome)
+            {
+                state.init_from_genome(genome, rect.size());
             }
 
             // 力模拟步进
             if !state.settled {
-                // 动态迭代次数：节点多则减少
                 let iters = (10.0_f64 * (36.0 / state.positions.len().max(1) as f64).sqrt())
                     .clamp(2.0, 12.0) as usize;
                 state.step(genome, iters);
@@ -274,7 +432,6 @@ fn handle_interaction(state: &mut ForceGraphState, response: &egui::Response, re
     // 左键拖拽平移
     if response.dragged_by(egui::PointerButton::Primary) {
         state.offset += response.drag_delta();
-        state.reset();
     }
 
     // 滚轮缩放（围绕鼠标位置）
@@ -283,7 +440,7 @@ fn handle_interaction(state: &mut ForceGraphState, response: &egui::Response, re
             let scroll = response.ctx.input(|i| i.smooth_scroll_delta.y);
             if scroll.abs() > 0.1 {
                 let old_scale = state.scale;
-                let new_scale = (old_scale * (1.0 + scroll * 0.15)).clamp(0.15, 4.0);
+                let new_scale = (old_scale * (1.0 + scroll * 0.02)).clamp(0.15, 4.0);
                 // 坐标变换: screen = cc + offset + world * scale
                 // 保持鼠标下的世界点不动:
                 //   world = (hover - cc - offset) / old_scale
@@ -292,7 +449,6 @@ fn handle_interaction(state: &mut ForceGraphState, response: &egui::Response, re
                 let ratio = new_scale / old_scale;
                 state.offset = to_cc - (to_cc - state.offset) * ratio;
                 state.scale = new_scale;
-                state.reset();
             }
         }
     }
@@ -535,21 +691,22 @@ fn block_color(blk: i8) -> egui::Color32 {
 
 fn block_label(blk: i8, count: usize) -> String {
     let role = match blk {
-        -100 => "感官输入",
-        100 => "运动输出",
-        0 => "体感",
+        // 已知功能区块
+        -1 => "左眼",
+        1 => "右眼",
+        -2 => "左光耳",
+        2 => "右光耳",
+        -3 => "内省",
+        3 => "外感",
+        -25 => "繁殖",
+        25 => "运动",
+        -26 => "发光",
+        // 通用分类
         b if b.abs() <= 3 => {
             if b < 0 {
                 "左感官"
             } else {
                 "右感官"
-            }
-        }
-        b if b.abs() <= 7 => {
-            if b < 0 {
-                "左初级"
-            } else {
-                "右初级"
             }
         }
         b if b.abs() <= 24 => {
@@ -567,7 +724,7 @@ fn block_label(blk: i8, count: usize) -> String {
             }
         }
     };
-    format!("B{} {}  {}n", blk, role, count)
+    format!("B{} {} {}n", blk, role, count)
 }
 
 fn node_tooltip(node: &NodeGene) -> String {
@@ -580,4 +737,17 @@ fn node_tooltip(node: &NodeGene) -> String {
         "id:{} {}\ndecay:{:.3} thr:{:.2} ref:{}",
         node.id, type_str, node.decay, node.threshold, node.refractory_period
     )
+}
+
+/// 计算 genome 简易指纹（检测变更后自动重新布局）
+fn genome_fingerprint(genome: &Genome) -> u64 {
+    let mut fp: u64 = 0;
+    for node in &genome.nodes {
+        fp = fp.wrapping_mul(31).wrapping_add(node.id as u64);
+    }
+    for conn in &genome.connections {
+        fp = fp.wrapping_mul(31).wrapping_add(conn.in_node as u64);
+        fp = fp.wrapping_mul(31).wrapping_add(conn.out_node as u64);
+    }
+    fp
 }
