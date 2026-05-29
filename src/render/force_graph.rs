@@ -67,6 +67,9 @@ const ALPHA_DECAY: f64 = 0.97;
 const ALPHA_REHEAT: f64 = 0.3;
 const NODE_PICK_RADIUS: f32 = 12.0;
 const HASH_JITTER_RANGE: f32 = 60.0;
+/// IO 节点与 Block 节点最高/最低点之间的安全距离（世界坐标）
+/// 每帧动态计算：input.y = block_min_y - LOCKED_OFFSET，output.y = block_max_y + LOCKED_OFFSET
+const LOCKED_OFFSET: f32 = 60.0;
 
 // ---------------------------------------------------------------------------
 // 力模拟状态（跨帧持久化）
@@ -322,6 +325,31 @@ impl ForceGraphState {
                 };
                 *self.positions.get_mut(id).unwrap() += vel * self.alpha as f32;
                 *self.velocities.get_mut(id).unwrap() = vel * 0.55;
+            }
+        }
+
+        // —— 动态 IO 行：贴当前 Block 节点 min_y / max_y 的外侧 LOCKED_OFFSET ——
+        // 每帧末算一次，让 Input/Output 永远在所有 Block 节点之上/之下 D 距离
+        let mut block_min_y = f32::MAX;
+        let mut block_max_y = f32::MIN;
+        for (id, pos) in &self.positions {
+            if !self.locked_nodes.contains(id) {
+                block_min_y = block_min_y.min(pos.y);
+                block_max_y = block_max_y.max(pos.y);
+            }
+        }
+        if block_min_y < f32::MAX {
+            let in_y = block_min_y - LOCKED_OFFSET;
+            let out_y = block_max_y + LOCKED_OFFSET;
+            for node in &genome.nodes {
+                let target_y = match node.node_type {
+                    NodeType::Input => in_y,
+                    NodeType::Output => out_y,
+                    _ => continue,
+                };
+                if let Some(pos) = self.positions.get_mut(&node.id) {
+                    pos.y = target_y;
+                }
             }
         }
 
