@@ -81,7 +81,7 @@ pub struct CachedStats {
     pub reward_counts: [usize; 3],
     pub death_age_stats: DeathAgeStats,
     pub clan_count: usize,
-    pub top_clans: Vec<(u64, usize)>,
+    pub top_clans: Vec<(u64, usize, f64)>,
     pub dominant_candidate: Option<DominantCandidate>,
     pub avg_compute_ns: f64,
     pub avg_nodes: f64,
@@ -625,10 +625,15 @@ impl StatsPanel {
         if !self.cached_stats.top_clans.is_empty() {
             ui.separator();
             ui.label("当前种族");
-            for (i, &(clan_hash, count)) in self.cached_stats.top_clans.iter().enumerate() {
+            for (i, &(clan_hash, count, avg_nodes)) in
+                self.cached_stats.top_clans.iter().enumerate()
+            {
                 ui.horizontal(|ui| {
                     let color = species_to_color(clan_hash);
-                    ui.colored_label(color, format!("{}. {} 个体", i + 1, count));
+                    ui.colored_label(
+                        color,
+                        format!("{}. {} 个体 · 节点 {:.1}", i + 1, count, avg_nodes),
+                    );
                     if ui
                         .small_button("💾")
                         .on_hover_text("保存该族代表基因")

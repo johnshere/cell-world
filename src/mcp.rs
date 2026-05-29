@@ -405,11 +405,12 @@ fn call_get_stats(state: &Arc<AppState>) -> Value {
         .top_clans
         .iter()
         .take(5)
-        .map(|(hash, count)| {
+        .map(|(hash, count, avg_nodes)| {
             json!({
                 "hash": hash,
                 "count": count,
-                "ratio": *count as f64 / ws.creature_count.max(1) as f64
+                "ratio": *count as f64 / ws.creature_count.max(1) as f64,
+                "avg_nodes": avg_nodes
             })
         })
         .collect();

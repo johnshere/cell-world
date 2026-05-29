@@ -1930,15 +1930,23 @@ impl World {
             creature_energy / alive_creatures.len() as f64
         };
 
-        // 种族统计（按 clan_hash 聚合）
-        let mut clan_counts: FxHashMap<u64, usize> = FxHashMap::default();
+        // 种族统计（按 clan_hash 聚合，同时累计节点数用于算每族平均节点数）
+        let mut clan_counts: FxHashMap<u64, (usize, usize)> = FxHashMap::default();
         for c in &alive_creatures {
-            *clan_counts.entry(c.clan_hash).or_insert(0) += 1;
+            let entry = clan_counts.entry(c.clan_hash).or_insert((0, 0));
+            entry.0 += 1;
+            entry.1 += c.genome.nodes.len();
         }
         let clan_count = clan_counts.len();
-        let mut clan_vec: Vec<(u64, usize)> = clan_counts.into_iter().collect();
+        let mut clan_vec: Vec<(u64, usize, f64)> = clan_counts
+            .into_iter()
+            .map(|(hash, (count, nodes_sum))| {
+                let avg_nodes = nodes_sum as f64 / count.max(1) as f64;
+                (hash, count, avg_nodes)
+            })
+            .collect();
         clan_vec.sort_by(|a, b| b.1.cmp(&a.1));
-        clan_vec.truncate(3);
+        clan_vec.truncate(10);
 
         // 优势种检测：每秒由 sim_thread 调用 refresh_dominant_candidate 刷新缓存，此处只读
         // 注意：种族缓存仍在 stats() 内 ensure 一次，因为面板渲染要用 clan map（不只是 dominant）
@@ -2686,8 +2694,8 @@ pub struct WorldStats {
     pub reward_counts: [usize; 3],
     pub death_age_stats: DeathAgeStats,
     pub clan_count: usize,
-    /// 种族前三: (clan_hash, count)
-    pub top_clans: Vec<(u64, usize)>,
+    /// 种族前十: (clan_hash, count, avg_nodes)
+    pub top_clans: Vec<(u64, usize, f64)>,
     pub dominant_candidate: Option<DominantCandidate>,
 }
 
