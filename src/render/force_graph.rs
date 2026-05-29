@@ -8,9 +8,19 @@
 //! - alpha 只乘在位置更新上，不缩放力 → 平衡点唯一、结果可复现
 //! - alpha 留底（alpha_min）→ 系统永不冻结，支持手动拖动后重排
 
+use crate::neural::block::{motor_block_for_output, sensory_block_for_input};
 use crate::neural::genome::{Genome, NodeGene, NodeType};
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
+
+/// 节点对应的 block 编号（Input/Output 走投射映射，Block 节点直接取自身）
+fn node_block(node: &NodeGene) -> i8 {
+    match node.node_type {
+        NodeType::Input => sensory_block_for_input(node.id),
+        NodeType::Output => motor_block_for_output(node.id.saturating_sub(Genome::INPUT_SIZE)),
+        NodeType::Block(b) => b,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -129,21 +139,17 @@ impl ForceGraphState {
         let radius_scale = canvas.x.min(canvas.y) / canvas.y; // 用于保持纵横相对一致
         let _ = radius_scale;
 
-        // 算所有出现的 block 的目标坐标
+        // 算所有出现的 block 的目标坐标（包括 Input/Output 节点投射到的感官/运动 block）
         for node in &genome.nodes {
-            if let NodeType::Block(b) = node.node_type {
-                self.block_targets
-                    .entry(b)
-                    .or_insert_with(|| Self::compute_block_target(b, canvas));
-            }
+            let b = node_block(node);
+            self.block_targets
+                .entry(b)
+                .or_insert_with(|| Self::compute_block_target(b, canvas));
         }
 
         // 初始位置：block 目标 + 按节点 ID 哈希的抖动（同 block 节点天然分散）
         for node in &genome.nodes {
-            let b = match node.node_type {
-                NodeType::Block(b) => b,
-                _ => continue,
-            };
+            let b = node_block(node);
             let target = self.block_targets[&b];
             let (dx, dy) = hash_jitter(node.id);
             let pos = egui::pos2(target.x + dx, target.y + dy);
@@ -201,12 +207,9 @@ impl ForceGraphState {
                 *self.velocities.get_mut(&conn.out_node).unwrap() -= f_vec;
             }
 
-            // 3. block 锚定（forceX/forceY，恒定强度）
+            // 3. block 锚定（forceX/forceY，恒定强度，对 Input/Output 也走投射 block 锚定）
             for node in &genome.nodes {
-                let b = match node.node_type {
-                    NodeType::Block(b) => b,
-                    _ => continue,
-                };
+                let b = node_block(node);
                 let target = match self.block_targets.get(&b) {
                     Some(t) => *t,
                     None => continue,
@@ -651,11 +654,8 @@ fn draw_legend(painter: &egui::Painter, rect: egui::Rect) {
 // ---------------------------------------------------------------------------
 
 fn blk_key(node: &NodeGene) -> i8 {
-    match node.node_type {
-        NodeType::Input => -100,
-        NodeType::Output => 100,
-        NodeType::Block(b) => b,
-    }
+    // Input/Output 都归到对应投射 block，跟同区 Block 节点共用一个分组框
+    node_block(node)
 }
 
 fn node_radius(node: &NodeGene) -> f32 {
