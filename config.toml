@@ -186,7 +186,7 @@ follow_update_interval = 0.25
 particle_min_energy = 50.0
 
 # === 力导图 ===
-# 力导图水平锚定强度（左右半球横向拉扯力）
-force_graph_h_anchor = 10.0
-# 力导图垂直锚定强度（感官/运动纵向拉扯力）
-force_graph_v_anchor = 30.0
+# 力导图水平锚定强度（forceX strength，左右半球横向拉扯力）
+force_graph_h_anchor = 0.08
+# 力导图垂直锚定强度（forceY strength，感官/运动纵向拉扯力）
+force_graph_v_anchor = 0.08

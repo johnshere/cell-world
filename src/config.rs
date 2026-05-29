@@ -294,11 +294,11 @@ fn default_solitude_penalty() -> f64 {
 }
 
 fn default_force_graph_h_anchor() -> f64 {
-    3.0
+    0.08
 }
 
 fn default_force_graph_v_anchor() -> f64 {
-    3.0
+    0.08
 }
 
 fn default_max_creatures() -> usize {

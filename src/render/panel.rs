@@ -840,6 +840,7 @@ impl StatsPanel {
         if close {
             self.force_graph_view = None;
             self.force_graph_genome = None;
+            self.force_graph_state.reset();
         }
     }
 
