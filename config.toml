@@ -21,7 +21,7 @@ volcano_radius = 3000.0
 # 火山粒子半径分布倾角（负值让外围更密，默认-0.3）
 volcano_spread_bias = 0.3
 # 每次喷发粒子数
-volcano_count = 55
+volcano_count = 50
 # 火山粒子能量
 volcano_particle_energy = 120.0
 
