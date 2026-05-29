@@ -279,6 +279,9 @@ pub struct Config {
     /// 力导图垂直锚定强度（感官/运动纵向拉扯力）
     #[serde(default = "default_force_graph_v_anchor")]
     pub force_graph_v_anchor: f64,
+    /// 力导图单 iter 速度上限（cap）：太小会让强锚定力被截断，导致 v_anchor 增大后仍打不过边吸引
+    #[serde(default = "default_force_graph_max_vel")]
+    pub force_graph_max_vel: f64,
 }
 
 fn default_true() -> bool {
@@ -299,6 +302,10 @@ fn default_force_graph_h_anchor() -> f64 {
 
 fn default_force_graph_v_anchor() -> f64 {
     0.08
+}
+
+fn default_force_graph_max_vel() -> f64 {
+    240.0
 }
 
 fn default_max_creatures() -> usize {

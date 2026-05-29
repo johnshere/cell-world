@@ -820,6 +820,7 @@ impl StatsPanel {
         // 每次打开弹框从 config 读取锚定强度（允许运行时调节）
         self.force_graph_state.h_anchor = config.force_graph_h_anchor;
         self.force_graph_state.v_anchor = config.force_graph_v_anchor;
+        self.force_graph_state.max_vel = config.force_graph_max_vel;
 
         let source = self.force_graph_view.clone();
         let genome = self.force_graph_genome.clone();
