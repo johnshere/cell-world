@@ -566,8 +566,12 @@ fn draw_block_groups(
     painter: &egui::Painter,
     to_screen: impl Fn(egui::Pos2) -> egui::Pos2,
 ) {
+    // 仅聚合 Block 节点：Input/Output 钉在画布顶/底，框进来会让 bounding box 贯穿画布
     let mut block_nodes: HashMap<i8, Vec<&NodeGene>> = HashMap::new();
     for node in &genome.nodes {
+        if !matches!(node.node_type, NodeType::Block(_)) {
+            continue;
+        }
         let blk = blk_key(node);
         if state.positions.contains_key(&node.id) {
             block_nodes.entry(blk).or_default().push(node);
