@@ -190,3 +190,6 @@ particle_min_energy = 50.0
 force_graph_h_anchor = 0.08
 # 力导图垂直锚定强度（forceY strength，感官/运动纵向拉扯力）
 force_graph_v_anchor = 0.08
+# 力导图单 iter 速度上限（cap）。原硬编码 = k×0.4 = 48，太小会把强锚定截断（v_anchor 增大无效）。
+# 240 ≈ k×2.0，让 v_anchor 调到 2 时能压过边吸引（上限 50/iter）。
+force_graph_max_vel = 240.0

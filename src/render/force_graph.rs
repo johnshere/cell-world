@@ -43,6 +43,8 @@ pub struct ForceGraphState {
     pub h_anchor: f64,
     /// 纵向锚定强度（forceY strength）
     pub v_anchor: f64,
+    /// 单 iter 速度上限。太小会截断强锚定力（让 v_anchor 增大失效），由 config 注入
+    pub max_vel: f64,
     /// genome 指纹（拓扑变化时自动重新初始化）
     genome_fingerprint: u64,
 }
@@ -60,6 +62,7 @@ impl ForceGraphState {
             offset: egui::Vec2::ZERO,
             h_anchor: 0.08,
             v_anchor: 0.08,
+            max_vel: 240.0,
             genome_fingerprint: 0,
         }
     }
@@ -84,7 +87,8 @@ impl ForceGraphState {
     ///   - |b|=25 → x ≈ ±W/2 × 0.99
     ///   - |b|=26 → x = ±W/2
     /// Y：分三段连续映射
-    ///   - 感官 |b|∈[1,3]   → 上 1/3 区，[-H/2, -H/6]，|b| 大者偏下
+    ///   - 感官 |b|∈[1,3]   → 上方收紧到 [-H/2, -H/3]，与联合区中线之间留出 H/6 安全带
+    ///     避免感官块被边吸引（连到联合/运动）轻易拉过中线
     ///   - 联合 |b|∈[4,24]  → 中 1/3 区，[-H/6, +H/6]，|b| 大者偏下
     ///   - 运动 |b|∈[25,31] → 下 1/3 区，[+H/6, +H/2]，|b| 大者偏下
     fn compute_block_target(b: i8, canvas: egui::Vec2) -> egui::Vec2 {
@@ -98,8 +102,9 @@ impl ForceGraphState {
         let x = sign * half_w * fx;
 
         let y = if ab <= 3.0 {
+            // |b|=1 → -H/2（最上）；|b|=3 → -H/3（仍在中线上方 1/3 屏高处）
             let t = ((ab - 1.0) / 2.0).clamp(0.0, 1.0);
-            -half_h * (1.0 - t * 2.0 / 3.0)
+            -half_h * (1.0 - t / 3.0)
         } else if ab <= 24.0 {
             let t = (ab - 4.0) / 20.0;
             half_h * (-1.0 / 3.0 + 2.0 / 3.0 * t)
@@ -217,7 +222,7 @@ impl ForceGraphState {
             }
 
             // 4. 应用速度 + 阻尼，alpha 只乘位置更新；pinned/dragging 节点速度归零
-            let max_vel = k as f32 * 0.4;
+            let max_vel = self.max_vel as f32;
             for id in &node_ids {
                 if Some(*id) == self.dragging_node || self.pinned.get(id).copied().unwrap_or(false)
                 {
