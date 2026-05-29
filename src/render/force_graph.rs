@@ -67,9 +67,6 @@ const ALPHA_DECAY: f64 = 0.97;
 const ALPHA_REHEAT: f64 = 0.3;
 const NODE_PICK_RADIUS: f32 = 12.0;
 const HASH_JITTER_RANGE: f32 = 60.0;
-/// IO 节点与 Block 节点最高/最低点之间的安全距离（世界坐标）
-/// 每帧动态计算：input.y = block_min_y - LOCKED_OFFSET，output.y = block_max_y + LOCKED_OFFSET
-const LOCKED_OFFSET: f32 = 60.0;
 
 // ---------------------------------------------------------------------------
 // 力模拟状态（跨帧持久化）
@@ -94,6 +91,10 @@ pub struct ForceGraphState {
     pub v_anchor: f64,
     /// 单 iter 速度上限。太小会截断强锚定力（让 v_anchor 增大失效），由 config 注入
     pub max_vel: f64,
+    /// IO 间距（世界坐标），同时控制：
+    ///   - 横向：同行内相邻 IO 节点等距间隔
+    ///   - 纵向：IO 行与最近 Block 节点的安全距离
+    pub io_spacing: f64,
     /// 硬锁节点（Input/Output 钉死在画布顶/底，不受力影响、不可拖、不可右键解锁）
     locked_nodes: FxHashSet<usize>,
     /// genome 指纹（拓扑变化时自动重新初始化）
@@ -114,6 +115,7 @@ impl ForceGraphState {
             h_anchor: 0.08,
             v_anchor: 0.08,
             max_vel: 240.0,
+            io_spacing: 150.0,
             locked_nodes: FxHashSet::default(),
             genome_fingerprint: 0,
         }
@@ -183,7 +185,6 @@ impl ForceGraphState {
         self.alpha = 1.0;
 
         let canvas = egui::vec2(canvas_size.x.max(400.0), canvas_size.y.max(400.0));
-        let half_w = canvas.x * 0.5;
         let half_h = canvas.y * 0.5;
 
         // 算所有 block 锚点（含 Input/Output 投射的感官/运动 block，用于 Block 节点锚定）
@@ -208,23 +209,41 @@ impl ForceGraphState {
         inputs.sort_by_key(|n| (node_block(n), n.id));
         outputs.sort_by_key(|n| (node_block(n), n.id));
 
-        // y 边距 = 5% 屏高，保证标签不超出画布
-        let in_y = -half_h * 0.95;
-        let in_n = inputs.len().max(1) as f32;
-        for (i, node) in inputs.iter().enumerate() {
-            let x = -half_w + (i as f32 + 0.5) / in_n * canvas.x;
-            self.positions.insert(node.id, egui::pos2(x, in_y));
-            self.velocities.insert(node.id, egui::Vec2::ZERO);
-            self.locked_nodes.insert(node.id);
-        }
-        let out_y = half_h * 0.95;
-        let out_n = outputs.len().max(1) as f32;
-        for (i, node) in outputs.iter().enumerate() {
-            let x = -half_w + (i as f32 + 0.5) / out_n * canvas.x;
-            self.positions.insert(node.id, egui::pos2(x, out_y));
-            self.velocities.insert(node.id, egui::Vec2::ZERO);
-            self.locked_nodes.insert(node.id);
-        }
+        // IO 节点等距 io_spacing 横向排开，行整体居中（x = 0 在画布中心）
+        // y 用 ±half_h * 0.95 作占位初值，step 末尾每帧动态贴近 Block 包络
+        let spacing = self.io_spacing as f32;
+        let place_io_row = |list: &[&NodeGene],
+                            y: f32,
+                            positions: &mut FxHashMap<usize, egui::Pos2>,
+                            velocities: &mut FxHashMap<usize, egui::Vec2>,
+                            locked: &mut FxHashSet<usize>| {
+            let n = list.len();
+            if n == 0 {
+                return;
+            }
+            let total = (n as f32 - 1.0) * spacing;
+            let start_x = -total * 0.5;
+            for (i, node) in list.iter().enumerate() {
+                let x = start_x + i as f32 * spacing;
+                positions.insert(node.id, egui::pos2(x, y));
+                velocities.insert(node.id, egui::Vec2::ZERO);
+                locked.insert(node.id);
+            }
+        };
+        place_io_row(
+            &inputs,
+            -half_h * 0.95,
+            &mut self.positions,
+            &mut self.velocities,
+            &mut self.locked_nodes,
+        );
+        place_io_row(
+            &outputs,
+            half_h * 0.95,
+            &mut self.positions,
+            &mut self.velocities,
+            &mut self.locked_nodes,
+        );
 
         // —— Block 节点：按 block 锚点 + 哈希抖动放置，参与力学 ——
         for node in &genome.nodes {
@@ -339,8 +358,9 @@ impl ForceGraphState {
             }
         }
         if block_min_y < f32::MAX {
-            let in_y = block_min_y - LOCKED_OFFSET;
-            let out_y = block_max_y + LOCKED_OFFSET;
+            let offset = self.io_spacing as f32;
+            let in_y = block_min_y - offset;
+            let out_y = block_max_y + offset;
             for node in &genome.nodes {
                 let target_y = match node.node_type {
                     NodeType::Input => in_y,

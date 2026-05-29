@@ -193,3 +193,7 @@ force_graph_v_anchor = 0.08
 # 力导图单 iter 速度上限（cap）。原硬编码 = k×0.4 = 48，太小会把强锚定截断（v_anchor 增大无效）。
 # 240 ≈ k×2.0，让 v_anchor 调到 2 时能压过边吸引（上限 50/iter）。
 force_graph_max_vel = 240.0
+# 力导图 Input/Output 间距（世界坐标）。同时作用于：
+#   - 横向：同行内相邻 IO 节点等距间隔
+#   - 纵向：IO 行与最近 Block 节点的安全距离（每帧贴近）
+force_graph_io_spacing = 150.0

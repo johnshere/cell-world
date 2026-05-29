@@ -282,6 +282,11 @@ pub struct Config {
     /// 力导图单 iter 速度上限（cap）：太小会让强锚定力被截断，导致 v_anchor 增大后仍打不过边吸引
     #[serde(default = "default_force_graph_max_vel")]
     pub force_graph_max_vel: f64,
+    /// 力导图 Input/Output 间距（世界坐标）。同时作用于两个维度：
+    ///   - 横向：同一行内相邻 IO 节点的等距间隔
+    ///   - 纵向：IO 行与最近 Block 节点的安全距离（每帧动态贴近）
+    #[serde(default = "default_force_graph_io_spacing")]
+    pub force_graph_io_spacing: f64,
 }
 
 fn default_true() -> bool {
@@ -306,6 +311,10 @@ fn default_force_graph_v_anchor() -> f64 {
 
 fn default_force_graph_max_vel() -> f64 {
     240.0
+}
+
+fn default_force_graph_io_spacing() -> f64 {
+    150.0
 }
 
 fn default_max_creatures() -> usize {

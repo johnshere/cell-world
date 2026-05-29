@@ -826,6 +826,7 @@ impl StatsPanel {
         self.force_graph_state.h_anchor = config.force_graph_h_anchor;
         self.force_graph_state.v_anchor = config.force_graph_v_anchor;
         self.force_graph_state.max_vel = config.force_graph_max_vel;
+        self.force_graph_state.io_spacing = config.force_graph_io_spacing;
 
         let source = self.force_graph_view.clone();
         let genome = self.force_graph_genome.clone();
