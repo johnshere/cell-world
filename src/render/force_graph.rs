@@ -10,8 +10,44 @@
 
 use crate::neural::block::{motor_block_for_output, sensory_block_for_input};
 use crate::neural::genome::{Genome, NodeGene, NodeType};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
+
+/// Input 节点作用标签（20 维感知，索引=node.id）
+const INPUT_LABELS: [&str; 20] = [
+    "L眼角",   // 0
+    "L接近",   // 1
+    "L能量",   // 2
+    "L类型",   // 3
+    "L相似",   // 4
+    "L密度",   // 5
+    "L朝向差", // 6
+    "L速度差", // 7
+    "R眼角",   // 8
+    "R接近",   // 9
+    "R能量",   // 10
+    "R类型",   // 11
+    "R相似",   // 12
+    "R密度",   // 13
+    "R朝向差", // 14
+    "R速度差", // 15
+    "自能量",  // 16
+    "地坡度",  // 17
+    "光耳角",  // 18
+    "光耳强",  // 19
+];
+
+/// Output 节点作用标签（8 维动作，索引=node.id - INPUT_SIZE）
+const OUTPUT_LABELS: [&str; 8] = [
+    "转向",   // 0
+    "速度",   // 1
+    "嘴",     // 2
+    "繁殖",   // 3
+    "繁阈值", // 4
+    "子能比", // 5
+    "痕迹",   // 6
+    "光嘴",   // 7
+];
 
 /// 节点对应的 block 编号（Input/Output 走投射映射，Block 节点直接取自身）
 fn node_block(node: &NodeGene) -> i8 {
@@ -55,6 +91,8 @@ pub struct ForceGraphState {
     pub v_anchor: f64,
     /// 单 iter 速度上限。太小会截断强锚定力（让 v_anchor 增大失效），由 config 注入
     pub max_vel: f64,
+    /// 硬锁节点（Input/Output 钉死在画布顶/底，不受力影响、不可拖、不可右键解锁）
+    locked_nodes: FxHashSet<usize>,
     /// genome 指纹（拓扑变化时自动重新初始化）
     genome_fingerprint: u64,
 }
@@ -73,6 +111,7 @@ impl ForceGraphState {
             h_anchor: 0.08,
             v_anchor: 0.08,
             max_vel: 240.0,
+            locked_nodes: FxHashSet::default(),
             genome_fingerprint: 0,
         }
     }
@@ -87,6 +126,7 @@ impl ForceGraphState {
         self.alpha = 1.0;
         self.scale = 1.0;
         self.offset = egui::Vec2::ZERO;
+        self.locked_nodes.clear();
         self.genome_fingerprint = 0;
     }
 
@@ -127,19 +167,23 @@ impl ForceGraphState {
     }
 
     /// 从基因组初始化布局
+    ///
+    /// - Input/Output 节点：等距钉死在画布顶/底排，按 (block, id) 升序左→右排列，加入 locked_nodes
+    /// - Block 节点：按 block_target 锚点 + 哈希抖动初始位置，正常受力
     pub fn init_from_genome(&mut self, genome: &Genome, canvas_size: egui::Vec2) {
         self.positions.clear();
         self.velocities.clear();
         self.block_targets.clear();
         self.pinned.clear();
+        self.locked_nodes.clear();
         self.dragging_node = None;
         self.alpha = 1.0;
 
         let canvas = egui::vec2(canvas_size.x.max(400.0), canvas_size.y.max(400.0));
-        let radius_scale = canvas.x.min(canvas.y) / canvas.y; // 用于保持纵横相对一致
-        let _ = radius_scale;
+        let half_w = canvas.x * 0.5;
+        let half_h = canvas.y * 0.5;
 
-        // 算所有出现的 block 的目标坐标（包括 Input/Output 节点投射到的感官/运动 block）
+        // 算所有 block 锚点（含 Input/Output 投射的感官/运动 block，用于 Block 节点锚定）
         for node in &genome.nodes {
             let b = node_block(node);
             self.block_targets
@@ -147,8 +191,43 @@ impl ForceGraphState {
                 .or_insert_with(|| Self::compute_block_target(b, canvas));
         }
 
-        // 初始位置：block 目标 + 按节点 ID 哈希的抖动（同 block 节点天然分散）
+        // —— Input/Output 节点：硬锁在顶/底排，按 (block, id) 升序等距排列 ——
+        let mut inputs: Vec<&NodeGene> = genome
+            .nodes
+            .iter()
+            .filter(|n| matches!(n.node_type, NodeType::Input))
+            .collect();
+        let mut outputs: Vec<&NodeGene> = genome
+            .nodes
+            .iter()
+            .filter(|n| matches!(n.node_type, NodeType::Output))
+            .collect();
+        inputs.sort_by_key(|n| (node_block(n), n.id));
+        outputs.sort_by_key(|n| (node_block(n), n.id));
+
+        // y 边距 = 5% 屏高，保证标签不超出画布
+        let in_y = -half_h * 0.95;
+        let in_n = inputs.len().max(1) as f32;
+        for (i, node) in inputs.iter().enumerate() {
+            let x = -half_w + (i as f32 + 0.5) / in_n * canvas.x;
+            self.positions.insert(node.id, egui::pos2(x, in_y));
+            self.velocities.insert(node.id, egui::Vec2::ZERO);
+            self.locked_nodes.insert(node.id);
+        }
+        let out_y = half_h * 0.95;
+        let out_n = outputs.len().max(1) as f32;
+        for (i, node) in outputs.iter().enumerate() {
+            let x = -half_w + (i as f32 + 0.5) / out_n * canvas.x;
+            self.positions.insert(node.id, egui::pos2(x, out_y));
+            self.velocities.insert(node.id, egui::Vec2::ZERO);
+            self.locked_nodes.insert(node.id);
+        }
+
+        // —— Block 节点：按 block 锚点 + 哈希抖动放置，参与力学 ——
         for node in &genome.nodes {
+            if !matches!(node.node_type, NodeType::Block(_)) {
+                continue;
+            }
             let b = node_block(node);
             let target = self.block_targets[&b];
             let (dx, dy) = hash_jitter(node.id);
@@ -227,7 +306,9 @@ impl ForceGraphState {
             // 4. 应用速度 + 阻尼，alpha 只乘位置更新；pinned/dragging 节点速度归零
             let max_vel = self.max_vel as f32;
             for id in &node_ids {
-                if Some(*id) == self.dragging_node || self.pinned.get(id).copied().unwrap_or(false)
+                if Some(*id) == self.dragging_node
+                    || self.pinned.get(id).copied().unwrap_or(false)
+                    || self.locked_nodes.contains(id)
                 {
                     *self.velocities.get_mut(id).unwrap() = egui::Vec2::ZERO;
                     continue;
@@ -333,6 +414,7 @@ pub fn render_force_graph_window(
             draw_block_groups(genome, state, &painter, to_screen);
             draw_connections(genome, state, &painter, to_screen);
             draw_nodes(genome, state, &painter, to_screen);
+            draw_io_labels(genome, state, &painter, to_screen);
             draw_hover_tooltip(genome, state, &response, rect, &painter, to_screen);
             draw_legend(&painter, rect);
         });
@@ -356,13 +438,15 @@ fn handle_interaction(state: &mut ForceGraphState, response: &egui::Response, re
         )
     };
 
-    // === 右键节点：切换 pinned ===
+    // === 右键节点：切换 pinned（locked 节点不响应：始终硬钉死）===
     if response.clicked_by(egui::PointerButton::Secondary) {
         if let Some(pos) = response.interact_pointer_pos() {
             if let Some(id) = pick_node(state, pos, to_screen) {
-                let was = state.pinned.get(&id).copied().unwrap_or(false);
-                state.pinned.insert(id, !was);
-                state.reheat();
+                if !state.locked_nodes.contains(&id) {
+                    let was = state.pinned.get(&id).copied().unwrap_or(false);
+                    state.pinned.insert(id, !was);
+                    state.reheat();
+                }
                 return;
             }
         }
@@ -390,13 +474,15 @@ fn handle_interaction(state: &mut ForceGraphState, response: &egui::Response, re
         return;
     }
 
-    // === 拖拽开始：在节点上 → 节点拖；空白 → 画布平移 ===
+    // === 拖拽开始：在节点上 → 节点拖（locked 节点不可拖）；空白 → 画布平移 ===
     if response.drag_started_by(egui::PointerButton::Primary) {
         if let Some(sp) = response.interact_pointer_pos() {
             if let Some(id) = pick_node(state, sp, to_screen) {
-                state.dragging_node = Some(id);
-                state.reheat();
-                return;
+                if !state.locked_nodes.contains(&id) {
+                    state.dragging_node = Some(id);
+                    state.reheat();
+                    return;
+                }
             }
         }
     }
@@ -562,6 +648,53 @@ fn draw_nodes(
                 );
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 绘制 Input/Output 节点的作用标签（顶/底排，与节点保持小间距）
+// ---------------------------------------------------------------------------
+
+fn draw_io_labels(
+    genome: &Genome,
+    state: &ForceGraphState,
+    painter: &egui::Painter,
+    to_screen: impl Fn(egui::Pos2) -> egui::Pos2,
+) {
+    let font = egui::FontId::proportional(10.0);
+    let color_in = egui::Color32::from_rgb(120, 230, 150);
+    let color_out = egui::Color32::from_rgb(255, 195, 100);
+    for node in &genome.nodes {
+        let (label, color, above) = match node.node_type {
+            NodeType::Input => {
+                let l = INPUT_LABELS.get(node.id).copied().unwrap_or("?");
+                (l, color_in, true)
+            }
+            NodeType::Output => {
+                let idx = node.id.saturating_sub(Genome::INPUT_SIZE);
+                let l = OUTPUT_LABELS.get(idx).copied().unwrap_or("?");
+                (l, color_out, false)
+            }
+            _ => continue,
+        };
+        let p = match state.positions.get(&node.id) {
+            Some(p) => *p,
+            None => continue,
+        };
+        let sp = to_screen(p);
+        // 标签贴节点：input 在上、output 在下，留 8 px 缝避免重叠
+        let (offset_y, align) = if above {
+            (-9.0, egui::Align2::CENTER_BOTTOM)
+        } else {
+            (9.0, egui::Align2::CENTER_TOP)
+        };
+        painter.text(
+            sp + egui::vec2(0.0, offset_y),
+            align,
+            format!("{}\n{}", node.id, label),
+            font.clone(),
+            color,
+        );
     }
 }
 
