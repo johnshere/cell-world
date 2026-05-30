@@ -73,6 +73,8 @@ const AUTO_ZOOM_ALPHA_THRESHOLD: f64 = 0.12;
 const AUTO_ZOOM_DURATION: f32 = 2.0;
 /// 自动缩放边距比例（画布的 padding）
 const AUTO_ZOOM_PADDING: f32 = 0.08;
+/// 质心凝聚力单次上限
+const BLOCK_COHESION_MAX: f32 = 30.0;
 
 // ---------------------------------------------------------------------------
 // 力模拟状态（跨帧持久化）
@@ -113,6 +115,10 @@ pub struct ForceGraphState {
     initial_scale: f32,
     /// 自动缩放已完成（避免每帧重复触发，覆盖用户手动缩放）
     auto_zoom_done: bool,
+    /// Block 内质心凝聚力强度（0=关闭）
+    pub cohesion_k: f64,
+    /// 整体密度缩放（1.0=默认）
+    pub density: f64,
 }
 
 impl ForceGraphState {
@@ -136,6 +142,8 @@ impl ForceGraphState {
             auto_zoom_t: 0.0,
             initial_scale: 1.0,
             auto_zoom_done: false,
+            cohesion_k: 0.003,
+            density: 1.0,
         }
     }
 
@@ -288,14 +296,14 @@ impl ForceGraphState {
         self.auto_zoom_done = false;
     }
 
-    /// 力模拟步进：斥力 + 边吸引 + block 锚定（恒定强度），alpha 只乘位置更新
+    /// 力模拟步进：斥力 + 边吸引 + block 锚定 + 质心凝聚力（恒定强度），alpha 只乘位置更新
     pub fn step(&mut self, genome: &Genome, iterations: usize) {
         if self.positions.is_empty() {
             return;
         }
 
-        let k_inner = 120.0_f64;
-        let k_outer = 240.0_f64;
+        let k_inner = 120.0_f64 * self.density;
+        let k_outer = 240.0_f64 * self.density;
 
         // 节点 ID 按值排序，消除浮点累加顺序漂移
         let mut node_ids: Vec<usize> = self.positions.keys().copied().collect();
@@ -362,7 +370,52 @@ impl ForceGraphState {
                 }
             }
 
-            // 4. 应用速度 + 阻尼，alpha 只乘位置更新；pinned/dragging 节点速度归零
+            // 4. block 质心凝聚力（线性弹簧，温和将同 block 节点拉向动态质心）
+            //    解决 block 内孤点/独立群被斥力推散的问题
+            {
+                if self.cohesion_k > 0.0 {
+                    // 按 block 聚合节点位置，计算质心
+                    let mut blk_sums: FxHashMap<i8, (egui::Vec2, usize)> = FxHashMap::default();
+                    for id in &node_ids {
+                        if self.locked_nodes.contains(id) {
+                            continue;
+                        }
+                        if let (Some(&pos), Some(&b)) =
+                            (self.positions.get(id), node_blocks.get(id))
+                        {
+                            let entry = blk_sums.entry(b).or_insert((egui::Vec2::ZERO, 0));
+                            entry.0 += pos.to_vec2();
+                            entry.1 += 1;
+                        }
+                    }
+                    // 对每个非孤立 block，把内节点向质心拉
+                    for (&b, &(sum, cnt)) in &blk_sums {
+                        if cnt <= 1 {
+                            continue;
+                        }
+                        let centroid = sum / cnt as f32;
+                        for id in &node_ids {
+                            if self.locked_nodes.contains(id) || node_blocks.get(id) != Some(&b) {
+                                continue;
+                            }
+                            if let (Some(&pos), Some(vel)) =
+                                (self.positions.get(id), self.velocities.get_mut(id))
+                            {
+                                let delta = centroid - pos.to_vec2();
+                                let dist = delta.length();
+                                if dist < 0.5 {
+                                    continue;
+                                }
+                                let force_mag =
+                                    (dist * self.cohesion_k as f32).min(BLOCK_COHESION_MAX);
+                                *vel += delta / dist * force_mag;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5. 应用速度 + 阻尼，alpha 只乘位置更新；pinned/dragging 节点速度归零
             let max_vel = self.max_vel as f32;
             for id in &node_ids {
                 if Some(*id) == self.dragging_node

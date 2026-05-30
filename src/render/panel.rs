@@ -416,12 +416,11 @@ impl StatsPanel {
         if alive.count > 0 {
             ui.horizontal_wrapped(|ui| {
                 ui.label(format!(
-                    "寿命: 育均:{:.0}s│均:{:.1}│中:{:.1}│最长:{:.1}│最短:{:.1}│存活:{}{}",
+                    "寿命: 育均:{:.0}s│均:{:.1}│中:{:.1}│最长:{:.1}│存活:{}{}",
                     self.cached_stats.avg_maturation_time,
                     alive.avg,
                     alive.median,
                     alive.max,
-                    alive.min,
                     alive.count,
                     if death.total_deaths > 0 {
                         format!("│总死亡:{}", death.total_deaths)
@@ -852,11 +851,13 @@ impl StatsPanel {
         if self.force_graph_view.is_none() {
             return;
         }
-        // 每次打开弹框从 config 读取锚定强度（允许运行时调节）
+        // 每次打开弹框从 config 读取力导图配置（允许运行时调节）
         self.force_graph_state.h_anchor = config.force_graph_h_anchor;
         self.force_graph_state.v_anchor = config.force_graph_v_anchor;
         self.force_graph_state.max_vel = config.force_graph_max_vel;
         self.force_graph_state.io_spacing = config.force_graph_io_spacing;
+        self.force_graph_state.density = config.force_graph_density;
+        self.force_graph_state.cohesion_k = config.force_graph_cohesion_k;
 
         let source = self.force_graph_view.clone();
         let genome = self.force_graph_genome.clone();

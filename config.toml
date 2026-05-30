@@ -23,7 +23,7 @@ volcano_spread_bias = 0.0
 # 每次喷发粒子数
 volcano_count = 50
 # 火山粒子能量
-volcano_particle_energy = 180.0
+volcano_particle_energy = 170.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -48,7 +48,7 @@ landing_damage_multiplier = 0.1
 # 每次火山喷发附带的熔岩流粒子数
 lava_count = 0
 # 熔岩粒子死亡时分裂第二个子粒子的概率
-lava_spread_probability = 0.1
+lava_spread_probability = 0.2
 # 最大链式代数
 lava_max_chain_depth = 1
 # 每个粒子贡献的等效液面高度
@@ -84,12 +84,12 @@ age_metabolism_factor = 0.025
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗系数（面板值×0.00001×半径³ = 实际消耗）
-move_cost = 1.3
+move_cost = 1.4
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.99
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.013
+heat_dissipation_coefficient = 0.014
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -183,7 +183,7 @@ follow_optimal_angle = 0.5235987755982988
 follow_angle_width = 0.4363323129985824
 follow_max_level = 1.0
 follow_update_interval = 0.25
-particle_min_energy = 80.0
+particle_min_energy = 70.0
 
 # === 力导图 ===
 # 力导图水平锚定强度（forceX strength，左右半球横向拉扯力）

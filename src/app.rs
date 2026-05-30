@@ -915,6 +915,49 @@ impl CellWorldApp {
                 );
             });
 
+            ui.collapsing("力导图", |ui| {
+                changed |= config_drag_f64(
+                    ui,
+                    "整体密度",
+                    "1.0=默认，<1更紧凑，>1更松散",
+                    &mut c.force_graph_density,
+                    0.1,
+                    0.2..=5.0,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "质心凝聚力",
+                    "同block节点靠拢强度，0=关闭",
+                    &mut c.force_graph_cohesion_k,
+                    0.001,
+                    0.0..=0.03,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "IO间距",
+                    "Input/Output节点间像素间距",
+                    &mut c.force_graph_io_spacing,
+                    10.0,
+                    100.0..=f64::MAX,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "水平锚定",
+                    "节点向目标列横向拉力",
+                    &mut c.force_graph_h_anchor,
+                    0.01,
+                    0.0..=1.0,
+                );
+                changed |= config_drag_f64(
+                    ui,
+                    "垂直锚定",
+                    "节点向目标行纵向拉力",
+                    &mut c.force_graph_v_anchor,
+                    0.01,
+                    0.0..=1.0,
+                );
+            });
+
             ui.collapsing("其他", |ui| {
                 changed |= config_drag_f64(
                     ui,
