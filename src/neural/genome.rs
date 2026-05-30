@@ -530,11 +530,10 @@ impl Genome {
             child.mutate_physio_gene(base_rate);
         }
 
-        // ====== 临时修复：Input/Output 连接合规性（低概率，渐进净化） ======
-        let repair_rate = base_rate * 0.3; // 每次变异有 ~4.5% 概率触发
-        if is_sexual && rng.gen::<f64>() < repair_rate {
-            child.repair_io_connections();
-        }
+        // ====== 临时修复：Input/Output 连接合规性（修复已完成，暂停） ======
+        // 注：mutate_add_node 的 Input/Output 约束 + toggle 守卫已永久防止复发
+        // 若有历史遗留再次出现，取消此行注释：
+        // if rng.gen::<f64>() < base_rate * 0.5 { child.repair_io_connections(); }
         // ====== 临时修复结束 ======
 
         child.rebuild_sorted_cache();
@@ -988,13 +987,14 @@ impl Genome {
     }
 
     // ====== 临时修复：Input/Output 连接合规性 ======
-    /// 每次调用同时做两件事（低概率触发，渐进净化）：
+    /// 每次调用同时做三件事：
     ///   1. Input/Output 若已无一条指向指定 block 的启用连接 → 恢复一条 disabled
     ///   2. Input→非指定 block / 非指定 block→Output 的违规连接 → 删除
-    /// TODO: 种群干净后移除此方法
+    ///   3. 删除单线孤点（Block 节点总连接 ≤1）
+    /// 调用点见 mutate() 末尾注释，需要时取消注释即可恢复
+    #[allow(dead_code)]
     fn repair_io_connections(&mut self) {
         use super::block;
-        let mut rng = rand::thread_rng();
         let input_size = Self::INPUT_SIZE;
         let output_start = input_size;
 
@@ -1130,6 +1130,31 @@ impl Genome {
         to_remove.sort_unstable();
         for &idx in to_remove.iter().rev() {
             self.connections.remove(idx);
+        }
+
+        // —— 3. 删除单线孤点：Block 节点仅有一条连接（进或出）→ 无回路，纯代谢累赘 ——
+        // disabled 线也算正常连接，只清理真正孤立（总连接数=1）的节点
+        let mut orphan_node_ids: Vec<usize> = Vec::new();
+        for node in &self.nodes {
+            if !matches!(node.node_type, NodeType::Block(_)) {
+                continue;
+            }
+            let total_conns = self
+                .connections
+                .iter()
+                .filter(|c| c.in_node == node.id || c.out_node == node.id)
+                .count();
+            if total_conns <= 1 {
+                orphan_node_ids.push(node.id);
+            }
+        }
+        if !orphan_node_ids.is_empty() {
+            // 删除这些节点的全部连接
+            self.connections.retain(|c| {
+                !orphan_node_ids.contains(&c.in_node) && !orphan_node_ids.contains(&c.out_node)
+            });
+            // 删除节点本身
+            self.nodes.retain(|n| !orphan_node_ids.contains(&n.id));
         }
     }
     // ====== 临时修复结束 ======

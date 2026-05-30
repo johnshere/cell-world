@@ -323,7 +323,7 @@ impl ForceGraphState {
                 }
             }
 
-            // 2. 边吸引（Hooke 形式，恒定强度）
+            // 2. 边吸引（Hooke 形式，同 block 比跨 block 更强）
             for conn in &genome.connections {
                 if !conn.enabled {
                     continue;
@@ -337,7 +337,9 @@ impl ForceGraphState {
                 };
                 let delta = pos_b - pos_a;
                 let dist = delta.length().max(0.01) as f64;
-                let force_mag = (dist * dist / k_inner).min(50.0);
+                let same_block = node_blocks.get(&conn.in_node) == node_blocks.get(&conn.out_node);
+                let k_attr = if same_block { k_inner } else { k_outer };
+                let force_mag = (dist * dist / k_attr).min(50.0);
                 let f_vec = delta / dist as f32 * force_mag as f32;
                 *self.velocities.get_mut(&conn.in_node).unwrap() += f_vec;
                 *self.velocities.get_mut(&conn.out_node).unwrap() -= f_vec;
@@ -765,7 +767,7 @@ fn draw_connections(
         ) {
             let a = to_screen(*pa);
             let b = to_screen(*pb);
-            let width = (conn.weight.abs() as f32 * 2.5).clamp(0.8, 4.0);
+            let width = (conn.weight.abs() as f32 * 1.5).clamp(0.4, 2.5);
             let alpha = (conn.weight.abs() as f32 * 0.6).clamp(0.15, 0.9);
             let color = if conn.weight > 0.0 {
                 egui::Color32::from_rgba_premultiplied(100, 200, 255, (alpha * 255.0) as u8)

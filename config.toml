@@ -21,9 +21,9 @@ volcano_radius = 3000.0
 # 火山粒子半径分布倾角（负值让外围更密，默认-0.3）
 volcano_spread_bias = 0.0
 # 每次喷发粒子数
-volcano_count = 100
+volcano_count = 50
 # 火山粒子能量
-volcano_particle_energy = 200.0
+volcano_particle_energy = 180.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -48,7 +48,7 @@ landing_damage_multiplier = 0.1
 # 每次火山喷发附带的熔岩流粒子数
 lava_count = 0
 # 熔岩粒子死亡时分裂第二个子粒子的概率
-lava_spread_probability = 0.0
+lava_spread_probability = 0.1
 # 最大链式代数
 lava_max_chain_depth = 1
 # 每个粒子贡献的等效液面高度
@@ -74,22 +74,22 @@ bite_transfer_rate = 0.5
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
-energy_denominator = 30.0
+energy_denominator = 15.0
 # 散热下限（指数衰减底板）
 heat_floor = 0.03
 
 # === 代谢 ===
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
-age_metabolism_factor = 0.02
+age_metabolism_factor = 0.025
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗系数（面板值×0.00001×半径³ = 实际消耗）
-move_cost = 1.0
+move_cost = 1.3
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.99
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.01
+heat_dissipation_coefficient = 0.013
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -138,7 +138,7 @@ neural_backend = "auto"
 neural_tick_rate = 600.0
 # 变异率（全局常量，不再是基因组内可演化基因）
 # base/block 两类变异共享此触发概率
-mutation_rate = 0.1
+mutation_rate = 0.05
 # 无性繁殖权重变异率缩放系数（仅作用于权重微调）
 # 无性繁殖中其余 7 类创新变异（add_connection/add_node/Layer/Block/block_probs/learning/physio/enable切换）完全禁用
 # 默认 0.4 ≈ 近似克隆；1.0=无差异化，0.0=完全克隆
@@ -165,7 +165,7 @@ terrain_slope_cost = 10.0
 # === 奖励通道开关 ===
 reward_energy_enabled = true
 reward_trail_enabled = false
-reward_group_enabled = false
+reward_group_enabled = true
 
 # === 反孤立代价（统一系数）===
 # 控制孤独生命的年龄加速倍率（vision_range 内无活邻居 → age 增速 ×solitude_penalty）
@@ -183,7 +183,7 @@ follow_optimal_angle = 0.5235987755982988
 follow_angle_width = 0.4363323129985824
 follow_max_level = 1.0
 follow_update_interval = 0.25
-particle_min_energy = 100.0
+particle_min_energy = 80.0
 
 # === 力导图 ===
 # 力导图水平锚定强度（forceX strength，左右半球横向拉扯力）
@@ -196,4 +196,4 @@ force_graph_max_vel = 240.0
 # 力导图 Input/Output 间距（世界坐标）。同时作用于：
 #   - 横向：同行内相邻 IO 节点等距间隔
 #   - 纵向：IO 行与最近 Block 节点的安全距离（每帧贴近）
-force_graph_io_spacing = 300.0
+force_graph_io_spacing = 500.0

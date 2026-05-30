@@ -538,95 +538,117 @@ impl StatsPanel {
         if templates.is_empty() {
             ui.label("暂无保存的基因模板");
         } else {
-            for template in templates {
-                let is_auto = template.auto_recorded == Some(true);
-                let tag = if is_auto { "⚡" } else { "📌" };
+            // 最大高度按 10 个条目计算，超出滚动
+            let max_h = 10.0 * 60.0;
+            egui::ScrollArea::vertical()
+                .max_height(max_h)
+                .show(ui, |ui| {
+                    for template in templates {
+                        let is_auto = template.auto_recorded == Some(true);
+                        let tag = if is_auto { "⚡" } else { "📌" };
 
-                egui::Frame::none()
-                    .inner_margin(egui::Margin::symmetric(4.0, 3.0))
-                    .stroke(egui::Stroke::new(0.5, egui::Color32::from_gray(60)))
-                    .rounding(3.0)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{} {}", tag, template.name));
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui.small_button("🗑").on_hover_text("删除").clicked() {
-                                        action.delete_template = Some(template.name.clone());
-                                    }
-                                    if ui
-                                        .small_button("投放")
-                                        .on_hover_text("投放5个该模板生物")
-                                        .clicked()
-                                    {
-                                        action.spawn = Some(Some(template.name.clone()));
-                                    }
-                                    if ui
-                                        .small_button("📊")
-                                        .on_hover_text("查看目标偏好")
-                                        .clicked()
-                                    {
-                                        self.target_pref_view =
-                                            Some(TargetPrefSource::Template(template.name.clone()));
-                                        self.target_pref_genome = Some(template.genome.clone());
-                                    }
-                                    if ui
-                                        .small_button("🔗")
-                                        .on_hover_text("查看脑拓扑力导图")
-                                        .clicked()
-                                    {
-                                        self.force_graph_view =
-                                            Some(TargetPrefSource::Template(template.name.clone()));
-                                        self.force_graph_genome = Some(template.genome.clone());
-                                    }
-                                },
-                            );
-                        });
+                        egui::Frame::none()
+                            .inner_margin(egui::Margin::symmetric(4.0, 3.0))
+                            .stroke(egui::Stroke::new(0.5, egui::Color32::from_gray(60)))
+                            .rounding(3.0)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("{} {}", tag, template.name));
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui.small_button("🗑").on_hover_text("删除").clicked()
+                                            {
+                                                action.delete_template =
+                                                    Some(template.name.clone());
+                                            }
+                                            if ui
+                                                .small_button("投放")
+                                                .on_hover_text("投放5个该模板生物")
+                                                .clicked()
+                                            {
+                                                action.spawn = Some(Some(template.name.clone()));
+                                            }
+                                            if ui
+                                                .small_button("📊")
+                                                .on_hover_text("查看目标偏好")
+                                                .clicked()
+                                            {
+                                                self.target_pref_view =
+                                                    Some(TargetPrefSource::Template(
+                                                        template.name.clone(),
+                                                    ));
+                                                self.target_pref_genome =
+                                                    Some(template.genome.clone());
+                                            }
+                                            if ui
+                                                .small_button("🔗")
+                                                .on_hover_text("查看脑拓扑力导图")
+                                                .clicked()
+                                            {
+                                                self.force_graph_view =
+                                                    Some(TargetPrefSource::Template(
+                                                        template.name.clone(),
+                                                    ));
+                                                self.force_graph_genome =
+                                                    Some(template.genome.clone());
+                                            }
+                                        },
+                                    );
+                                });
 
-                        // 信息行
-                        let mut info_parts: Vec<String> = Vec::new();
-                        info_parts.push(format!("能量:{:.0}", template.initial_energy));
-                        if let Some(score) = template.score {
-                            info_parts.push(format!("评分:{:.1}", score));
-                        }
-                        if let Some(ratio) = template.population_ratio {
-                            info_parts.push(format!("占比:{:.0}%", ratio * 100.0));
-                        }
-                        if let Some(age) = template.avg_age {
-                            info_parts.push(format!("均龄:{:.0}s", age));
-                        }
-                        let gen = template.generation.or(template.max_generation);
-                        if let Some(gen) = gen {
-                            info_parts.push(format!("代:{}", gen));
-                        }
-                        if let Some(avg_e) = template.avg_energy {
-                            info_parts.push(format!("均能:{:.0}", avg_e));
-                        }
+                                // 信息行
+                                let mut info_parts: Vec<String> = Vec::new();
+                                info_parts.push(format!("能量:{:.0}", template.initial_energy));
+                                if let Some(score) = template.score {
+                                    info_parts.push(format!("评分:{:.1}", score));
+                                }
+                                if let Some(ratio) = template.population_ratio {
+                                    info_parts.push(format!("占比:{:.0}%", ratio * 100.0));
+                                }
+                                if let Some(age) = template.avg_age {
+                                    info_parts.push(format!("均龄:{:.0}s", age));
+                                }
+                                let gen = template.generation.or(template.max_generation);
+                                if let Some(gen) = gen {
+                                    info_parts.push(format!("代:{}", gen));
+                                }
+                                if let Some(avg_e) = template.avg_energy {
+                                    info_parts.push(format!("均能:{:.0}", avg_e));
+                                }
 
-                        ui.label(
-                            egui::RichText::new(info_parts.join("  "))
-                                .small()
-                                .color(egui::Color32::from_gray(160)),
-                        );
+                                ui.label(
+                                    egui::RichText::new(info_parts.join("  "))
+                                        .small()
+                                        .color(egui::Color32::from_gray(160)),
+                                );
 
-                        // 基因结构信息
-                        let conn_count = template.genome.connections.len();
-                        let node_count = template.genome.nodes.len();
-                        let hidden = node_count.saturating_sub(
-                            crate::neural::Genome::INPUT_SIZE + crate::neural::Genome::OUTPUT_SIZE,
-                        );
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "节点:{} (隐:{})  连接:{}",
-                                node_count, hidden, conn_count
-                            ))
-                            .small()
-                            .color(egui::Color32::from_gray(120)),
-                        );
-                    });
-                ui.add_space(2.0);
-            }
+                                // 基因结构信息
+                                let enabled_count = template
+                                    .genome
+                                    .connections
+                                    .iter()
+                                    .filter(|c| c.enabled)
+                                    .count();
+                                let disabled_count =
+                                    template.genome.connections.len() - enabled_count;
+                                let node_count = template.genome.nodes.len();
+                                let hidden = node_count.saturating_sub(
+                                    crate::neural::Genome::INPUT_SIZE
+                                        + crate::neural::Genome::OUTPUT_SIZE,
+                                );
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "节点:{} (隐:{})  连接:有效{} 禁用{}",
+                                        node_count, hidden, enabled_count, disabled_count,
+                                    ))
+                                    .small()
+                                    .color(egui::Color32::from_gray(120)),
+                                );
+                            });
+                        ui.add_space(2.0);
+                    }
+                });
         }
 
         // 种族快速保存区
