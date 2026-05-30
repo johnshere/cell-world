@@ -446,6 +446,13 @@ fn call_get_stats(state: &Arc<AppState>) -> Value {
             "max": ws.death_age_stats.max,
             "min": ws.death_age_stats.min
         },
+        "alive_age_stats": {
+            "count": ws.alive_age_stats.count,
+            "avg": ws.alive_age_stats.avg,
+            "median": ws.alive_age_stats.median,
+            "max": ws.alive_age_stats.max,
+            "min": ws.alive_age_stats.min
+        },
         "action_counts": ws.action_counts,
         "reward_counts": ws.reward_counts,
         "volcano_countdown": snap.volcano_countdown,

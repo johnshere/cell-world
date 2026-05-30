@@ -1930,6 +1930,42 @@ impl World {
             creature_energy / alive_creatures.len() as f64
         };
 
+        // 存活生物年龄统计
+        let alive_age_stats = if alive_creatures.is_empty() {
+            AliveAgeStats::default()
+        } else {
+            let n = alive_creatures.len();
+            let mut ages: Vec<f64> = alive_creatures.iter().map(|c| c.age).collect();
+            let sum: f64 = ages.iter().sum();
+            let mut min = f64::MAX;
+            let mut max = 0.0_f64;
+            for &v in &ages {
+                if v < min {
+                    min = v;
+                }
+                if v > max {
+                    max = v;
+                }
+            }
+            let median = if n % 2 == 0 {
+                let (_, m1, rest) =
+                    ages.select_nth_unstable_by(n / 2 - 1, |a, b| a.partial_cmp(b).unwrap());
+                let (_, m2, _) = rest.select_nth_unstable_by(0, |a, b| a.partial_cmp(b).unwrap());
+                (*m1 + *m2) / 2.0
+            } else {
+                let (_, m, _) =
+                    ages.select_nth_unstable_by(n / 2, |a, b| a.partial_cmp(b).unwrap());
+                *m
+            };
+            AliveAgeStats {
+                count: n,
+                avg: sum / n as f64,
+                median,
+                max,
+                min,
+            }
+        };
+
         // 种族统计（按 clan_hash 聚合，同时累计节点数用于算每族平均节点数）
         let mut clan_counts: FxHashMap<u64, (usize, usize)> = FxHashMap::default();
         for c in &alive_creatures {
@@ -1974,6 +2010,7 @@ impl World {
             },
             reward_counts: self.reward_counts,
             death_age_stats: self.death_age_stats.clone(),
+            alive_age_stats,
             clan_count,
             top_clans: clan_vec,
             dominant_candidate,
@@ -2678,6 +2715,16 @@ pub struct DeathAgeStats {
     pub total_deaths: usize,
 }
 
+/// 存活生物年龄统计（仅当前活着的个体）
+#[derive(Default, Clone)]
+pub struct AliveAgeStats {
+    pub count: usize,
+    pub avg: f64,
+    pub median: f64,
+    pub max: f64,
+    pub min: f64,
+}
+
 #[derive(Clone, Default)]
 pub struct WorldStats {
     pub time: f64,
@@ -2693,6 +2740,8 @@ pub struct WorldStats {
     /// 奖励触发次数（3通道：能量/痕迹/集体）
     pub reward_counts: [usize; 3],
     pub death_age_stats: DeathAgeStats,
+    /// 存活生物年龄统计
+    pub alive_age_stats: AliveAgeStats,
     pub clan_count: usize,
     /// 种族前十: (clan_hash, count, avg_nodes)
     pub top_clans: Vec<(u64, usize, f64)>,

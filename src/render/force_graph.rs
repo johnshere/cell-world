@@ -67,6 +67,12 @@ const ALPHA_DECAY: f64 = 0.97;
 const ALPHA_REHEAT: f64 = 0.3;
 const NODE_PICK_RADIUS: f32 = 12.0;
 const HASH_JITTER_RANGE: f32 = 60.0;
+/// alpha 低于此阈值后力基本稳定，可开始自动缩放
+const AUTO_ZOOM_ALPHA_THRESHOLD: f64 = 0.12;
+/// 自动缩放动画时长（秒）
+const AUTO_ZOOM_DURATION: f32 = 2.0;
+/// 自动缩放边距比例（画布的 padding）
+const AUTO_ZOOM_PADDING: f32 = 0.08;
 
 // ---------------------------------------------------------------------------
 // 力模拟状态（跨帧持久化）
@@ -99,6 +105,14 @@ pub struct ForceGraphState {
     locked_nodes: FxHashSet<usize>,
     /// genome 指纹（拓扑变化时自动重新初始化）
     genome_fingerprint: u64,
+    /// 自动缩放：力稳定后计算的目标 scale
+    target_scale: Option<f32>,
+    /// 自动缩放动画进度 0→1
+    auto_zoom_t: f32,
+    /// 动画起始的 scale（用户手动缩放时取消动画）
+    initial_scale: f32,
+    /// 自动缩放已完成（避免每帧重复触发，覆盖用户手动缩放）
+    auto_zoom_done: bool,
 }
 
 impl ForceGraphState {
@@ -118,6 +132,10 @@ impl ForceGraphState {
             io_spacing: 150.0,
             locked_nodes: FxHashSet::default(),
             genome_fingerprint: 0,
+            target_scale: None,
+            auto_zoom_t: 0.0,
+            initial_scale: 1.0,
+            auto_zoom_done: false,
         }
     }
 
@@ -133,6 +151,10 @@ impl ForceGraphState {
         self.offset = egui::Vec2::ZERO;
         self.locked_nodes.clear();
         self.genome_fingerprint = 0;
+        self.target_scale = None;
+        self.auto_zoom_t = 0.0;
+        self.initial_scale = 1.0;
+        self.auto_zoom_done = false;
     }
 
     /// 计算 block 编号 b 对应的目标坐标
@@ -259,6 +281,11 @@ impl ForceGraphState {
         }
 
         self.genome_fingerprint = genome_fingerprint(genome);
+        // 自动缩放：力稳定后重新计算（仅一次）
+        self.target_scale = None;
+        self.auto_zoom_t = 0.0;
+        self.initial_scale = self.scale;
+        self.auto_zoom_done = false;
     }
 
     /// 力模拟步进：斥力 + 边吸引 + block 锚定（恒定强度），alpha 只乘位置更新
@@ -267,20 +294,28 @@ impl ForceGraphState {
             return;
         }
 
-        let k = 120.0_f64;
+        let k_inner = 120.0_f64;
+        let k_outer = 240.0_f64;
 
         // 节点 ID 按值排序，消除浮点累加顺序漂移
         let mut node_ids: Vec<usize> = self.positions.keys().copied().collect();
         node_ids.sort_unstable();
 
+        // 预计算每个节点的 block 编号（斥力循环中按 block 分内外距离）
+        let node_blocks: FxHashMap<usize, i8> =
+            genome.nodes.iter().map(|n| (n.id, node_block(n))).collect();
+
         for _ in 0..iterations {
             // 1. 斥力（Coulomb，恒定强度）
+            //    同 block 节点使用 k_inner，不同 block 使用 k_outer ≈ 2×k_inner
             for i in 0..node_ids.len() {
                 for j in (i + 1)..node_ids.len() {
                     let a = node_ids[i];
                     let b = node_ids[j];
                     let delta = self.positions[&a] - self.positions[&b];
                     let dist = delta.length().max(0.01) as f64;
+                    let same_block = node_blocks.get(&a) == node_blocks.get(&b);
+                    let k = if same_block { k_inner } else { k_outer };
                     let force_mag = (k * k / dist).min(200.0);
                     let f_vec = delta / dist as f32 * force_mag as f32;
                     *self.velocities.get_mut(&a).unwrap() += f_vec;
@@ -302,7 +337,7 @@ impl ForceGraphState {
                 };
                 let delta = pos_b - pos_a;
                 let dist = delta.length().max(0.01) as f64;
-                let force_mag = (dist * dist / k).min(50.0);
+                let force_mag = (dist * dist / k_inner).min(50.0);
                 let f_vec = delta / dist as f32 * force_mag as f32;
                 *self.velocities.get_mut(&conn.in_node).unwrap() += f_vec;
                 *self.velocities.get_mut(&conn.out_node).unwrap() -= f_vec;
@@ -454,15 +489,61 @@ pub fn render_force_graph_window(
                 .clamp(2.0, 12.0) as usize;
             state.step(genome, iters);
 
+            // 自动缩放：力稳定后计算 fit 尺度并缓慢动画到位（仅一次）
+            if !state.auto_zoom_done
+                && state.target_scale.is_none()
+                && state.alpha < AUTO_ZOOM_ALPHA_THRESHOLD
+            {
+                let mut min_x = f32::MAX;
+                let mut max_x = f32::MIN;
+                let mut min_y = f32::MAX;
+                let mut max_y = f32::MIN;
+                for &pos in state.positions.values() {
+                    min_x = min_x.min(pos.x);
+                    max_x = max_x.max(pos.x);
+                    min_y = min_y.min(pos.y);
+                    max_y = max_y.max(pos.y);
+                }
+                if min_x < max_x {
+                    let world_w = max_x - min_x;
+                    let world_h = max_y - min_y;
+                    let avail_w = rect.width() * (1.0 - 2.0 * AUTO_ZOOM_PADDING);
+                    let avail_h = rect.height() * (1.0 - 2.0 * AUTO_ZOOM_PADDING);
+                    let fit_scale = (avail_w / world_w).min(avail_h / world_h).max(0.02);
+                    if (fit_scale - state.scale).abs() > 0.05 {
+                        state.target_scale = Some(fit_scale);
+                        state.initial_scale = state.scale;
+                        state.auto_zoom_t = 0.0;
+                    } else {
+                        state.auto_zoom_done = true;
+                    }
+                }
+            }
+            // 动画推进
+            if let Some(target) = state.target_scale {
+                let dt = ui.input(|i| i.stable_dt).min(0.1);
+                state.auto_zoom_t = (state.auto_zoom_t + dt / AUTO_ZOOM_DURATION).min(1.0);
+                // ease-out cubic
+                let t = 1.0 - (1.0 - state.auto_zoom_t).powi(3);
+                state.scale = state.initial_scale + (target - state.initial_scale) * t;
+                if state.auto_zoom_t >= 1.0 {
+                    state.scale = target;
+                    state.target_scale = None;
+                    state.auto_zoom_done = true;
+                }
+            }
+
             // 坐标变换
             let canvas_center = rect.center() + state.offset;
+            let display_scale = state.scale;
             let to_screen =
-                |p: egui::Pos2| -> egui::Pos2 { canvas_center + (p.to_vec2() * state.scale) };
+                |p: egui::Pos2| -> egui::Pos2 { canvas_center + (p.to_vec2() * display_scale) };
 
             draw_block_groups(genome, state, &painter, to_screen);
             draw_connections(genome, state, &painter, to_screen);
             draw_nodes(genome, state, &painter, to_screen);
             draw_io_labels(genome, state, &painter, to_screen);
+            draw_block_labels(genome, state, &painter, to_screen);
             draw_hover_tooltip(genome, state, &response, rect, &painter, to_screen);
             draw_legend(&painter, rect);
         });
@@ -538,6 +619,9 @@ fn handle_interaction(state: &mut ForceGraphState, response: &egui::Response, re
     // 左键拖拽（不在节点上）→ 平移画布
     if response.dragged_by(egui::PointerButton::Primary) {
         state.offset += response.drag_delta();
+        // 用户手动平移时也取消自动缩放
+        state.target_scale = None;
+        state.auto_zoom_done = true;
     }
 
     // 滚轮缩放
@@ -546,11 +630,14 @@ fn handle_interaction(state: &mut ForceGraphState, response: &egui::Response, re
             let scroll = response.ctx.input(|i| i.smooth_scroll_delta.y);
             if scroll.abs() > 0.1 {
                 let old_scale = state.scale;
-                let new_scale = (old_scale * (1.0 + scroll * 0.02)).clamp(0.15, 4.0);
+                let new_scale = (old_scale * (1.0 + scroll * 0.01)).clamp(0.02, 4.0);
                 let to_cc = hover - cc;
                 let ratio = new_scale / old_scale;
                 state.offset = to_cc - (to_cc - state.offset) * ratio;
                 state.scale = new_scale;
+                // 用户手动缩放时取消自动缩放动画并标记完成，不再介入
+                state.target_scale = None;
+                state.auto_zoom_done = true;
             }
         }
     }
@@ -650,6 +737,24 @@ fn draw_connections(
     painter: &egui::Painter,
     to_screen: impl Fn(egui::Pos2) -> egui::Pos2,
 ) {
+    let disabled_color = egui::Color32::from_rgba_premultiplied(80, 80, 80, 30);
+
+    // 先画禁用连接（最底层，极淡灰）
+    for conn in &genome.connections {
+        if conn.enabled {
+            continue;
+        }
+        if let (Some(pa), Some(pb)) = (
+            state.positions.get(&conn.in_node),
+            state.positions.get(&conn.out_node),
+        ) {
+            let a = to_screen(*pa);
+            let b = to_screen(*pb);
+            painter.line_segment([a, b], egui::Stroke::new(0.5, disabled_color));
+        }
+    }
+
+    // 再画启用连接（上层，带颜色和粗细）
     for conn in &genome.connections {
         if !conn.enabled {
             continue;
@@ -751,6 +856,40 @@ fn draw_io_labels(
 }
 
 // ---------------------------------------------------------------------------
+// 绘制 Block 节点 ID 标注（小字，缩放足够大时显示）
+// ---------------------------------------------------------------------------
+
+fn draw_block_labels(
+    genome: &Genome,
+    state: &ForceGraphState,
+    painter: &egui::Painter,
+    to_screen: impl Fn(egui::Pos2) -> egui::Pos2,
+) {
+    if state.scale < 0.7 {
+        return; // 缩太小时不显示，避免重叠成团
+    }
+    let font = egui::FontId::proportional(9.0);
+    for node in &genome.nodes {
+        if !matches!(node.node_type, NodeType::Block(_)) {
+            continue;
+        }
+        let p = match state.positions.get(&node.id) {
+            Some(p) => *p,
+            None => continue,
+        };
+        let sp = to_screen(p);
+        let color = node_color(node).gamma_multiply(0.5);
+        painter.text(
+            sp + egui::vec2(7.0, -4.0),
+            egui::Align2::LEFT_TOP,
+            format!("{}", node.id),
+            font.clone(),
+            color,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Hover 提示
 // ---------------------------------------------------------------------------
 
@@ -808,6 +947,10 @@ fn draw_legend(painter: &egui::Painter, rect: egui::Rect) {
         (egui::Color32::from_rgb(255, 180, 80), "运动"),
         (egui::Color32::from_rgb(100, 200, 255), "兴奋+"),
         (egui::Color32::from_rgb(255, 120, 100), "抑制-"),
+        (
+            egui::Color32::from_rgba_premultiplied(80, 80, 80, 30),
+            "禁用",
+        ),
         (egui::Color32::from_rgb(255, 220, 80), "已钉"),
     ];
 

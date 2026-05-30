@@ -7,7 +7,7 @@ use super::Selection;
 use crate::config::Config;
 use crate::snapshot::list_archives;
 use crate::store::Store;
-use crate::world::{DeathAgeStats, DominantCandidate, SimSnapshot, GRID_WORLD_SIZE};
+use crate::world::{AliveAgeStats, DeathAgeStats, DominantCandidate, SimSnapshot, GRID_WORLD_SIZE};
 
 /// 面板操作结果
 #[derive(Default)]
@@ -80,6 +80,7 @@ pub struct CachedStats {
     // 奖励触发统计（3通道：能量/痕迹/集体）
     pub reward_counts: [usize; 3],
     pub death_age_stats: DeathAgeStats,
+    pub alive_age_stats: AliveAgeStats,
     pub clan_count: usize,
     pub top_clans: Vec<(u64, usize, f64)>,
     pub dominant_candidate: Option<DominantCandidate>,
@@ -157,6 +158,7 @@ impl StatsPanel {
                 action_counts: stats.action_counts,
                 reward_counts: stats.reward_counts,
                 death_age_stats: stats.death_age_stats.clone(),
+                alive_age_stats: stats.alive_age_stats.clone(),
                 clan_count: stats.clan_count,
                 top_clans: stats.top_clans.clone(),
                 dominant_candidate: stats.dominant_candidate.clone(),
@@ -408,18 +410,24 @@ impl StatsPanel {
             ));
         });
 
-        // 死亡年龄统计
+        // 寿命统计（仅存活生物，死亡总数从历史记录取）
+        let alive = &self.cached_stats.alive_age_stats;
         let death = &self.cached_stats.death_age_stats;
-        if death.count > 0 {
+        if alive.count > 0 {
             ui.horizontal_wrapped(|ui| {
                 ui.label(format!(
-                    "寿命: 育均:{:.0}s│均:{:.1}│中:{:.1}│最长:{:.1}│最短:{:.1}│死亡:{}",
+                    "寿命: 育均:{:.0}s│均:{:.1}│中:{:.1}│最长:{:.1}│最短:{:.1}│存活:{}{}",
                     self.cached_stats.avg_maturation_time,
-                    death.avg,
-                    death.median,
-                    death.max,
-                    death.min,
-                    death.total_deaths
+                    alive.avg,
+                    alive.median,
+                    alive.max,
+                    alive.min,
+                    alive.count,
+                    if death.total_deaths > 0 {
+                        format!("│总死亡:{}", death.total_deaths)
+                    } else {
+                        String::new()
+                    },
                 ));
             });
         }

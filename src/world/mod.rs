@@ -12,4 +12,4 @@ pub use sim_thread::SimSnapshot;
 pub use spatial::SpatialGrid;
 pub use terrain::{TerrainMap, TerrainParams, GRID_WORLD_SIZE};
 pub use trail::TrailPoint;
-pub use world::{DeathAgeStats, DominantCandidate, World};
+pub use world::{AliveAgeStats, DeathAgeStats, DominantCandidate, World};

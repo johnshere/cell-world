@@ -5,7 +5,7 @@ min_creatures = 5
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 999
 # 初始能量
-initial_energy = 10.0
+initial_energy = 100.0
 # 初始世界缩放比例
 initial_scale = 0.4000000059604645
 
@@ -19,11 +19,11 @@ volcano_interval = 30.0
 # 火山喷射半径
 volcano_radius = 3000.0
 # 火山粒子半径分布倾角（负值让外围更密，默认-0.3）
-volcano_spread_bias = 0.68
+volcano_spread_bias = 0.0
 # 每次喷发粒子数
-volcano_count = 130
+volcano_count = 100
 # 火山粒子能量
-volcano_particle_energy = 262.2
+volcano_particle_energy = 200.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -89,7 +89,7 @@ move_cost = 1.0
 follow_cost_discount = 0.99
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.006
+heat_dissipation_coefficient = 0.01
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -138,7 +138,7 @@ neural_backend = "auto"
 neural_tick_rate = 600.0
 # 变异率（全局常量，不再是基因组内可演化基因）
 # base/block 两类变异共享此触发概率
-mutation_rate = 0.15
+mutation_rate = 0.1
 # 无性繁殖权重变异率缩放系数（仅作用于权重微调）
 # 无性繁殖中其余 7 类创新变异（add_connection/add_node/Layer/Block/block_probs/learning/physio/enable切换）完全禁用
 # 默认 0.4 ≈ 近似克隆；1.0=无差异化，0.0=完全克隆
@@ -183,7 +183,7 @@ follow_optimal_angle = 0.5235987755982988
 follow_angle_width = 0.4363323129985824
 follow_max_level = 1.0
 follow_update_interval = 0.25
-particle_min_energy = 190.0
+particle_min_energy = 100.0
 
 # === 力导图 ===
 # 力导图水平锚定强度（forceX strength，左右半球横向拉扯力）
