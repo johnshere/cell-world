@@ -1,5 +1,6 @@
 use rand::seq::SliceRandom;
 use rand::Rng;
+use rustc_hash::FxHashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -417,18 +418,52 @@ impl Genome {
         // 结构变异调制因子：幼年活跃(2x)，成年后衰减
         let structure_factor = 2.0 * (-p).exp();
 
+        // ====== 临时梳理-4：连接数>7的节点只允许权重削弱，不允许增强 ======
+        let conn_threshold: usize = 7;
+        let mut node_conn_counts: FxHashMap<usize, usize> = FxHashMap::default();
+        for conn in &self.connections {
+            *node_conn_counts.entry(conn.in_node).or_default() += 1;
+            *node_conn_counts.entry(conn.out_node).or_default() += 1;
+        }
+        // ====== 临时梳理-4 结束 ======
+
         // 权重变异（不受发育期影响）；无性繁殖时 rate 按 asexual_mutation_scale 缩放
         for conn in &mut child.connections {
             if rng.gen::<f64>() < weight_rate {
+                let in_over =
+                    node_conn_counts.get(&conn.in_node).copied().unwrap_or(0) > conn_threshold;
+                let out_over =
+                    node_conn_counts.get(&conn.out_node).copied().unwrap_or(0) > conn_threshold;
+                let restricted = in_over || out_over;
+
                 if rng.gen::<f64>() < 0.9 {
                     // 微调
-                    conn.weight += rng.gen_range(-0.5..0.5);
+                    let delta_range = if restricted {
+                        (-0.5..0.0) // 受限：仅允许削弱
+                    } else {
+                        (-0.5..0.5) // 正常：正负均可
+                    };
+                    conn.weight += rng.gen_range(delta_range);
                     conn.weight = conn.weight.clamp(-2.0, 2.0);
                 } else {
                     // 重置
-                    conn.weight = rng.gen_range(-1.0..1.0);
+                    let reset_range = if restricted {
+                        (-1.0..0.0) // 受限：仅负权重
+                    } else {
+                        (-1.0..1.0)
+                    };
+                    conn.weight = rng.gen_range(reset_range);
                 }
             }
+            // ====== 临时梳理-4：受限连接弱到一定程度 → disabled ======
+            let in_over =
+                node_conn_counts.get(&conn.in_node).copied().unwrap_or(0) > conn_threshold;
+            let out_over =
+                node_conn_counts.get(&conn.out_node).copied().unwrap_or(0) > conn_threshold;
+            if (in_over || out_over) && conn.enabled && conn.weight.abs() < 0.05 {
+                conn.enabled = false;
+            }
+            // ====== 临时梳理-4 结束 ======
         }
 
         // 以下 7 类"创新型"变异仅在有性繁殖时发生
@@ -522,6 +557,18 @@ impl Genome {
         // 若有历史遗留再次出现，取消此行注释：
         // if rng.gen::<f64>() < base_rate * 0.5 { child.repair_io_connections(); }
         // ====== 临时修复结束 ======
+
+        // ====== 临时梳理-2：渐进惩罚跨 block 违规连接（Proc→外界 / 外界→Out） ======
+        if is_sexual && rng.gen::<f64>() < base_rate * 0.3 {
+            child.rectify_cross_block_io();
+        }
+        // ====== 临时梳理-2 结束 ======
+
+        // Input/Output 孤点修复：若全部启用线已断，强制重连到指定 block 中最少线的节点
+        child.repair_orphan_io();
+
+        // 删除无有效输出的 Block 节点（所有出边均已 disabled 或从无出边）
+        child.prune_dead_output_nodes();
 
         child.rebuild_sorted_cache();
         child
@@ -745,6 +792,112 @@ impl Genome {
         }
     }
 
+    // ====== 临时梳理-2：渐进惩罚跨 block 违规连接 ======
+    /// 扫描全脑跨 block 连接，对违规连接（Proc→外界 / 外界→Out）渐进惩罚：
+    ///   |weight| > 0.1 → weight *= 0.5（削弱）
+    ///   |weight| ≤ 0.1 → enabled = false（退役）
+    /// 每次随机挑最多 2 条违规连接处理
+    fn rectify_cross_block_io(&mut self) {
+        use super::block;
+        let mut rng = rand::thread_rng();
+
+        // 统计每个 block 是否有 Out / Proc 节点
+        let blk_has: FxHashMap<i8, (bool, bool)> = {
+            let mut m: FxHashMap<i8, (bool, bool)> = FxHashMap::default();
+            for node in &self.nodes {
+                if let NodeType::Block(_) = node.node_type {
+                    let entry = m.entry(Self::node_block(node)).or_insert((false, false));
+                    if node.layer == LayerType::Output {
+                        entry.0 = true;
+                    } else {
+                        entry.1 = true;
+                    }
+                }
+            }
+            m
+        };
+
+        // 收集所有跨 block 违规连接（含索引）
+        let mut violations: Vec<usize> = Vec::new();
+        for (i, conn) in self.connections.iter().enumerate() {
+            if !conn.enabled {
+                continue;
+            }
+            let in_blk = self
+                .nodes
+                .iter()
+                .find(|n| n.id == conn.in_node)
+                .map(|n| Self::node_block(n))
+                .unwrap_or(0);
+            let out_blk = self
+                .nodes
+                .iter()
+                .find(|n| n.id == conn.out_node)
+                .map(|n| Self::node_block(n))
+                .unwrap_or(0);
+            // 仅跨 block 连接
+            if in_blk == out_blk {
+                continue;
+            }
+            // 忽略 Input/Output 保护区
+            let in_node = self.nodes.iter().find(|n| n.id == conn.in_node);
+            let out_node = self.nodes.iter().find(|n| n.id == conn.out_node);
+            let in_is_input = in_node.map_or(false, |n| matches!(n.node_type, NodeType::Input));
+            let out_is_output = out_node.map_or(false, |n| matches!(n.node_type, NodeType::Output));
+            if in_is_input || out_is_output {
+                continue;
+            }
+
+            let in_layer_ok = in_node.map_or(true, |n| {
+                if n.layer == LayerType::Processing {
+                    // Proc 当发射器：检查该 block 是否有 Out
+                    !blk_has.get(&in_blk).map_or(false, |(has_out, _)| *has_out)
+                } else {
+                    // Out 当发射器：合规
+                    true
+                }
+            });
+            let out_layer_ok = out_node.map_or(true, |n| {
+                if n.layer == LayerType::Output {
+                    // Out 当接收器：检查该 block 是否有 Proc
+                    !blk_has
+                        .get(&out_blk)
+                        .map_or(false, |(_, has_proc)| *has_proc)
+                } else {
+                    true
+                }
+            });
+            // 两边都违规只算一条，优先算发射端违规
+            if !in_layer_ok || (!in_layer_ok && !out_layer_ok) || !out_layer_ok {
+                // 但确保 block 自身已配齐类型（有 Out/Proc 才判断违规）
+                let in_has = blk_has.get(&in_blk).map_or((false, false), |v| *v);
+                let out_has = blk_has.get(&out_blk).map_or((false, false), |v| *v);
+                let in_violation = !in_layer_ok && in_has.0;
+                let out_violation = !out_layer_ok && out_has.1;
+                if in_violation || out_violation {
+                    violations.push(i);
+                }
+            }
+        }
+
+        if violations.is_empty() {
+            return;
+        }
+
+        // 随机挑最多 2 条处理
+        let count = 2.min(violations.len());
+        for _ in 0..count {
+            let idx = violations[rng.gen_range(0..violations.len())];
+            let conn = &mut self.connections[idx];
+            if conn.weight.abs() > 0.1 {
+                conn.weight *= 0.5;
+            } else {
+                conn.enabled = false;
+            }
+        }
+    }
+    // ====== 临时梳理-2 结束 ======
+
     /// 添加连接变异（分区分层感知，加权概率采样）
     fn mutate_add_connection(&mut self, _conf: &Config) {
         use super::block;
@@ -772,17 +925,31 @@ impl Genome {
         let chosen_blk = blk_keys[rng.gen_range(0..blk_keys.len())];
         let candidates = &from_by_blk[&chosen_blk];
 
-        // 在 block 内按 layer 加权选节点（Proc 60%, Out 40%）
+        // ====== 临时梳理-1：若 block 有 Out，源极偏 Out（~95%）；Proc 不充当跨块发射器 ======
+        // 临时完工后删除本段，恢复原有 Proc60%/Out40% 逻辑
+        let blk_has_out_temp = self.nodes.iter().any(|n| {
+            matches!(n.node_type, NodeType::Block(_))
+                && Self::node_block(n) == chosen_blk
+                && n.layer == LayerType::Output
+        });
+        let temp_out_boost = if blk_has_out_temp { 20.0_f32 } else { 1.0_f32 };
         let mut weights: Vec<f32> = Vec::with_capacity(candidates.len());
         for &ci in candidates {
             let layer = self.nodes[ci].layer;
-            let w = if layer == LayerType::Processing {
+            let base = if layer == LayerType::Processing {
                 0.6
             } else {
                 0.4
             };
+            let w = if layer == LayerType::Output {
+                base * temp_out_boost
+            } else {
+                base
+            };
             weights.push(w);
         }
+        // ====== 临时梳理-1 结束 ======
+
         let total: f32 = weights.iter().sum();
         let from_idx = if total <= 0.0 {
             candidates[rng.gen_range(0..candidates.len())]
@@ -871,6 +1038,34 @@ impl Genome {
                 continue; // 该类别无候选，重新采样
             }
 
+            // ====== 临时梳理-1：跨 block 目标若其 block 有 Proc，目标必须是 Proc ======
+            let matching: Vec<usize> = matching
+                .into_iter()
+                .filter(|&i| {
+                    let to_blk = Self::node_block(&self.nodes[i]);
+                    if to_blk == from_blk {
+                        return true; // 同 block 不限制
+                    }
+                    let to_layer = self.nodes[i].layer;
+                    if to_layer == LayerType::Output {
+                        // 目标 block 有 Proc 吗？
+                        let blk_has_proc = self.nodes.iter().any(|n| {
+                            matches!(n.node_type, NodeType::Block(_))
+                                && Self::node_block(n) == to_blk
+                                && n.layer == LayerType::Processing
+                        });
+                        // 有 Proc 但目标是 Out → 拒绝
+                        !blk_has_proc
+                    } else {
+                        true // 目标是 Proc，总是合规
+                    }
+                })
+                .collect();
+            if matching.is_empty() {
+                continue;
+            }
+            // ====== 临时梳理-1 结束 ======
+
             // 按源 block 的 target_pref 做加权采样：缺省 1.0=中性
             let from_pref = self.conn_probs.get(&from_blk);
             let to_idx = {
@@ -918,70 +1113,219 @@ impl Genome {
         }
     }
 
-    /// 添加节点变异（继承源节点分区，小概率变异到新区）
+    /// 添加节点变异（分裂连接 A→B，插入新节点 X）
+    /// - X 的 block/layer 由旧连接 A→B 的拓扑方向类别推导（保留旧连接的语义）
+    /// - 选连接时按 1/源block节点数 加权，稀疏 block 优先享用 add_node
     fn mutate_add_node(&mut self, rate: f64) {
+        use super::block;
         let mut rng = rand::thread_rng();
 
-        // 选择一个启用的连接
-        let enabled_conns: Vec<usize> = self
+        // 选择一个启用的连接，按 1/源 block 节点数加权（稀疏 block 优先）
+        let enabled_conns: Vec<(usize, f64)> = self
             .connections
             .iter()
             .enumerate()
             .filter(|(_, c)| c.enabled)
-            .map(|(i, _)| i)
+            .map(|(i, c)| {
+                let in_blk = self
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == c.in_node)
+                    .map(|n| Self::node_block(n))
+                    .unwrap_or(0);
+                let blk_node_count = self
+                    .nodes
+                    .iter()
+                    .filter(|n| Self::node_block(n) == in_blk)
+                    .count()
+                    .max(1) as f64;
+                (i, 1.0 / blk_node_count)
+            })
             .collect();
 
         if enabled_conns.is_empty() {
             return;
         }
 
-        let conn_idx = enabled_conns[rng.gen_range(0..enabled_conns.len())];
+        let total_weight: f64 = enabled_conns.iter().map(|(_, w)| w).sum();
+        let mut r = rng.gen::<f64>() * total_weight;
+        let mut conn_idx = enabled_conns[enabled_conns.len() - 1].0;
+        for &(idx, w) in &enabled_conns {
+            r -= w;
+            if r <= 0.0 {
+                conn_idx = idx;
+                break;
+            }
+        }
+
         let old_conn = self.connections[conn_idx].clone();
 
         // 禁用旧连接
         self.connections[conn_idx].enabled = false;
 
-        // 确定新节点的 block
-        // 分裂后 A→X→B，X 必须与两端「保护区」邻居兼容：
-        //   - 左端 A→X：若 A 是 Input，X 必须是该 Input 的指定感官区
-        //   - 右端 X→B：若 B 是 Output，X 必须是该 Output 的指定运动区
-        //   - 两端都不是保护区：正常随机联合区（演化产生新区的主通道）
         let in_node = self.nodes.iter().find(|n| n.id == old_conn.in_node);
         let out_node = self.nodes.iter().find(|n| n.id == old_conn.out_node);
-        let src_block = in_node.map(|n| Self::node_block(n)).unwrap_or(0);
+        let in_blk = in_node.map(|n| Self::node_block(n)).unwrap_or(0);
+        let out_blk = out_node.map(|n| Self::node_block(n)).unwrap_or(0);
 
         let in_is_input = in_node.map_or(false, |n| matches!(n.node_type, NodeType::Input));
         let out_is_output = out_node.map_or(false, |n| matches!(n.node_type, NodeType::Output));
 
-        let new_block = if in_is_input {
-            // 左端是 Input：X 必须落在该 Input 的指定感官区
-            super::block::sensory_block_for_input(old_conn.in_node)
-        } else if out_is_output {
-            // 右端是 Output：X 必须落在该 Output 的指定运动区
-            let out_idx = old_conn.out_node.saturating_sub(Self::INPUT_SIZE);
-            super::block::motor_block_for_output(out_idx)
+        // 判定 A→B 的方向类别
+        let direction = if in_is_input || out_is_output {
+            None // 保护区走硬约束，不参与方向分类
         } else {
-            // 两端都不是保护区：正常随机联合区逻辑
-            let src_side: i8 = if src_block >= 0 { 1 } else { -1 };
-            if rng.gen::<f64>() < rate {
-                super::block::random_association_block(src_side, &mut rng)
+            let same_block = in_blk == out_blk;
+            let forward = block::is_forward(in_blk, out_blk);
+            let same_side = block::is_same_side(in_blk, out_blk);
+            let out_is_output_layer = out_node.map_or(false, |n| n.layer == LayerType::Output);
+            if same_block && !out_is_output_layer {
+                Some(ConnTarget::SameBlockProcessing)
+            } else if same_block && out_is_output_layer {
+                Some(ConnTarget::SameBlockOutput)
+            } else if !same_block && forward && same_side {
+                Some(ConnTarget::CrossForwardSame)
+            } else if !same_block && forward && !same_side && block::is_homotopic(in_blk, out_blk) {
+                Some(ConnTarget::CrossForwardOther)
             } else {
-                src_block
+                Some(ConnTarget::CrossFeedback)
             }
         };
 
-        // 确定新节点的 layer
-        let new_layer = if rng.gen::<f64>() < rate {
-            LayerType::Output
+        // 确定新节点 X 的 block 和 layer
+        let (new_block, new_layer_weight) = if in_is_input {
+            (
+                block::sensory_block_for_input(old_conn.in_node),
+                None, // Input→感官：layer 随机
+            )
+        } else if out_is_output {
+            let out_idx = old_conn.out_node.saturating_sub(Self::INPUT_SIZE);
+            (block::motor_block_for_output(out_idx), None)
+        } else if let Some(dir) = direction {
+            match dir {
+                ConnTarget::SameBlockProcessing => {
+                    // 同 block 处理：X 留在同 block，偏向 Processing
+                    (in_blk, Some(false))
+                }
+                ConnTarget::SameBlockOutput => {
+                    // 同 block 投射：X 留在同 block，偏向 Out
+                    (in_blk, Some(true))
+                }
+                ConnTarget::CrossForwardSame => {
+                    // 同侧前馈：X 落在 in_blk~out_blk 中间，偏向 Processing
+                    let mid = in_blk + (out_blk - in_blk) / 2;
+                    let side: i8 = if in_blk >= 0 { 1 } else { -1 };
+                    let abs_mid = mid.unsigned_abs();
+                    // 中间点在联合区范围则用中间点，否则取 in_blk
+                    if (4..=24).contains(&abs_mid) {
+                        (mid.abs() * side.signum(), Some(false))
+                    } else {
+                        (in_blk, Some(false))
+                    }
+                }
+                ConnTarget::CrossForwardOther => {
+                    // 对侧前馈：同上但跨半球，X 取 in_blk 侧
+                    (in_blk, Some(false))
+                }
+                ConnTarget::CrossFeedback => {
+                    // 反馈：X 偏向 out_blk 侧，layer 均衡
+                    (out_blk, None)
+                }
+            }
         } else {
-            LayerType::Processing
+            // 兜底：继承 in_blk
+            (in_blk, None)
+        };
+
+        // target_pref 微调 block：若 in 对 out_blk 有偏好，微调 X 的 block
+        let new_block = if !in_is_input && !out_is_output {
+            let from_pref = self.conn_probs.get(&in_blk);
+            if let Some(pref) = from_pref.and_then(|p| p.target_pref.get(&out_blk).copied()) {
+                if pref > 1.1 && block::is_association(out_blk) && (out_blk - new_block).abs() <= 2
+                {
+                    // in 偏爱 out_blk：X 靠近 out_blk
+                    out_blk
+                } else if pref < 0.9 && block::is_association(in_blk) {
+                    // in 回避 out_blk：X 留在 in_blk
+                    in_blk
+                } else {
+                    new_block
+                }
+            } else {
+                new_block
+            }
+        } else {
+            new_block
+        };
+
+        // ====== 临时梳理-3：补全 block 缺失的节点类型 ======
+        // 统计 new_block 内 Proc/Out 节点数
+        let blk_proc_n = self
+            .nodes
+            .iter()
+            .filter(|n| {
+                matches!(n.node_type, NodeType::Block(_))
+                    && Self::node_block(n) == new_block
+                    && n.layer == LayerType::Processing
+            })
+            .count();
+        let blk_out_n = self
+            .nodes
+            .iter()
+            .filter(|n| {
+                matches!(n.node_type, NodeType::Block(_))
+                    && Self::node_block(n) == new_block
+                    && n.layer == LayerType::Output
+            })
+            .count();
+        let blk_type_hint: Option<LayerType> = if blk_proc_n == 0 && blk_out_n > 0 {
+            // 只有 Out，缺 Proc → 强制补 Proc（概率 90%）
+            if rng.gen::<f64>() < 0.9 {
+                Some(LayerType::Processing)
+            } else {
+                None
+            }
+        } else if blk_out_n == 0 && blk_proc_n > 0 {
+            // 只有 Proc，缺 Out → 强制补 Out（概率 90%）
+            if rng.gen::<f64>() < 0.9 {
+                Some(LayerType::Output)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        // ====== 临时梳理-3 结束 ======
+
+        // 确定 layer：方向推导 > 补全 > 随机
+        let new_layer = if let Some(forced) = blk_type_hint {
+            forced
+        } else if let Some(prefer_out) = new_layer_weight {
+            if prefer_out {
+                if rng.gen::<f64>() < 0.6 {
+                    LayerType::Output
+                } else {
+                    LayerType::Processing
+                }
+            } else {
+                // 偏向 Processing
+                if rng.gen::<f64>() < 0.1 {
+                    LayerType::Output
+                } else {
+                    LayerType::Processing
+                }
+            }
+        } else {
+            if rng.gen::<f64>() < rate {
+                LayerType::Output
+            } else {
+                LayerType::Processing
+            }
         };
 
         let new_node_id = self.next_node_id;
         self.next_node_id += 1;
         // 直读 pass-through 初始化：与基础大脑节点参数一致，确保 add_node 是中性变异
-        // （连接拓扑已按 NEAT 经典做法做中性插入：A→B=1, B→C=原A→C 权重）
-        // threshold/decay/refractory 仍是基因，由后续 mutate_snn_params 演化决定是否走脉冲
         self.nodes.push(NodeGene {
             id: new_node_id,
             node_type: NodeType::Block(new_block),
@@ -1179,6 +1523,146 @@ impl Genome {
         }
     }
     // ====== 临时修复结束 ======
+
+    /// 删除无效 Block 节点：出边全部 disabled 或入边全部 disabled
+    /// Input/Output 节点不受影响，它们由 toggle 守卫 + 硬约束保护
+    fn prune_dead_output_nodes(&mut self) {
+        let mut has_enabled_out: FxHashMap<usize, bool> = FxHashMap::default();
+        let mut has_enabled_in: FxHashMap<usize, bool> = FxHashMap::default();
+        for conn in &self.connections {
+            has_enabled_out.entry(conn.in_node).or_insert(false);
+            has_enabled_in.entry(conn.out_node).or_insert(false);
+            if conn.enabled {
+                *has_enabled_out.get_mut(&conn.in_node).unwrap() = true;
+                *has_enabled_in.get_mut(&conn.out_node).unwrap() = true;
+            }
+        }
+
+        let dead_ids: Vec<usize> = self
+            .nodes
+            .iter()
+            .filter(|n| {
+                matches!(n.node_type, NodeType::Block(_))
+                    && (!has_enabled_out.get(&n.id).copied().unwrap_or(false)
+                        || !has_enabled_in.get(&n.id).copied().unwrap_or(false))
+            })
+            .map(|n| n.id)
+            .collect();
+
+        if dead_ids.is_empty() {
+            return;
+        }
+
+        self.connections
+            .retain(|c| !dead_ids.contains(&c.in_node) && !dead_ids.contains(&c.out_node));
+        self.nodes.retain(|n| !dead_ids.contains(&n.id));
+    }
+
+    /// Input/Output 孤点修复：若全部启用线已断，强制生成新连接到指定 block
+    /// 目标：指定 block 中当前连接数（含 disabled）最少的节点
+    fn repair_orphan_io(&mut self) {
+        use super::block;
+        let mut rng = rand::thread_rng();
+
+        for node in &self.nodes {
+            match node.node_type {
+                NodeType::Input => {
+                    let designated = block::sensory_block_for_input(node.id);
+                    let has_enabled = self.connections.iter().any(|c| {
+                        c.enabled
+                            && c.in_node == node.id
+                            && self
+                                .nodes
+                                .iter()
+                                .any(|n| n.id == c.out_node && Self::node_block(n) == designated)
+                    });
+                    if has_enabled {
+                        continue;
+                    }
+                    // 找到指定 block 中总连接数最少的节点
+                    let designated_nodes: Vec<usize> = self
+                        .nodes
+                        .iter()
+                        .enumerate()
+                        .filter(
+                            |(_, n)| matches!(n.node_type, NodeType::Block(b) if b == designated),
+                        )
+                        .map(|(i, _)| i)
+                        .collect();
+                    // 按总连接数（含 disabled）排序，取最少
+                    let best = designated_nodes.iter().min_by_key(|&&i| {
+                        let id = self.nodes[i].id;
+                        self.connections
+                            .iter()
+                            .filter(|c| c.in_node == id || c.out_node == id)
+                            .count()
+                    });
+                    if let Some(&best_idx) = best {
+                        let to_id = self.nodes[best_idx].id;
+                        let exists = self
+                            .connections
+                            .iter()
+                            .any(|c| c.in_node == node.id && c.out_node == to_id);
+                        if !exists {
+                            self.connections.push(ConnectionGene {
+                                in_node: node.id,
+                                out_node: to_id,
+                                weight: rng.gen_range(-0.1..0.1),
+                                enabled: true,
+                            });
+                        }
+                    }
+                }
+                NodeType::Output => {
+                    let out_idx = node.id.saturating_sub(Self::INPUT_SIZE);
+                    let designated = block::motor_block_for_output(out_idx);
+                    let has_enabled = self.connections.iter().any(|c| {
+                        c.enabled
+                            && c.out_node == node.id
+                            && self
+                                .nodes
+                                .iter()
+                                .any(|n| n.id == c.in_node && Self::node_block(n) == designated)
+                    });
+                    if has_enabled {
+                        continue;
+                    }
+                    let designated_nodes: Vec<usize> = self
+                        .nodes
+                        .iter()
+                        .enumerate()
+                        .filter(
+                            |(_, n)| matches!(n.node_type, NodeType::Block(b) if b == designated),
+                        )
+                        .map(|(i, _)| i)
+                        .collect();
+                    let best = designated_nodes.iter().min_by_key(|&&i| {
+                        let id = self.nodes[i].id;
+                        self.connections
+                            .iter()
+                            .filter(|c| c.in_node == id || c.out_node == id)
+                            .count()
+                    });
+                    if let Some(&best_idx) = best {
+                        let from_id = self.nodes[best_idx].id;
+                        let exists = self
+                            .connections
+                            .iter()
+                            .any(|c| c.in_node == from_id && c.out_node == node.id);
+                        if !exists {
+                            self.connections.push(ConnectionGene {
+                                in_node: from_id,
+                                out_node: node.id,
+                                weight: rng.gen_range(-0.1..0.1),
+                                enabled: true,
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 
     /// 计算基因组哈希
     pub fn hash(&self) -> u64 {

@@ -963,6 +963,9 @@ mod inner {
         last_batch_ns: u64,
         /// 学习基因缓存：creature_id -> LearningGene
         learning_genes: FxHashMap<u64, LearningGene>,
+        // ====== 临时梳理-4：creature_id -> node_conn_counts ======
+        node_conn_counts: FxHashMap<u64, FxHashMap<usize, usize>>,
+        // ====== 临时梳理-4 结束 ======
     }
 
     impl GpuExecutor {
@@ -975,6 +978,7 @@ mod inner {
                 last_tick_count: 0,
                 last_batch_ns: 0,
                 learning_genes: FxHashMap::default(),
+                node_conn_counts: FxHashMap::default(),
             })
         }
     }
@@ -1008,6 +1012,11 @@ mod inner {
                 let conn_count = self.gpu.meta_cpu[slot].conn_count as usize;
                 let conn_base = slot * MAX_CONNS;
 
+                // ====== 临时梳理-4：连接数>7的节点 Hebbian 只能削弱 ======
+                const GPU_HEBB_CONN_THRESHOLD: usize = 7;
+                let counts = self.node_conn_counts.get(&r.creature_id);
+                // ====== 临时梳理-4 结束 ======
+
                 for c in 0..conn_count {
                     let trace = self.gpu.traces_cpu[conn_base + c];
                     if trace.abs() < 0.001 {
@@ -1015,7 +1024,24 @@ mod inner {
                     }
                     let delta = rate * (trace as f64) * r.total_reward * sign;
                     let conn = &mut self.gpu.connections_cpu[conn_base + c];
-                    conn.weight = (conn.weight as f64 + delta).clamp(-2.0, 2.0) as f32;
+                    // ====== 临时梳理-4：受限判定 ======
+                    let in_count = counts
+                        .and_then(|m| m.get(&(conn.from_node as usize)))
+                        .copied()
+                        .unwrap_or(0);
+                    let out_count = counts
+                        .and_then(|m| m.get(&(conn.to_node as usize)))
+                        .copied()
+                        .unwrap_or(0);
+                    let gpu_restricted =
+                        in_count > GPU_HEBB_CONN_THRESHOLD || out_count > GPU_HEBB_CONN_THRESHOLD;
+                    let effective_delta = if gpu_restricted && delta > 0.0 {
+                        0.0
+                    } else {
+                        delta
+                    };
+                    conn.weight = (conn.weight as f64 + effective_delta).clamp(-2.0, 2.0) as f32;
+                    // ====== 临时梳理-4 结束 ======
 
                     // Post-apply trace 衰减（对齐 CPU 版 apply_physiology 的 traces *= 0.1）
                     self.gpu.traces_cpu[conn_base + c] *= 0.1;
@@ -1047,6 +1073,15 @@ mod inner {
                     _pad1: 0.0,
                 };
                 self.gpu.upload_learning_params(slot, &params);
+
+                // ====== 临时梳理-4：统计节点连接数（含disabled） ======
+                let mut counts: FxHashMap<usize, usize> = FxHashMap::default();
+                for conn in &genome.connections {
+                    *counts.entry(conn.in_node).or_default() += 1;
+                    *counts.entry(conn.out_node).or_default() += 1;
+                }
+                self.node_conn_counts.insert(id, counts);
+                // ====== 临时梳理-4 结束 ======
             }
         }
 
@@ -1057,6 +1092,9 @@ mod inner {
             self.slots.free(id);
             self.output_modes_cache.remove(&id);
             self.learning_genes.remove(&id);
+            // ====== 临时梳理-4 ======
+            self.node_conn_counts.remove(&id);
+            // ====== 临时梳理-4 结束 ======
         }
 
         fn run_batch(&mut self, inputs: &[CreatureInput], tick_count: usize) {

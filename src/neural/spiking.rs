@@ -46,6 +46,9 @@ pub struct SpikingNetwork {
     eligibility_traces: FxHashMap<(usize, usize), f64>,
     /// 学习基因（从基因组复制，运行时只读）
     learning_gene: LearningGene,
+    // ====== 临时梳理-4：节点连接数（Hebbian 受限判定） ======
+    node_conn_counts: FxHashMap<usize, usize>,
+    // ====== 临时梳理-4 结束 ======
 }
 
 impl Default for SpikingNetwork {
@@ -61,6 +64,7 @@ impl Default for SpikingNetwork {
             prev_state: FxHashMap::default(),
             eligibility_traces: FxHashMap::default(),
             learning_gene: LearningGene::default(),
+            node_conn_counts: FxHashMap::default(),
         }
     }
 }
@@ -152,6 +156,14 @@ impl SpikingNetwork {
             prev_state.insert(node_id, (0.0, false));
         }
 
+        // ====== 临时梳理-4：统计每个节点的连接数（含disabled） ======
+        let mut node_conn_counts: FxHashMap<usize, usize> = FxHashMap::default();
+        for conn in &genome.connections {
+            *node_conn_counts.entry(conn.in_node).or_default() += 1;
+            *node_conn_counts.entry(conn.out_node).or_default() += 1;
+        }
+        // ====== 临时梳理-4 结束 ======
+
         Self {
             nodes,
             eval_order,
@@ -163,6 +175,7 @@ impl SpikingNetwork {
             prev_state,
             eligibility_traces: FxHashMap::default(),
             learning_gene: genome.learning.clone(),
+            node_conn_counts,
         }
     }
 
@@ -457,12 +470,26 @@ impl SpikingNetwork {
             }
         }
 
+        // ====== 临时梳理-4：连接数>6的节点 Hebbian 只能削弱 ======
+        const HEBB_CONN_THRESHOLD: usize = 7;
+        // ====== 临时梳理-4 结束 ======
+
         // 应用权重更新
         for ((in_node, out_node), delta) in updates {
             if let Some(inputs) = self.all_inputs.get_mut(&out_node) {
                 for (src, weight) in inputs.iter_mut() {
                     if *src == in_node {
-                        *weight = (*weight + delta).clamp(-2.0, 2.0);
+                        let in_over = self.node_conn_counts.get(&in_node).copied().unwrap_or(0)
+                            > HEBB_CONN_THRESHOLD;
+                        let out_over = self.node_conn_counts.get(&out_node).copied().unwrap_or(0)
+                            > HEBB_CONN_THRESHOLD;
+                        let restricted = in_over || out_over;
+                        let effective_delta = if restricted && delta > 0.0 {
+                            0.0 // 受限：不增强
+                        } else {
+                            delta
+                        };
+                        *weight = (*weight + effective_delta).clamp(-2.0, 2.0);
                         continue;
                     }
                 }

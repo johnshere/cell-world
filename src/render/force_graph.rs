@@ -73,8 +73,6 @@ const AUTO_ZOOM_ALPHA_THRESHOLD: f64 = 0.12;
 const AUTO_ZOOM_DURATION: f32 = 2.0;
 /// 自动缩放边距比例（画布的 padding）
 const AUTO_ZOOM_PADDING: f32 = 0.08;
-/// 质心凝聚力单次上限
-const BLOCK_COHESION_MAX: f32 = 30.0;
 
 // ---------------------------------------------------------------------------
 // 力模拟状态（跨帧持久化）
@@ -406,8 +404,8 @@ impl ForceGraphState {
                                 if dist < 0.5 {
                                     continue;
                                 }
-                                let force_mag =
-                                    (dist * self.cohesion_k as f32).min(BLOCK_COHESION_MAX);
+                                let k = self.cohesion_k as f32;
+                                let force_mag = (dist * k).min(k * 200.0);
                                 *vel += delta / dist * force_mag;
                             }
                         }

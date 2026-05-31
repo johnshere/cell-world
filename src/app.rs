@@ -929,8 +929,8 @@ impl CellWorldApp {
                     "质心凝聚力",
                     "同block节点靠拢强度，0=关闭",
                     &mut c.force_graph_cohesion_k,
-                    1.0,
-                    0.0..=100.0,
+                    0.01,
+                    0.001..=100.0,
                 );
                 changed |= config_drag_f64(
                     ui,
@@ -1926,9 +1926,9 @@ impl eframe::App for CellWorldApp {
             }
         }
 
-        // 基因库自动投放：每2秒为勾选的模板各投放1个生物
+        // 基因库自动投放：按配置间隔为勾选的模板各投放1个生物
         if !self.panel.auto_spawn_templates.is_empty()
-            && self.panel.last_auto_spawn.elapsed() >= std::time::Duration::from_secs(2)
+            && self.panel.last_auto_spawn.elapsed() >= std::time::Duration::from_secs(3)
         {
             self.panel.last_auto_spawn = std::time::Instant::now();
             for name in self.panel.auto_spawn_templates.iter() {
