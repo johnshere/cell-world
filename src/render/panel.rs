@@ -1,4 +1,5 @@
 use egui::Ui;
+use rustc_hash::FxHashSet;
 use std::time::Instant;
 
 use super::canvas::species_to_color;
@@ -53,6 +54,10 @@ pub struct StatsPanel {
     force_graph_genome: Option<crate::neural::Genome>,
     /// 力导图状态（跨帧维护力模拟）
     pub force_graph_state: super::force_graph::ForceGraphState,
+    /// 基因库自动投放的模板名集合
+    pub auto_spawn_templates: rustc_hash::FxHashSet<String>,
+    /// 上次自动投放时间
+    pub last_auto_spawn: Instant,
 }
 
 /// 目标偏好查看窗口的数据来源
@@ -133,6 +138,8 @@ impl StatsPanel {
             force_graph_view: None,
             force_graph_genome: None,
             force_graph_state: super::force_graph::ForceGraphState::new(),
+            auto_spawn_templates: FxHashSet::default(),
+            last_auto_spawn: Instant::now(),
         }
     }
 
@@ -552,6 +559,23 @@ impl StatsPanel {
                             .rounding(3.0)
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
+                                    // 手动模板左侧加自动投放 checkbox
+                                    if !is_auto {
+                                        let mut active =
+                                            self.auto_spawn_templates.contains(&template.name);
+                                        if ui
+                                            .checkbox(&mut active, "")
+                                            .on_hover_text("每2秒投放1个该模板生物")
+                                            .changed()
+                                        {
+                                            if active {
+                                                self.auto_spawn_templates
+                                                    .insert(template.name.clone());
+                                            } else {
+                                                self.auto_spawn_templates.remove(&template.name);
+                                            }
+                                        }
+                                    }
                                     ui.label(format!("{} {}", tag, template.name));
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),

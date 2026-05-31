@@ -507,19 +507,6 @@ impl Genome {
                 }
             }
 
-            // Block 变异（仅联合区节点可变，使用 block_rate）
-            for node in &mut child.nodes {
-                if let NodeType::Block(ref mut blk) = node.node_type {
-                    if super::block::is_association(*blk) && rng.gen::<f64>() < block_rate {
-                        let delta: i8 = rng.gen_range(-2..=2);
-                        let new_blk = (*blk + delta).clamp(-24, 24);
-                        if super::block::is_association(new_blk) {
-                            *blk = new_blk;
-                        }
-                    }
-                }
-            }
-
             // block_probs变异（使用 block_rate）
             child.mutate_block_probs_gene(block_rate);
 
@@ -763,20 +750,54 @@ impl Genome {
         use super::block;
         let mut rng = rand::thread_rng();
 
-        // 随机选源节点（Input 或 Block）
-        let from_candidates: Vec<usize> = self
-            .nodes
-            .iter()
-            .enumerate()
-            .filter(|(_, n)| !matches!(n.node_type, NodeType::Output))
-            .map(|(i, _)| i)
-            .collect();
+        // 源节点选择：先随机选 block，再在 block 内按 layer 加权选节点
+        // Processing 偏向发新连接（60%），Output 偏向向外投射（40%）
+        // Input 走独立硬约束路径，参与 block 随机但因只有自身而无加权
 
-        if from_candidates.is_empty() {
+        // 按 block 分组非 Output 节点
+        let mut from_by_blk: HashMap<i8, Vec<usize>> = HashMap::new();
+        for (i, node) in self.nodes.iter().enumerate() {
+            if matches!(node.node_type, NodeType::Output) {
+                continue;
+            }
+            let blk = Self::node_block(node);
+            from_by_blk.entry(blk).or_default().push(i);
+        }
+        if from_by_blk.is_empty() {
             return;
         }
 
-        let from_idx = from_candidates[rng.gen_range(0..from_candidates.len())];
+        // 随机选一个 block（各 block 等权）
+        let blk_keys: Vec<i8> = from_by_blk.keys().copied().collect();
+        let chosen_blk = blk_keys[rng.gen_range(0..blk_keys.len())];
+        let candidates = &from_by_blk[&chosen_blk];
+
+        // 在 block 内按 layer 加权选节点（Proc 60%, Out 40%）
+        let mut weights: Vec<f32> = Vec::with_capacity(candidates.len());
+        for &ci in candidates {
+            let layer = self.nodes[ci].layer;
+            let w = if layer == LayerType::Processing {
+                0.6
+            } else {
+                0.4
+            };
+            weights.push(w);
+        }
+        let total: f32 = weights.iter().sum();
+        let from_idx = if total <= 0.0 {
+            candidates[rng.gen_range(0..candidates.len())]
+        } else {
+            let mut r = rng.gen::<f32>() * total;
+            let mut chosen = candidates[candidates.len() - 1];
+            for (k, &ci) in candidates.iter().enumerate() {
+                r -= weights[k];
+                if r <= 0.0 {
+                    chosen = ci;
+                    break;
+                }
+            }
+            chosen
+        };
         let from_node = &self.nodes[from_idx];
         let from_blk = Self::node_block(from_node);
         let from_id = from_node.id;

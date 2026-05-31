@@ -9,7 +9,7 @@
 //! - alpha 留底（alpha_min）→ 系统永不冻结，支持手动拖动后重排
 
 use crate::neural::block::{motor_block_for_output, sensory_block_for_input};
-use crate::neural::genome::{Genome, NodeGene, NodeType};
+use crate::neural::genome::{ConnProbsGene, Genome, LayerType, NodeGene, NodeType};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
 
@@ -594,12 +594,13 @@ pub fn render_force_graph_window(
             let to_screen =
                 |p: egui::Pos2| -> egui::Pos2 { canvas_center + (p.to_vec2() * display_scale) };
 
-            draw_block_groups(genome, state, &painter, to_screen);
+            let block_bboxes = draw_block_groups(genome, state, &painter, to_screen);
             draw_connections(genome, state, &painter, to_screen);
             draw_nodes(genome, state, &painter, to_screen);
             draw_io_labels(genome, state, &painter, to_screen);
             draw_block_labels(genome, state, &painter, to_screen);
             draw_hover_tooltip(genome, state, &response, rect, &painter, to_screen);
+            draw_block_hover(genome, &response, &block_bboxes, &painter);
             draw_legend(&painter, rect);
         });
 
@@ -727,7 +728,8 @@ fn draw_block_groups(
     state: &ForceGraphState,
     painter: &egui::Painter,
     to_screen: impl Fn(egui::Pos2) -> egui::Pos2,
-) {
+) -> Vec<(i8, egui::Rect)> {
+    let mut bboxes: Vec<(i8, egui::Rect)> = Vec::new();
     // 仅聚合 Block 节点：Input/Output 钉在画布顶/底，框进来会让 bounding box 贯穿画布
     let mut block_nodes: HashMap<i8, Vec<&NodeGene>> = HashMap::new();
     for node in &genome.nodes {
@@ -771,7 +773,9 @@ fn draw_block_groups(
         painter.rect_filled(bbox, 6.0, color.gamma_multiply(0.12));
         painter.rect_stroke(bbox, 6.0, egui::Stroke::new(1.5, color.gamma_multiply(0.6)));
 
-        let label = block_label(blk, nodes.len());
+        bboxes.push((blk, bbox));
+
+        let label = block_label(blk, nodes);
         painter.text(
             egui::pos2(bbox.left() + 4.0, bbox.top() + 2.0),
             egui::Align2::LEFT_TOP,
@@ -779,6 +783,79 @@ fn draw_block_groups(
             egui::FontId::proportional(10.0),
             color.gamma_multiply(0.9),
         );
+    }
+    bboxes
+}
+
+// ---------------------------------------------------------------------------
+// 区块悬停信息：conn_probs + target_pref
+// ---------------------------------------------------------------------------
+
+fn draw_block_hover(
+    genome: &Genome,
+    response: &egui::Response,
+    bboxes: &[(i8, egui::Rect)],
+    painter: &egui::Painter,
+) {
+    let hover_pos = match response.hover_pos() {
+        Some(p) => p,
+        None => return,
+    };
+    for &(blk, bbox) in bboxes {
+        if !bbox.contains(hover_pos) {
+            continue;
+        }
+        let probs = genome.conn_probs.get(&blk);
+        let default_probs = ConnProbsGene::default();
+        let proc_probs = probs.map(|p| p.proc).unwrap_or(default_probs.proc);
+        let out_probs = probs.map(|p| p.out).unwrap_or(default_probs.out);
+        let target_pref = probs.map(|p| &p.target_pref);
+        let has_prefs = target_pref.map_or(false, |t| !t.is_empty());
+
+        let mut lines: Vec<String> = Vec::new();
+        lines.push(format!("B{}", blk));
+        lines.push(format!(
+            "P: 同区Proc{:.0}% 同区Out{:.0}% 跨同行{:.0}% 跨对行{:.0}% 反馈{:.0}%",
+            proc_probs[0] * 100.0,
+            proc_probs[1] * 100.0,
+            proc_probs[2] * 100.0,
+            proc_probs[3] * 100.0,
+            proc_probs[4] * 100.0,
+        ));
+        lines.push(format!(
+            "O: 同区Proc{:.0}% 同区Out{:.0}% 跨同行{:.0}% 跨对行{:.0}% 反馈{:.0}%",
+            out_probs[0] * 100.0,
+            out_probs[1] * 100.0,
+            out_probs[2] * 100.0,
+            out_probs[3] * 100.0,
+            out_probs[4] * 100.0,
+        ));
+        if has_prefs {
+            let mut prefs: Vec<String> = target_pref
+                .unwrap()
+                .iter()
+                .map(|(k, v)| format!("→B{}:{:.1}x", k, v))
+                .collect();
+            prefs.sort();
+            lines.push(format!("偏爱: {}", prefs.join(" ")));
+        }
+
+        // tooltip 背景
+        let font = egui::FontId::proportional(9.0);
+        let tip = lines.join("\n");
+        let galley = painter.layout_no_wrap(tip, font.clone(), egui::Color32::WHITE);
+        let pad = egui::vec2(6.0, 3.0);
+        let tip_size = galley.size() + pad * 2.0;
+        let tip_pos = egui::pos2(hover_pos.x + 12.0, (hover_pos.y - tip_size.y).max(0.0));
+        let tip_rect = egui::Rect::from_min_size(tip_pos, tip_size);
+        painter.rect_filled(tip_rect, 4.0, egui::Color32::from_black_alpha(220));
+        painter.rect_stroke(
+            tip_rect,
+            4.0,
+            egui::Stroke::new(1.0, egui::Color32::from_gray(100)),
+        );
+        painter.galley(tip_pos + pad, galley, egui::Color32::WHITE);
+        break;
     }
 }
 
@@ -806,6 +883,7 @@ fn draw_connections(
             let a = to_screen(*pa);
             let b = to_screen(*pb);
             painter.line_segment([a, b], egui::Stroke::new(0.5, disabled_color));
+            draw_arrowhead(painter, a, b, 3.0, 5.0, disabled_color);
         }
     }
 
@@ -828,8 +906,40 @@ fn draw_connections(
                 egui::Color32::from_rgba_premultiplied(255, 120, 100, (alpha * 255.0) as u8)
             };
             painter.line_segment([a, b], egui::Stroke::new(width, color));
+            draw_arrowhead(painter, a, b, width.max(1.5), 5.0, color);
         }
     }
+}
+
+/// 在连线 out_node 端绘制小三角箭头，指示信号流向
+fn draw_arrowhead(
+    painter: &egui::Painter,
+    a: egui::Pos2,
+    b: egui::Pos2,
+    line_width: f32,
+    arrow_len: f32,
+    color: egui::Color32,
+) {
+    let dir = b - a;
+    let dist = dir.length();
+    if dist < 16.0 {
+        return; // 连线太短，箭头会重叠
+    }
+    let dir_n = dir / dist;
+    let perp = egui::vec2(-dir_n.y, dir_n.x);
+    // 箭头从 out_node 表面向内缩一个节点半径
+    let inset = 7.0;
+    let tip = b - dir_n * inset;
+    let base = tip - dir_n * arrow_len;
+    let half_w = (line_width * 0.8).max(1.8);
+    let p1 = tip;
+    let p2 = base + perp * half_w;
+    let p3 = base - perp * half_w;
+    painter.add(egui::Shape::convex_polygon(
+        vec![p1, p2, p3],
+        color,
+        egui::Stroke::NONE,
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -848,8 +958,20 @@ fn draw_nodes(
             let r = node_radius(node);
             let color = node_color(node);
 
-            painter.circle_filled(sp, r, color);
-            painter.circle_stroke(sp, r, egui::Stroke::new(1.0, color.gamma_multiply(0.7)));
+            match node.node_type {
+                // Block Out 层：正方形（实心），边长 ≈ 圆直径
+                NodeType::Block(_) if node.layer == LayerType::Output => {
+                    let half = r * 0.7;
+                    let sq = egui::Rect::from_center_size(sp, egui::vec2(half * 2.0, half * 2.0));
+                    painter.rect_filled(sq, 1.0, color);
+                    painter.rect_stroke(sq, 1.0, egui::Stroke::new(1.0, color.gamma_multiply(0.7)));
+                }
+                // Block Proc 层 + Input/Output：圆形（现有行为）
+                _ => {
+                    painter.circle_filled(sp, r, color);
+                    painter.circle_stroke(sp, r, egui::Stroke::new(1.0, color.gamma_multiply(0.7)));
+                }
+            }
 
             // pinned 节点：外圈黄色提示
             if state.pinned.get(&node.id).copied().unwrap_or(false) {
@@ -996,22 +1118,84 @@ fn draw_legend(painter: &egui::Painter, rect: egui::Rect) {
     let x = rect.left() + 6.0;
     let y = rect.bottom() - 14.0;
 
-    let items = [
-        (egui::Color32::from_rgb(100, 220, 130), "感官"),
-        (egui::Color32::from_rgb(180, 180, 200), "隐层"),
-        (egui::Color32::from_rgb(255, 180, 80), "运动"),
-        (egui::Color32::from_rgb(100, 200, 255), "兴奋+"),
-        (egui::Color32::from_rgb(255, 120, 100), "抑制-"),
+    let items: [(
+        &dyn Fn(&egui::Painter, egui::Pos2, egui::Color32),
+        egui::Color32,
+        &str,
+    ); 9] = [
         (
+            &(|p, pos, c| {
+                p.circle_filled(pos, 4.0, c);
+            }),
+            egui::Color32::from_rgb(100, 220, 130),
+            "感官",
+        ),
+        (
+            &(|p, pos, c| {
+                p.circle_filled(pos, 4.0, c);
+            }),
+            egui::Color32::from_rgb(180, 180, 200),
+            "隐层",
+        ),
+        (
+            &(|p, pos, c| {
+                p.circle_filled(pos, 4.0, c);
+            }),
+            egui::Color32::from_rgb(255, 180, 80),
+            "运动",
+        ),
+        (
+            &(|p, pos, c| {
+                p.circle_filled(pos, 4.0, c);
+            }),
+            egui::Color32::from_rgb(255, 220, 130),
+            "Proc○",
+        ),
+        (
+            &(|p, pos, c| {
+                let half = 3.5;
+                p.rect_filled(
+                    egui::Rect::from_center_size(pos, egui::vec2(half * 2.0, half * 2.0)),
+                    0.5,
+                    c,
+                );
+            }),
+            egui::Color32::from_rgb(255, 220, 130),
+            "Out□",
+        ),
+        (
+            &(|p, pos, c| {
+                p.circle_filled(pos, 4.0, c);
+            }),
+            egui::Color32::from_rgb(100, 200, 255),
+            "兴奋+",
+        ),
+        (
+            &(|p, pos, c| {
+                p.circle_filled(pos, 4.0, c);
+            }),
+            egui::Color32::from_rgb(255, 120, 100),
+            "抑制-",
+        ),
+        (
+            &(|p, pos, c| {
+                p.circle_filled(pos, 4.0, c);
+            }),
             egui::Color32::from_rgba_premultiplied(80, 80, 80, 30),
             "禁用",
         ),
-        (egui::Color32::from_rgb(255, 220, 80), "已钉"),
+        (
+            &(|p, pos, c| {
+                p.circle_filled(pos, 4.0, c);
+            }),
+            egui::Color32::from_rgb(255, 220, 80),
+            "已钉",
+        ),
     ];
 
     let mut x_off = x;
-    for (color, label) in &items {
-        painter.circle_filled(egui::pos2(x_off, y), 4.0, *color);
+    for (draw_fn, color, label) in &items {
+        draw_fn(painter, egui::pos2(x_off, y), *color);
         painter.text(
             egui::pos2(x_off + 7.0, y),
             egui::Align2::LEFT_CENTER,
@@ -1069,7 +1253,7 @@ fn block_color(blk: i8) -> egui::Color32 {
     egui::Color32::from_rgb(brighten(r), brighten(g), brighten(b))
 }
 
-fn block_label(blk: i8, count: usize) -> String {
+fn block_label(blk: i8, nodes: &[&NodeGene]) -> String {
     let role = match blk {
         -1 => "左眼",
         1 => "右眼",
@@ -1102,7 +1286,15 @@ fn block_label(blk: i8, count: usize) -> String {
             }
         }
     };
-    format!("B{} {} {}n", blk, role, count)
+    let proc_n = nodes
+        .iter()
+        .filter(|n| n.layer == LayerType::Processing)
+        .count();
+    let out_n = nodes
+        .iter()
+        .filter(|n| n.layer == LayerType::Output)
+        .count();
+    format!("B{} {} P:{} O:{}", blk, role, proc_n, out_n)
 }
 
 fn node_tooltip(node: &NodeGene) -> String {
