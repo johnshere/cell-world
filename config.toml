@@ -19,9 +19,9 @@ volcano_interval = 25.0
 # 火山喷射半径
 volcano_radius = 3000.0
 # 火山粒子半径分布倾角（负值让外围更密，默认-0.3）
-volcano_spread_bias = 0.5
+volcano_spread_bias = 1.0
 # 每次喷发粒子数
-volcano_count = 55
+volcano_count = 45
 # 火山粒子能量
 volcano_particle_energy = 130.0
 
@@ -80,7 +80,7 @@ heat_floor = 0.03
 
 # === 代谢 ===
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
-age_metabolism_factor = 0.015
+age_metabolism_factor = 0.025
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗系数（面板值×0.00001×半径³ = 实际消耗）
@@ -138,7 +138,7 @@ neural_backend = "auto"
 neural_tick_rate = 600.0
 # 变异率（全局常量，不再是基因组内可演化基因）
 # base/block 两类变异共享此触发概率
-mutation_rate = 0.12
+mutation_rate = 0.5
 # 无性繁殖权重变异率缩放系数（仅作用于权重微调）
 # 无性繁殖中其余 7 类创新变异（add_connection/add_node/Layer/Block/block_probs/learning/physio/enable切换）完全禁用
 # 默认 0.4 ≈ 近似克隆；1.0=无差异化，0.0=完全克隆
@@ -157,7 +157,7 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = false
-auto_spawn_interval = 1.0
+auto_spawn_interval = 99.0
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
@@ -165,7 +165,7 @@ terrain_slope_cost = 10.0
 # === 奖励通道开关 ===
 reward_energy_enabled = true
 reward_trail_enabled = false
-reward_group_enabled = true
+reward_group_enabled = false
 
 # === 反孤立代价（统一系数）===
 # 控制孤独生命的年龄加速倍率（vision_range 内无活邻居 → age 增速 ×solitude_penalty）
