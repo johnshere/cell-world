@@ -243,9 +243,9 @@ fn passes_c1_cap(
     from_n < limit && to_n < limit
 }
 
-/// debug 断言：新增连接必须满足 Input/Output 硬约束
-/// - Input → 仅可连其指定感官 block（sensory_block_for_input）
-/// - Output → 仅可由其指定运动 block（motor_block_for_output）接收
+/// debug 断言：新增连接必须满足 Input/Output 双重硬约束（block + layer）
+/// - Input → 仅可连其指定感官 block 的 Processing 层节点
+/// - Output → 仅可由其指定运动 block 的 Output 层节点接收
 /// 仅在 debug 构建中生效，release 零开销
 #[inline]
 fn debug_assert_valid_io_edge(nodes: &[NodeGene], from_id: usize, to_id: usize) {
@@ -256,7 +256,7 @@ fn debug_assert_valid_io_edge(nodes: &[NodeGene], from_id: usize, to_id: usize) 
     let from_node = nodes.iter().find(|n| n.id == from_id);
     let to_node = nodes.iter().find(|n| n.id == to_id);
     if let (Some(fnode), Some(tnode)) = (from_node, to_node) {
-        // Input 源
+        // Input 源：目标必须是指定 block + Processing layer
         if matches!(fnode.node_type, NodeType::Input) {
             let designated = block::sensory_block_for_input(from_id);
             let to_blk = Genome::node_block(tnode);
@@ -265,8 +265,16 @@ fn debug_assert_valid_io_edge(nodes: &[NodeGene], from_id: usize, to_id: usize) 
                 "Input id={} 必须连到指定 block {}, 实际连到 {}",
                 from_id, designated, to_blk
             );
+            debug_assert_eq!(
+                tnode.layer,
+                LayerType::Processing,
+                "Input id={} 必须连到 Processing 层节点, 实际目标节点 id={} 是 {:?}",
+                from_id,
+                to_id,
+                tnode.layer
+            );
         }
-        // Output 目标
+        // Output 目标：源必须是指定 motor block + Output layer
         if matches!(tnode.node_type, NodeType::Output) {
             let out_idx = to_id.saturating_sub(Genome::INPUT_SIZE);
             let designated = block::motor_block_for_output(out_idx);
@@ -275,6 +283,14 @@ fn debug_assert_valid_io_edge(nodes: &[NodeGene], from_id: usize, to_id: usize) 
                 from_blk, designated,
                 "Output id={} 必须由指定 block {} 接收, 实际由 {} 发起",
                 to_id, designated, from_blk
+            );
+            debug_assert_eq!(
+                fnode.layer,
+                LayerType::Output,
+                "Output id={} 必须由 Output 层节点驱动, 实际源节点 id={} 是 {:?}",
+                to_id,
+                from_id,
+                fnode.layer
             );
         }
     }
@@ -300,22 +316,26 @@ impl Genome {
     /// [7] 发光强度 tanh→(v+1)/2 映射到 0~1, 量化一位小数     block -26（光嘴/语言生成）
     pub const OUTPUT_SIZE: usize = 8;
 
-    /// 创建最小基因组（v2.4 84 节点拓扑）：
+    /// 创建最小基因组（v2.4.1 56 节点拓扑 = 2n）：
     ///
     /// - 20 Input + 8 Output = 28 个固定 I/O 节点
-    /// - 每 input 在其指定感官 block 中独占 1 个 Proc 节点 + 1 个反向补齐 Out 节点
-    /// - 每 output 在其指定运动 block 中独占 1 个 Out 节点 + 1 个反向补齐 Proc 节点
-    /// - 合计 28 (I/O) + 20 (input Proc) + 20 (input 反向 Out) + 8 (output Out) + 8 (output 反向 Proc) = 84
+    /// - 每 input 在其指定感官 block 中独占 1 个 Proc 节点（无反向 Out 补齐）
+    /// - 每 output 在其指定运动 block 中独占 1 个 Out 节点（无反向 Proc 补齐）
+    /// - 合计 28 (I/O) + 20 (input Proc) + 8 (output Out) = **56 节点（2n）**
     ///
-    /// 必要连接（保证从 input 到 output 至少一条潜在通路）：
-    /// - input_i → 其独占 Proc_i（input 硬约束）
-    /// - input 的独占 Proc_i → 同 block 配对反向 Out_i（block 内部信号出口）
-    /// - output 的反向 Proc_j → 同 block 独占 Out_j（block 内部信号入口）
-    /// - 独占 Out_j → output_j（output 硬约束）
+    /// 必要连接（仅两类，3 跳最短可达 output）：
+    /// - input_i → 其独占 Proc_i（input 硬约束 + Proc layer 硬约束）
+    /// - 独占 Out_j → output_j（output 硬约束 + Out layer 硬约束）
     ///
-    /// 然后撒 `n × initial_connection_ratio` 条随机跨/同 block 连接，遵守：
-    /// - ConnProbs/target_pref/硬约束（input/output 指定 block）
-    /// - C1 软上限：单节点活跃连接数 ≤10
+    /// 必要边权重用 `[-1.0, 1.0]`（演化基线信号强度），让 "input→Proc → [cross 边] → Out→output"
+    /// 3 跳路径在初始时就有非零 speed 信号驱动。
+    ///
+    /// 然后撒 `n × initial_connection_ratio` 条随机跨/同 block 连接（小权重 `[-0.1, 0.1]`，
+    /// 复用 `mutate_add_connection(_, Some(10))`），遵守：
+    /// - ConnProbs/target_pref/硬约束/C1≤10
+    ///
+    /// C2（block 内 Proc+Out 共存）由 `mutate_add_node` 在演化中自然补齐，不在初始预制——
+    /// 初始 sensory 只有 Proc / motor 只有 Out 是有意为之，给演化留扩张空间。
     pub fn random_minimal(initial_connection_ratio: f64) -> Self {
         use super::block;
         let mut rng = rand::thread_rng();
@@ -350,7 +370,7 @@ impl Genome {
             next_id += 1;
         }
 
-        // 3. 每个 input：独占 Proc + 配对反向 Out（同 block）
+        // 3. 每个 input：独占 Proc（在其指定 sensory block，无 Out 配对）
         for input_id in 0..Self::INPUT_SIZE {
             let blk = block::sensory_block_for_input(input_id);
 
@@ -365,34 +385,16 @@ impl Genome {
             });
             next_id += 1;
 
-            let out_id = next_id;
-            nodes.push(NodeGene {
-                id: out_id,
-                node_type: NodeType::Block(blk),
-                layer: LayerType::Output,
-                decay: 0.0,
-                threshold: 0.0,
-                refractory_period: 0,
-            });
-            next_id += 1;
-
-            // input → 独占 Proc
+            // input → 独占 Proc（必要边大权重）
             connections.push(ConnectionGene {
                 in_node: input_id,
                 out_node: proc_id,
-                weight: rng.gen_range(-0.1..0.1),
-                enabled: true,
-            });
-            // 独占 Proc → 配对反向 Out（block 内部信号出口）
-            connections.push(ConnectionGene {
-                in_node: proc_id,
-                out_node: out_id,
-                weight: rng.gen_range(-0.1..0.1),
+                weight: rng.gen_range(-1.0..1.0),
                 enabled: true,
             });
         }
 
-        // 4. 每个 output：独占 Out + 配对反向 Proc（同 block）
+        // 4. 每个 output：独占 Out（在其指定 motor block，无 Proc 配对）
         for output_idx in 0..Self::OUTPUT_SIZE {
             let output_id = output_start + output_idx;
             let blk = block::motor_block_for_output(output_idx);
@@ -408,29 +410,11 @@ impl Genome {
             });
             next_id += 1;
 
-            let proc_id = next_id;
-            nodes.push(NodeGene {
-                id: proc_id,
-                node_type: NodeType::Block(blk),
-                layer: LayerType::Processing,
-                decay: 0.0,
-                threshold: 0.0,
-                refractory_period: 0,
-            });
-            next_id += 1;
-
-            // 配对反向 Proc → 独占 Out（block 内部信号入口）
-            connections.push(ConnectionGene {
-                in_node: proc_id,
-                out_node: out_id,
-                weight: rng.gen_range(-0.1..0.1),
-                enabled: true,
-            });
-            // 独占 Out → output
+            // 独占 Out → output（必要边大权重）
             connections.push(ConnectionGene {
                 in_node: out_id,
                 out_node: output_id,
-                weight: rng.gen_range(-0.1..0.1),
+                weight: rng.gen_range(-1.0..1.0),
                 enabled: true,
             });
         }
@@ -898,14 +882,16 @@ impl Genome {
         let from_blk = Self::node_block(from_node);
         let from_id = from_node.id;
 
-        // === 硬约束路径：Input 只连同 block 感官区 ===
+        // === 硬约束路径：Input 只连同 block 感官区的 Processing 层节点 ===
         if matches!(from_node.node_type, NodeType::Input) {
             let targets: Vec<usize> = self
                 .nodes
                 .iter()
                 .enumerate()
                 .filter(|(_, n)| {
-                    matches!(n.node_type, NodeType::Block(b) if b == from_blk) && n.id != from_id
+                    matches!(n.node_type, NodeType::Block(b) if b == from_blk)
+                        && n.layer == LayerType::Processing
+                        && n.id != from_id
                 })
                 .map(|(i, _)| i)
                 .collect();
@@ -956,10 +942,11 @@ impl Genome {
                 .copied()
                 .filter(|&i| {
                     let to_node = &self.nodes[i];
-                    // 硬约束：Output 只从其指定运动区接收
+                    // 硬约束：Output 只从其指定运动区的 Output 层节点接收
                     if matches!(to_node.node_type, NodeType::Output) {
                         let out_idx = to_node.id.saturating_sub(Self::INPUT_SIZE);
-                        return from_blk == block::motor_block_for_output(out_idx);
+                        return from_blk == block::motor_block_for_output(out_idx)
+                            && from_layer == LayerType::Output;
                     }
                     Self::matches_conn_target(from_blk, to_node, target_type)
                 })

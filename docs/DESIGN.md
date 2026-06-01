@@ -618,12 +618,14 @@ auto_spawn_interval = 45.0
 （与 v2.4 同步批处理技术里程碑同主版本号，小号区分；用户口头简称为 "v2.4"，在 todo.md 中以 "版本 2.4.1 更新" 标签管理）
 - [x] **Output 接收硬约束修复**：`mutate_add_connection` 把 `is_motor(from_blk)` 改为 `from_blk == motor_block_for_output(out_idx)`，与 Input 侧严格对称
 - [x] **debug_assert 守门**：所有写入 `connections` 的入口（`mutate_add_connection` 三处 push、未来的新入口）在 push 前调用 `debug_assert_valid_io_edge`，违规 debug 立崩 / release 零开销
-- [x] **`random_minimal` 84 节点拓扑重写**：每 input 独占 Proc + 同 block 配对反向 Out（20×2=40），每 output 独占 Out + 同 block 配对反向 Proc（8×2=16），加 28 个 I/O = 84 节点；5 个感官 block + 3 个运动 block 均同时具备 Proc+Out 双层
+- [x] **`random_minimal` 56 节点拓扑重写（2n）**：每 input 独占 Proc（无 Out 配对）+ 每 output 独占 Out（无 Proc 配对）+ 28 个 I/O = 56 节点；5 个感官 block 初始只有 Proc / 3 个运动 block 初始只有 Out，故意打破 C2，演化由 mutate_add_node 自然补齐
+- [x] **必要 IO 边权重 `[-1.0, 1.0]`**：input→独占 Proc 与 独占 Out→output 这 28 条骨架边用大权重，让 3 跳路径在初始就有非零 speed 信号；额外随机边维持 `[-0.1, 0.1]` 中性插入
 - [x] **配置项替换**：删除 `initial_connections_min/max`，新增 `initial_connection_ratio: f64`（默认 0.2），额外随机边数 = `(INPUT_SIZE + OUTPUT_SIZE) × ratio` 四舍五入取整
 - [x] **三条永久软约束确立**：
   - C1 节点活跃连接 ≤10：仅作用于 `random_minimal` 初始化，演化期不限
-  - C2 block 必须 Proc+Out 共存：`mutate_add_node` 90% 概率补齐缺失 layer
+  - C2 block 应有 Proc+Out 共存：**只在 `mutate_add_node` 触发时 90% 概率补齐缺失 layer，初始不预制**
   - C3 跨 block 目标偏向 Proc：`mutate_add_connection` 加权 ×3
+- [x] **Input/Output 硬约束加 layer 双重校验**：Input 源只能连同 block 的 Processing 层节点；Output 目标只能由同 motor block 的 Output 层节点驱动。`debug_assert_valid_io_edge` 同步校验 block + layer 两条，违规 debug 立崩
 - [x] **删除 4 套临时脚手架**：临时-1（add_connection 内偏置 patch）、临时-2（rectify_cross_block_io 渐进惩罚）、临时-3（重命名为 C2 永久）、临时-4（节点连接数>7 权重单向削弱 + Hebbian 限增，三处 genome/spiking/gpu）、临时修复（repair_io_connections 死码）
 - [x] **MAX_NODES/MAX_CONNS 上调**：64→256, 128→512（spiking.rs + gpu.rs + snn_tick.wgsl 三处同步），新增 `src/neural/capacity.rs` 提供高水位告警（仅超出新历史最大值时打印一次）
 - 数据迁移：不做。本版本生效后从零开始演化

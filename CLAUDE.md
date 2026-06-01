@@ -42,6 +42,7 @@ cell-world 的核心理念是让群体行为（集群、尾随、捕猎、哺育
 - **crossover 节点/连接处理不对称导致孤儿节点（架构缺陷修复，2026-05）**：`Genome::crossover` 中连接处理是 NEAT 经典做法——遍历 `fitter.connections`，共有的 50/50，fitter 独有的保留，**weaker 独有的丢弃**。但节点处理多了一段"weaker 独有节点也保留（避免基因流失）"循环。这种节点全保留 + 连接只取 fitter 的不一致，让 add_node 创新通过 weaker→child 路径传递时变成**孤儿节点**：节点 X 保留了但连接 A→X、X→B 被丢弃，X 没有任何 in/out 边，对脑子毫无贡献。更糟的是孤儿在后代里继续传递（不会断），让 `nodes.len()` 虚高但拓扑没真正变。已观测：fix 上一条后 565 次 add_node 触发、节点最大值仅 37、群体均值 36.0——疑似就是孤儿节点扩散，真正的拓扑创新极难传递。**修复**：删除 weaker 独有节点保留循环，让节点和连接都采用 NEAT 标准（disjoint/excess 只从 fitter 取）。后果：新节点必须通过"携带者作 self 发起繁殖"50% 路径才能完整传递（节点+连接一起），但传过去的是完整拓扑而不是孤儿。这次也属于"修复明显架构缺陷"——演化路径被半堵死，不是"替演化做工作"。
 - **Output 接收硬约束写松（架构缺陷修复，v2.4.1，2026-06）**：`mutate_add_connection` 内 `is_motor(from_blk)` 只判 `|b|≥25`，对 b25 / b-25 / b-26 一视同仁——意味着 b25 的运动节点会获得到 output[3..5]（繁殖）/ output[7]（光嘴）的连接通路，违反"每个 output 只接收其专属 motor 块"的架构语义（与 Input 侧的 `from_blk == sensory_block_for_input(input_id)` 严格对称要求不一致）。**修复**：把 `is_motor(from_blk)` 改为 `from_blk == motor_block_for_output(out_idx)`，并在三处 `connections.push` 前加 `debug_assert_valid_io_edge`（release 零开销），下次再写漏立即崩。属于"修复明显架构缺陷"——演化原本可以发现"借道错误 motor 块"的捷径，等于让硬约束失去意义。
 - **临时脚手架长期未清理积累 4 套违章拼贴（架构清债，v2.4.1，2026-06）**：演化阶段为修缮已演化基因引入的 4 套临时逻辑（临时-1：mutate_add_connection 内 ×20 Out boost + 跨 block Proc-only 过滤；临时-2：每代渐进惩罚跨 block 违规连接；临时-3：add_node 强制补齐 block 缺失 layer 类型；临时-4：节点连接数>7 时权重单向削弱 + Hebbian 限增），累计修补了 `genome.rs` / `spiking.rs` / `gpu.rs` 三处的演化路径。这些脚手架原意是不重启数据时硬扳已演化群体的不良拓扑，但**长期共存导致演化压力被搬到补丁内**：补丁实际在替演化做工作（决定 block 哪种 layer 应主导、决定何时退役连接、决定权重单调方向）。**清理（v2.4.1 演化重启）**：全部删除，仅保留两条"真正中性的软约束"作为永久规则——C2（add_node 90% 概率补齐 block 缺失 layer，保留 10% 容许偏差）+ C3（add_connection 跨 block 时 Proc 目标权重 ×3，软偏置不是硬过滤）。判据：保留下来的两条是"演化探索时的均匀采样基底"，而被删的四套是"演化时的方向性裁剪"。
+- **初始拓扑两轮设计 + 必要边权重错配（v2.4.1，2026-06）**：第一轮设计 84 节点（3n），每 block 预制 Proc+Out 双层，路径深度 5 跳；同时把必要 IO 边权重也设为 `[-0.1, 0.1]`（误从 mutate 的"中性插入"语义复制）→ 5 跳 × 小权重数学上无法让 `|out[1]| × max_speed > 0.05` 速度阈值，**初代全部不会动 → 不能吃 → 饿死 → 演化无法启动**。Hebbian 又依赖移动产生奖励信号，形成死锁。**修正**：① 收回 56 节点（2n），sensory block 只放 Proc / motor block 只放 Out，故意打破 C2 让演化在 mutate_add_node 阶段自然补齐；② 必要 IO 边权重恢复 `[-1.0, 1.0]`（演化基线强信号），让 3 跳路径 0.5³≈0.125 直接超过运动阈值；③ 额外随机边维持 `[-0.1, 0.1]`（中性插入语义）。教训：**初始拓扑设计要先验算"信号从 input 走到 output 的衰减积"够不够穿过最近的行为阈值**——这是基本算术，但我第一轮当成了"涌现问题"，差点用 D 选项（输出端 sigmoid 放大）掩盖根因。涌现是关于演化能在什么基底上自我组织，不是关于把死锁的物理基底硬拽过阈值。
 
 ### 如何正确推动涌现
 
@@ -209,13 +210,16 @@ cargo clippy          # 代码检查
   - **不再是基因组内可演化基因**（`MutationGene` 已删除）
   - 原因：自适应变异率在稳定环境下必然塌到下界，拖累演化
   - 想调节探索强度直接改 config
-- **初始大脑拓扑（v2.4.1重构）**: `Genome::random_minimal(initial_connection_ratio)` 生成 84 节点骨架
+- **初始大脑拓扑（v2.4.1 重构，2n 56 节点）**: `Genome::random_minimal(initial_connection_ratio)` 生成最小骨架
   - 20 Input + 8 Output = 28 个固定 I/O 节点
-  - 每 input 在其指定感官 block 中独占 1 个 Proc 节点 + 1 个配对反向 Out 节点
-  - 每 output 在其指定运动 block 中独占 1 个 Out 节点 + 1 个配对反向 Proc 节点
-  - 合计 28 + 20×2 + 8×2 = **84 节点**，5 个感官 block (-1/+1/-3/+3/-2) + 3 个运动 block (+25/-25/-26) 均同时具备 Proc+Out 双层（满足 C2）
-  - 必要连接：input→独占 Proc、独占 Proc→配对反向 Out（block 内出口）、配对反向 Proc→独占 Out（block 内入口）、独占 Out→output，共 56 条
-  - 额外随机边：`n × initial_connection_ratio`（n=28，默认 ratio=0.2 → ~6 条），通过复用 `mutate_add_connection(Some(10))` 注入，遵守 ConnProbs/target_pref/硬约束 + C1 ≤10
+  - 每 input 在其指定感官 block 中独占 1 个 Proc 节点（**无 Out 配对**）
+  - 每 output 在其指定运动 block 中独占 1 个 Out 节点（**无 Proc 配对**）
+  - 合计 28 + 20 + 8 = **56 节点（2n，n=输入+输出总数）**
+  - 5 个感官 block (-1/+1/-3/+3/-2) 初始只有 Proc，3 个运动 block (+25/-25/-26) 初始只有 Out——**故意打破 C2** 给演化留扩张空间，C2 在 `mutate_add_node` 触发时再 90% 概率补齐
+  - 必要连接（共 28 条，3 跳最短可达 output）：input→独占 Proc、独占 Out→output
+  - **必要边权重 `[-1.0, 1.0]`**（演化基线强信号）；额外随机边走 `mutate_add_connection(Some(10))` 用 `[-0.1, 0.1]`（中性插入）
+  - 3 跳路径：`input → 独占 Proc → [cross 边] → 独占 Out → output`，3 个 `[-1,1]` 权重乘积均值 ~0.125，speed = 0.125 × max_speed = 2.5（>0.05 阈值），初代生命大概率能动
+  - 额外随机边：`n × initial_connection_ratio`（n=28，默认 ratio=0.2 → ~6 条），遵守 ConnProbs/target_pref/硬约束 + C1 ≤10
   - 配置项：`initial_connection_ratio: f64`（替代旧 `initial_connections_min/max`）
 - **三条永久软约束（v2.4.1确立）**: 取代旧的临时-1/2/3/4 拼贴，方向中性
   - **C1 单节点活跃连接 ≤10**：仅作用于初始化（`random_minimal` + 其内部撒边），演化中 `mutate_add_connection(None)` 无任何上限。实现：`passes_c1_cap()` 工具函数 + `mutate_add_connection(_, max_per_node: Option<usize>)` 参数化

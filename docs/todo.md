@@ -13,15 +13,18 @@
 - ✅ Input 侧硬约束沿用现有 `from_blk == sensory_block_for_input(input_id)`，断言一并覆盖
 - 不需要清理历史违规（重新演化）
 
-4、初始生命神经网络重构 — ✅ **已完成**
-- ✅ `random_minimal(initial_connection_ratio: f64)` 84 节点拓扑：20 Input + 8 Output + 20×2 input 侧（独占 Proc + 配对反向 Out）+ 8×2 output 侧（独占 Out + 配对反向 Proc）= 84
+4、初始生命神经网络重构 — ✅ **已完成（二次修订为 2n 56 节点）**
+- ✅ `random_minimal(initial_connection_ratio: f64)` 56 节点拓扑（2n）：
+  - 20 Input + 8 Output + 20 input 独占 Proc + 8 output 独占 Out = 56
+  - **取消反向类型补齐**：sensory block 初始只有 Proc / motor block 初始只有 Out，C2 由演化在 mutate_add_node 阶段补齐
+- ✅ 必要 IO 边权重 `[-1.0, 1.0]`：input→独占 Proc + 独占 Out→output 共 28 条骨架边用大权重，3 跳路径 0.5³≈0.125 × max_speed=2.5 直接突破运动阈值 0.05
 - ✅ Input 不再直连 Output，必经 block 内独占节点
 - ✅ UI 面板和 `config.toml` 改为 `initial_connection_ratio`，删除 `initial_connections_min/max`
 
 5、随机额外连接 — ✅ **已完成**
 - ✅ 额外边数 = `(INPUT_SIZE + OUTPUT_SIZE) × initial_connection_ratio` 四舍五入
 - ✅ 复用 `mutate_add_connection(_, Some(10))`，自动遵守 ConnProbs/target_pref + C1≤10 + 硬约束
-- ✅ 新边权重 `[-0.1, 0.1]` 小扰动
+- ✅ 新边权重 `[-0.1, 0.1]` 小扰动（中性插入语义）
 
 ## 附加排查（版本 2.4.1 守门）
 
@@ -45,5 +48,14 @@
 | 约束 | 含义 | 落点 | 开关 |
 |------|------|------|------|
 | **C1** | 节点活跃连接 ≤10 | `passes_c1_cap()` + `mutate_add_connection(_, Option<usize>)` | 仅 `random_minimal` 启用 `Some(10)`，演化期 `None` 完全不限 |
-| **C2** | block 内 Proc+Out 同时存在 | `mutate_add_node` 检测缺失类型，90% 概率补齐 | 永久 |
+| **C2** | block 应有 Proc+Out 共存 | `mutate_add_node` 检测缺失类型，90% 概率补齐 | **仅在 add_node 触发时生效，初始 random_minimal 不预制** |
 | **C3** | 跨 block 连接 Proc 目标 ×3 | `mutate_add_connection` 加权采样阶段 | 永久 |
+
+## 双重硬约束（block + layer，由 debug_assert 守门）
+
+| 端点 | 约束 | 由谁守门 |
+|------|------|----------|
+| Input 源 | 目标必须 `block == sensory_block_for_input(input_id) && layer == Processing` | `mutate_add_connection` Input 分支 filter + `debug_assert_valid_io_edge` |
+| Output 目标 | 源必须 `block == motor_block_for_output(out_idx) && layer == Output` | `mutate_add_connection` Block 源分支 filter + `debug_assert_valid_io_edge` |
+
+在 2n 初始拓扑下，sensory block 只有 Proc / motor block 只有 Out，layer 硬约束初始天然满足；当演化通过 `mutate_add_node` 给 sensory block 加 Out 节点后，layer 硬约束防止 input 错连到新 Out。
