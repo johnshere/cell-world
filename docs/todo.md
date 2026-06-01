@@ -1,41 +1,49 @@
-# 版本 2.4 更新
+# 版本 2.4.1 更新
 
 > 不考虑数据迁移，本版本生效后从零开始演化。
+> （DESIGN.md 已有 v2.4 同步批处理里程碑，本次以小号 v2.4.1 区分；用户口头沿用"v2.4"作为简称）
 
-1、基因库的列表 checkbox 选中后，会定时投放，投放逻辑删除；选中 checkbox 在自动记录的模板不显示，改为显示；低于最低生命数量会自动投放，不再从自动记录中投放，改为从选中的投放。即两者结合取消定时投放，改为最低数量时投放选中模板
+1、基因库的列表 checkbox 选中后，会定时投放，投放逻辑删除；选中 checkbox 在自动记录的模板不显示，改为显示；低于最低生命数量会自动投放，不再从自动记录中投放，改为从选中的投放。即两者结合取消定时投放，改为最低数量时投放选中模板 — **pending**
 
-2、鼠标滑到力导图连线时，应该显示线的信息
+2、鼠标滑到力导图连线时，应该显示线的信息 — **pending**
 
-3、修复 Output 接收侧硬约束（架构 bug）
-- 现象：b25 motor 节点会连到 output 27（光嘴）、output 23（繁殖），违反"每个 output 只接收其专属 motor 块"的架构语义
-- 根因：`mutate_add_connection` 的硬约束写松了——`is_motor(from_blk)` 只校验 `|b|≥25`，对 b25 / b-25 / b-26 一视同仁
-- 修复点：
-  - `genome.rs:1028-1032` 把 `is_motor(from_blk)` 改为 `from_blk == motor_block_for_output(out_idx)`，与 Input 侧（`from_blk == sensory_block_for_input(input_id)`）对称
-  - 在 `connections.push` 前加 `debug_assert!` 校验两条硬约束（input→专属感官块、专属 motor 块→output），下次再有遗漏立即崩
-  - 同步排查全代码库其他可能写入 connections 的路径是否也遵守该硬约束（见本版本"附加排查"）
+3、修复 Output 接收侧硬约束（架构 bug）— ✅ **已完成**
+- ✅ `mutate_add_connection` 把 `is_motor(from_blk)` 改为 `from_blk == motor_block_for_output(out_idx)`
+- ✅ 三处 push 前加 `debug_assert_valid_io_edge`（release 零开销）
+- ✅ Input 侧硬约束沿用现有 `from_blk == sensory_block_for_input(input_id)`，断言一并覆盖
 - 不需要清理历史违规（重新演化）
 
-4、初始生命神经网络重构
-- 现在初始生命的节点数是 36，且包含 input、output；改为数量不定，节点初始数量不确定，由 input、output 数量衍生
-- 每个 input、output 都至少连接一个节点（目标区域的），不允许 input 直连 output；且 input 初始连接 proc 节点，output 初始连接 out 节点，如此节点数就是 输入输出节点数*2
-- 初始每个 block 在连接 input、output 之后，只有单一的 proc 或 out 节点；再补全另一类型节点，数量相等；此时节点数就是 输入输出节点数*3
-- UI 面板中关于神经网络初始连接的配置删除，改为初始连接数与输入输出节点数的倍率 n，n 可以是一位小数，运算时取整
+4、初始生命神经网络重构 — ✅ **已完成**
+- ✅ `random_minimal(initial_connection_ratio: f64)` 84 节点拓扑：20 Input + 8 Output + 20×2 input 侧（独占 Proc + 配对反向 Out）+ 8×2 output 侧（独占 Out + 配对反向 Proc）= 84
+- ✅ Input 不再直连 Output，必经 block 内独占节点
+- ✅ UI 面板和 `config.toml` 改为 `initial_connection_ratio`，删除 `initial_connections_min/max`
 
-5、跟进配置给初始生命神经网络的节点随机连线
-- 在第4项骨架基础上，按 `n × (INPUT_SIZE + OUTPUT_SIZE)` 取整作为额外随机边数
-- 候选边池排除 "Input→Output 直连"，遵守 ConnProbs 5 方向 + target_pref 加权采样（与 mutate_add_connection 同一套规则）
-- 新边权重用小扰动 `[-0.1, 0.1]`，与变异保持一致
+5、随机额外连接 — ✅ **已完成**
+- ✅ 额外边数 = `(INPUT_SIZE + OUTPUT_SIZE) × initial_connection_ratio` 四舍五入
+- ✅ 复用 `mutate_add_connection(_, Some(10))`，自动遵守 ConnProbs/target_pref + C1≤10 + 硬约束
+- ✅ 新边权重 `[-0.1, 0.1]` 小扰动
 
-## 附加排查（版本 2.4 守门）
+## 附加排查（版本 2.4.1 守门）
 
-### 硬约束守门（input 专属感官块 / output 专属 motor 块）
-- 全代码库所有写入 `genome.connections` 的入口都必须强制：
-  - `from = Input` ⇒ `to.block == sensory_block_for_input(from.id)`
-  - `to = Output` ⇒ `from.block == motor_block_for_output(to.id - INPUT_SIZE)`
-- 已知入口：`random_minimal`、`mutate_add_connection`、`mutate_add_node`、`crossover`
-- 见"附加排查报告"（待补充）逐一核对
+### 硬约束守门（input 专属感官块 / output 专属 motor 块）— ✅ **已完成**
+- ✅ 通过 `debug_assert_valid_io_edge` 强制守门，覆盖以下入口的 push 点：
+  - `mutate_add_connection` Input 路径
+  - `mutate_add_connection` Block 源路径
+  - `random_minimal` 间接通过 `mutate_add_connection` 注入
+- 其他写入入口结论：
+  - `random_minimal` 本体的 I/O 必要连接（input→独占 Proc / 独占 Out→output / block 内部线）：拓扑构造时按硬约束直接生成，不经过随机采样路径，不会违规
+  - `mutate_add_node` 仅做"已有连接 A→B 中插入 X"的中性变异（A→X=权重1, X→B=原权重），不创造跨 I/O 端点的新边
+  - `crossover` 走 NEAT 标准 disjoint/excess，从父代取整条连接，原本就合规；若父代合规则子代必合规
 
-### ConnProbs / target_pref 守门
-- 所有"按拓扑方向随机选目标节点"的路径都应走 `conn_target` + `matches_conn_target` + `target_pref` 加权，而不是独立写一套
-- 已知入口：`mutate_add_connection`、`mutate_add_node`（X 的 block 选择）
-- 见"附加排查报告"（待补充）
+### ConnProbs / target_pref 守门 — ✅ **已完成**
+- `mutate_add_connection` 已走 `conn_target` + `matches_conn_target` + `target_pref` 加权 + 新加 C3 软偏好（跨 block Proc 候选 ×3）
+- `mutate_add_node` 的 X block 选择走 `from_pref.target_pref.get(out_blk)`，已合规
+- 没有其他独立写一套的路径
+
+## 三条永久软约束（替代旧的临时脚手架）
+
+| 约束 | 含义 | 落点 | 开关 |
+|------|------|------|------|
+| **C1** | 节点活跃连接 ≤10 | `passes_c1_cap()` + `mutate_add_connection(_, Option<usize>)` | 仅 `random_minimal` 启用 `Some(10)`，演化期 `None` 完全不限 |
+| **C2** | block 内 Proc+Out 同时存在 | `mutate_add_node` 检测缺失类型，90% 概率补齐 | 永久 |
+| **C3** | 跨 block 连接 Proc 目标 ×3 | `mutate_add_connection` 加权采样阶段 | 永久 |

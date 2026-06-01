@@ -40,6 +40,8 @@ cell-world 的核心理念是让群体行为（集群、尾随、捕猎、哺育
 - **适应度共享**：曾考虑用"同族拥挤税"打破单一优势种，但拥挤税本质是惩罚聚集，和目标（演化群体行为）方向相反。**结论：不加。**
 - **mutate_add_node 节点参数失配（架构缺陷修复，2026-05）**：基础大脑节点全部为直读 pass-through（`decay=0, threshold=0, refractory=0`，整网络是连续值前馈 ANN），但 `mutate_add_node` 给新节点随机 `threshold ∈ [0.3, 1.0]`/`decay ∈ [0.5, 0.95]`/`refractory ∈ [1, 3]`——脉冲模式。新节点被插入到原本连续梯度的通路上，把信号离散化 + 加不应期死区，子代行为相比父代严重退化 → **所有 add_node 突变体被自然选择秒杀，节点数永久卡在初始 36**（已观测：18k 有性繁殖、按 ~7% 触发率应有 ~1200 次 add_node 触发但节点数无增长）。同时 `mutate_add_connection` 用 `[-1.0, 1.0]` 大权重初始化，新连接一上来就是大扰动，孩子也容易被淘汰。本质是连接拓扑写得正确（经典 NEAT 中性插入：A→B=1, B→C=原值）但节点参数写法停留在"全脉冲"时代，两边不自洽。**修复**：新节点初始化为直读 pass-through（与基础大脑一致），新连接权重缩小到 `[-0.1, 0.1]`。threshold/decay/refractory 仍是基因，由 `mutate_snn_params` 演化决定是否走脉冲。这次属于"修复明显架构缺陷"（演化路径被堵死），不是"替演化做工作"——修复后才让演化真正有机会发现递归环路、群体行为等结构性创新。
 - **crossover 节点/连接处理不对称导致孤儿节点（架构缺陷修复，2026-05）**：`Genome::crossover` 中连接处理是 NEAT 经典做法——遍历 `fitter.connections`，共有的 50/50，fitter 独有的保留，**weaker 独有的丢弃**。但节点处理多了一段"weaker 独有节点也保留（避免基因流失）"循环。这种节点全保留 + 连接只取 fitter 的不一致，让 add_node 创新通过 weaker→child 路径传递时变成**孤儿节点**：节点 X 保留了但连接 A→X、X→B 被丢弃，X 没有任何 in/out 边，对脑子毫无贡献。更糟的是孤儿在后代里继续传递（不会断），让 `nodes.len()` 虚高但拓扑没真正变。已观测：fix 上一条后 565 次 add_node 触发、节点最大值仅 37、群体均值 36.0——疑似就是孤儿节点扩散，真正的拓扑创新极难传递。**修复**：删除 weaker 独有节点保留循环，让节点和连接都采用 NEAT 标准（disjoint/excess 只从 fitter 取）。后果：新节点必须通过"携带者作 self 发起繁殖"50% 路径才能完整传递（节点+连接一起），但传过去的是完整拓扑而不是孤儿。这次也属于"修复明显架构缺陷"——演化路径被半堵死，不是"替演化做工作"。
+- **Output 接收硬约束写松（架构缺陷修复，v2.4.1，2026-06）**：`mutate_add_connection` 内 `is_motor(from_blk)` 只判 `|b|≥25`，对 b25 / b-25 / b-26 一视同仁——意味着 b25 的运动节点会获得到 output[3..5]（繁殖）/ output[7]（光嘴）的连接通路，违反"每个 output 只接收其专属 motor 块"的架构语义（与 Input 侧的 `from_blk == sensory_block_for_input(input_id)` 严格对称要求不一致）。**修复**：把 `is_motor(from_blk)` 改为 `from_blk == motor_block_for_output(out_idx)`，并在三处 `connections.push` 前加 `debug_assert_valid_io_edge`（release 零开销），下次再写漏立即崩。属于"修复明显架构缺陷"——演化原本可以发现"借道错误 motor 块"的捷径，等于让硬约束失去意义。
+- **临时脚手架长期未清理积累 4 套违章拼贴（架构清债，v2.4.1，2026-06）**：演化阶段为修缮已演化基因引入的 4 套临时逻辑（临时-1：mutate_add_connection 内 ×20 Out boost + 跨 block Proc-only 过滤；临时-2：每代渐进惩罚跨 block 违规连接；临时-3：add_node 强制补齐 block 缺失 layer 类型；临时-4：节点连接数>7 时权重单向削弱 + Hebbian 限增），累计修补了 `genome.rs` / `spiking.rs` / `gpu.rs` 三处的演化路径。这些脚手架原意是不重启数据时硬扳已演化群体的不良拓扑，但**长期共存导致演化压力被搬到补丁内**：补丁实际在替演化做工作（决定 block 哪种 layer 应主导、决定何时退役连接、决定权重单调方向）。**清理（v2.4.1 演化重启）**：全部删除，仅保留两条"真正中性的软约束"作为永久规则——C2（add_node 90% 概率补齐 block 缺失 layer，保留 10% 容许偏差）+ C3（add_connection 跨 block 时 Proc 目标权重 ×3，软偏置不是硬过滤）。判据：保留下来的两条是"演化探索时的均匀采样基底"，而被删的四套是"演化时的方向性裁剪"。
 
 ### 如何正确推动涌现
 
@@ -73,6 +75,7 @@ cargo clippy          # 代码检查
 |          | `src/neural/gpu.rs`        | GPU 后端（wgpu），批处理 run_batch + 在线 Hebbian 学习 |
 |          | `src/neural/snn_tick.wgsl` | Compute shader：spike 累加 + eligibility trace 计算    |
 |          | `src/neural/slot_alloc.rs` | GPU 固定槽位分配（MAX_CREATURES=512）                  |
+|          | `src/neural/capacity.rs`   | MAX_NODES/MAX_CONNS 静默截断高水位告警                 |
 | 世界系统 | `src/world/world.rs`       | 主循环、感知、动作执行、bridge 同步调用                |
 |          | `src/world/sim_thread.rs`  | sim 线程入口，命令处理，快照导出                       |
 |          | `src/world/creature.rs`    | 生物结构                                               |
@@ -206,6 +209,24 @@ cargo clippy          # 代码检查
   - **不再是基因组内可演化基因**（`MutationGene` 已删除）
   - 原因：自适应变异率在稳定环境下必然塌到下界，拖累演化
   - 想调节探索强度直接改 config
+- **初始大脑拓扑（v2.4.1重构）**: `Genome::random_minimal(initial_connection_ratio)` 生成 84 节点骨架
+  - 20 Input + 8 Output = 28 个固定 I/O 节点
+  - 每 input 在其指定感官 block 中独占 1 个 Proc 节点 + 1 个配对反向 Out 节点
+  - 每 output 在其指定运动 block 中独占 1 个 Out 节点 + 1 个配对反向 Proc 节点
+  - 合计 28 + 20×2 + 8×2 = **84 节点**，5 个感官 block (-1/+1/-3/+3/-2) + 3 个运动 block (+25/-25/-26) 均同时具备 Proc+Out 双层（满足 C2）
+  - 必要连接：input→独占 Proc、独占 Proc→配对反向 Out（block 内出口）、配对反向 Proc→独占 Out（block 内入口）、独占 Out→output，共 56 条
+  - 额外随机边：`n × initial_connection_ratio`（n=28，默认 ratio=0.2 → ~6 条），通过复用 `mutate_add_connection(Some(10))` 注入，遵守 ConnProbs/target_pref/硬约束 + C1 ≤10
+  - 配置项：`initial_connection_ratio: f64`（替代旧 `initial_connections_min/max`）
+- **三条永久软约束（v2.4.1确立）**: 取代旧的临时-1/2/3/4 拼贴，方向中性
+  - **C1 单节点活跃连接 ≤10**：仅作用于初始化（`random_minimal` + 其内部撒边），演化中 `mutate_add_connection(None)` 无任何上限。实现：`passes_c1_cap()` 工具函数 + `mutate_add_connection(_, max_per_node: Option<usize>)` 参数化
+  - **C2 block 内 Proc+Out 同时存在**：在 `mutate_add_node` 中 90% 概率把新节点补成 block 缺失的 layer，保留 10% 允许偏差作为演化变异通道
+  - **C3 跨 block 连接软偏好 Proc 目标**：`mutate_add_connection` 加权采样阶段，跨 block 的 Block 目标 Proc 候选 ×3 倍权重，仿生意义：跨区信号优先进入"前端处理"层
+  - 与硬约束的区别：硬约束（Input→指定 block，Output 由指定 block 接收）由 `debug_assert_valid_io_edge` 守门，违规直接 panic；C1/C2/C3 是软偏置/概率倾向，留有演化空间
+- **神经网络容量上限（v2.4.1上调）**: MAX_NODES = 256, MAX_CONNS = 512, MAX_CREATURES = 512
+  - 三处硬编码必须同步：`spiking.rs::from_genome`、`gpu.rs` 顶部、`snn_tick.wgsl` 顶部
+  - 静默截断：超出上限时 `from_genome`/`upload_genome` 只取前 N 个节点 + 前 M 条连接，端点指向被截断节点的连接会被一并丢弃
+  - 高水位告警：`src/neural/capacity.rs` 提供 `warn_nodes_overflow` / `warn_conns_overflow`，仅当 genome.nodes.len() / 启用连接数刷新历史最大值时打印一次，避免日志刷屏
+  - GPU 显存估算（4070 SUPER 12GB 充分余量）：节点 8B × 256 × 512 = 1MB，连接 16B × 512 × 512 = 4MB，eligibility traces 4B × 512 × 512 = 1MB，总计约 10MB
 - **有性 vs 无性繁殖差异化（演化创新带宽收归有性）**:
   - 通过 `Genome::mutate(conf, parent_age, is_sexual)` 第三参数控制
   - **无性繁殖**：仅保留权重微调一类变异，且 rate × `asexual_mutation_scale`（默认 0.4）→ 近似克隆
@@ -247,6 +268,9 @@ cargo clippy          # 代码检查
 ## 开发注意
 
 1. NEAT 变异: `genome.rs` → `mutate(conf)` 从 `conf.mutation_rate` 读取触发概率；base 管常规权重/连接/SNN/Layer，block 管 block 编号迁移与 conn_probs，两者目前共享同一个全局 rate
+   - **硬约束守门**：所有写入 `genome.connections` 的入口在 push 前必须过 `debug_assert_valid_io_edge`——Input 源必须 `to.block == sensory_block_for_input(from.id)`，Output 目标必须 `from.block == motor_block_for_output(to.id - INPUT_SIZE)`，违规 release 静默通过、debug 立即崩
+   - **C1 软上限**：仅 `random_minimal` 调用 `mutate_add_connection(_, Some(10))` 启用；演化期 `mutate(conf)` 调 `mutate_add_connection(_, None)` 完全不限
+   - **C2/C3**：C2 在 `mutate_add_node` 内、C3 在 `mutate_add_connection` 加权阶段，无开关，永久生效
 2. 感知系统: `world.rs` → `compute_perception_pure()` 窄波束扫描，左右眼各 8 通道，并行阶段使用（rayon）
 3. 动作执行: `world.rs` → `execute_actions()` 7 输出映射（全直读），嘴巴食物吸收不受冷却限制，咬受冷却限制。这部分是串行的，O(N) 扩展瓶颈
 4. update_creatures 三阶段:

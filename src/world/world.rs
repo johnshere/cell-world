@@ -463,14 +463,7 @@ impl World {
 
         let creature_id = self.next_creature_id;
         self.next_creature_id += 1;
-        let creature = Creature::random(
-            creature_id,
-            x,
-            y,
-            energy,
-            config.initial_connections_min,
-            config.initial_connections_max,
-        );
+        let creature = Creature::random(creature_id, x, y, energy, config.initial_connection_ratio);
         // 自然生成：以自身基因建族
         self.clan_genomes
             .insert(creature.clan_hash, creature.genome.clone());

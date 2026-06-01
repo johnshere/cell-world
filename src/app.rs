@@ -626,19 +626,13 @@ impl CellWorldApp {
             let mut changed = false;
 
             ui.collapsing("进化", |ui| {
-                changed |= config_drag_usize(
+                changed |= config_drag_f64(
                     ui,
-                    "初始连接min",
-                    "新生物最少神经连接数",
-                    &mut c.initial_connections_min,
-                    1..=20,
-                );
-                changed |= config_drag_usize(
-                    ui,
-                    "初始连接max",
-                    "新生物最多神经连接数",
-                    &mut c.initial_connections_max,
-                    2..=30,
+                    "初始连接倍率",
+                    "新生物随机额外边数 = (INPUT+OUTPUT) × 此值，遵守 C1≤10",
+                    &mut c.initial_connection_ratio,
+                    0.05,
+                    0.0..=2.0,
                 );
                 changed |= config_drag_f64(
                     ui,

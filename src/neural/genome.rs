@@ -1,4 +1,3 @@
-use rand::seq::SliceRandom;
 use rand::Rng;
 use rustc_hash::FxHashMap;
 use std::collections::hash_map::DefaultHasher;
@@ -216,6 +215,71 @@ enum ConnTarget {
     CrossFeedback,       // 跨区反馈
 }
 
+/// C1 软上限：当 `cap = Some(n)` 时，若 from_id / to_id 任一端点的活跃连接数 ≥ n 则拒绝
+/// `cap = None` 表示无上限（演化中调用）
+#[inline]
+fn passes_c1_cap(
+    connections: &[ConnectionGene],
+    from_id: usize,
+    to_id: usize,
+    cap: Option<usize>,
+) -> bool {
+    let Some(limit) = cap else {
+        return true;
+    };
+    let mut from_n = 0usize;
+    let mut to_n = 0usize;
+    for c in connections {
+        if !c.enabled {
+            continue;
+        }
+        if c.in_node == from_id || c.out_node == from_id {
+            from_n += 1;
+        }
+        if c.in_node == to_id || c.out_node == to_id {
+            to_n += 1;
+        }
+    }
+    from_n < limit && to_n < limit
+}
+
+/// debug 断言：新增连接必须满足 Input/Output 硬约束
+/// - Input → 仅可连其指定感官 block（sensory_block_for_input）
+/// - Output → 仅可由其指定运动 block（motor_block_for_output）接收
+/// 仅在 debug 构建中生效，release 零开销
+#[inline]
+fn debug_assert_valid_io_edge(nodes: &[NodeGene], from_id: usize, to_id: usize) {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+    use super::block;
+    let from_node = nodes.iter().find(|n| n.id == from_id);
+    let to_node = nodes.iter().find(|n| n.id == to_id);
+    if let (Some(fnode), Some(tnode)) = (from_node, to_node) {
+        // Input 源
+        if matches!(fnode.node_type, NodeType::Input) {
+            let designated = block::sensory_block_for_input(from_id);
+            let to_blk = Genome::node_block(tnode);
+            debug_assert_eq!(
+                to_blk, designated,
+                "Input id={} 必须连到指定 block {}, 实际连到 {}",
+                from_id, designated, to_blk
+            );
+        }
+        // Output 目标
+        if matches!(tnode.node_type, NodeType::Output) {
+            let out_idx = to_id.saturating_sub(Genome::INPUT_SIZE);
+            let designated = block::motor_block_for_output(out_idx);
+            let from_blk = Genome::node_block(fnode);
+            debug_assert_eq!(
+                from_blk, designated,
+                "Output id={} 必须由指定 block {} 接收, 实际由 {} 发起",
+                to_id, designated, from_blk
+            );
+        }
+    }
+}
+
 impl Genome {
     /// 输入维度 = 20，每种感官单侧投射，靠同源跨连让对侧使用：
     /// 左眼 [0..7]: 扫描角, 接近度, 能量, 实体类型, 基因相似度/同族, 能量密度, 朝向差, 速度差   → block -1
@@ -236,15 +300,30 @@ impl Genome {
     /// [7] 发光强度 tanh→(v+1)/2 映射到 0~1, 量化一位小数     block -26（光嘴/语言生成）
     pub const OUTPUT_SIZE: usize = 8;
 
-    /// 创建最小基因组：Input → 感官区Block → 运动区Block → Output
-    pub fn random_minimal(min_connections: usize, max_connections: usize) -> Self {
+    /// 创建最小基因组（v2.4 84 节点拓扑）：
+    ///
+    /// - 20 Input + 8 Output = 28 个固定 I/O 节点
+    /// - 每 input 在其指定感官 block 中独占 1 个 Proc 节点 + 1 个反向补齐 Out 节点
+    /// - 每 output 在其指定运动 block 中独占 1 个 Out 节点 + 1 个反向补齐 Proc 节点
+    /// - 合计 28 (I/O) + 20 (input Proc) + 20 (input 反向 Out) + 8 (output Out) + 8 (output 反向 Proc) = 84
+    ///
+    /// 必要连接（保证从 input 到 output 至少一条潜在通路）：
+    /// - input_i → 其独占 Proc_i（input 硬约束）
+    /// - input 的独占 Proc_i → 同 block 配对反向 Out_i（block 内部信号出口）
+    /// - output 的反向 Proc_j → 同 block 独占 Out_j（block 内部信号入口）
+    /// - 独占 Out_j → output_j（output 硬约束）
+    ///
+    /// 然后撒 `n × initial_connection_ratio` 条随机跨/同 block 连接，遵守：
+    /// - ConnProbs/target_pref/硬约束（input/output 指定 block）
+    /// - C1 软上限：单节点活跃连接数 ≤10
+    pub fn random_minimal(initial_connection_ratio: f64) -> Self {
         use super::block;
         let mut rng = rand::thread_rng();
         let mut nodes = Vec::new();
         let mut connections = Vec::new();
         let mut next_id = 0usize;
 
-        // 1. 创建固定 Input 节点（17个）
+        // 1. 创建固定 Input 节点
         for _i in 0..Self::INPUT_SIZE {
             nodes.push(NodeGene {
                 id: next_id,
@@ -257,7 +336,7 @@ impl Genome {
             next_id += 1;
         }
 
-        // 2. 创建固定 Output 节点（7个）
+        // 2. 创建固定 Output 节点
         let output_start = next_id;
         for _i in 0..Self::OUTPUT_SIZE {
             nodes.push(NodeGene {
@@ -271,19 +350,13 @@ impl Genome {
             next_id += 1;
         }
 
-        // 3. 创建感官区 Block 节点（每种感官占一对镜像 abs 中的某一侧，靠同源跨连传到对侧）
-        let sensory_blocks: [(i8, std::ops::Range<usize>); 5] = [
-            (-1, 0..8),   // 左眼 → Input 0~7
-            (1, 8..16),   // 右眼 → Input 8~15
-            (-3, 16..17), // 自身能量（内省）→ Input 16
-            (3, 17..18),  // 地形感知（外感觉）→ Input 17
-            (-2, 18..20), // 光语言（"光耳"）→ Input 18(方位) + 19(强度)
-        ];
-        let mut sensory_node_ids: Vec<(i8, usize)> = Vec::new(); // (block, node_id)
-        for &(blk, ref input_range) in &sensory_blocks {
-            let node_id = next_id;
+        // 3. 每个 input：独占 Proc + 配对反向 Out（同 block）
+        for input_id in 0..Self::INPUT_SIZE {
+            let blk = block::sensory_block_for_input(input_id);
+
+            let proc_id = next_id;
             nodes.push(NodeGene {
-                id: node_id,
+                id: proc_id,
                 node_type: NodeType::Block(blk),
                 layer: LayerType::Processing,
                 decay: 0.0,
@@ -291,27 +364,10 @@ impl Genome {
                 refractory_period: 0,
             });
             next_id += 1;
-            sensory_node_ids.push((blk, node_id));
 
-            // Input → 感官区 Block
-            for input_id in input_range.clone() {
-                connections.push(ConnectionGene {
-                    in_node: input_id,
-                    out_node: node_id,
-                    weight: rng.gen_range(-1.0..1.0),
-                    enabled: true,
-                });
-            }
-        }
-
-        // 4. 创建运动区 Block 节点：Block(25)运动, Block(-25)繁殖, Block(-26)光嘴
-        // 光嘴放 -26 跟光耳 -2 同侧，闭合语言通路（同侧前馈概率远高于跨半球）
-        let motor_blocks: [i8; 3] = [25, -25, -26];
-        let mut motor_node_ids: Vec<(i8, usize)> = Vec::new();
-        for &blk in &motor_blocks {
-            let node_id = next_id;
+            let out_id = next_id;
             nodes.push(NodeGene {
-                id: node_id,
+                id: out_id,
                 node_type: NodeType::Block(blk),
                 layer: LayerType::Output,
                 decay: 0.0,
@@ -319,42 +375,67 @@ impl Genome {
                 refractory_period: 0,
             });
             next_id += 1;
-            motor_node_ids.push((blk, node_id));
+
+            // input → 独占 Proc
+            connections.push(ConnectionGene {
+                in_node: input_id,
+                out_node: proc_id,
+                weight: rng.gen_range(-0.1..0.1),
+                enabled: true,
+            });
+            // 独占 Proc → 配对反向 Out（block 内部信号出口）
+            connections.push(ConnectionGene {
+                in_node: proc_id,
+                out_node: out_id,
+                weight: rng.gen_range(-0.1..0.1),
+                enabled: true,
+            });
         }
 
-        // 5. 感官区 Block → 各运动区 Block
-        for &(_sblk, sensory_id) in &sensory_node_ids {
-            for &(_mblk, motor_id) in &motor_node_ids {
-                connections.push(ConnectionGene {
-                    in_node: sensory_id,
-                    out_node: motor_id,
-                    weight: rng.gen_range(-1.0..1.0),
-                    enabled: true,
-                });
-            }
+        // 4. 每个 output：独占 Out + 配对反向 Proc（同 block）
+        for output_idx in 0..Self::OUTPUT_SIZE {
+            let output_id = output_start + output_idx;
+            let blk = block::motor_block_for_output(output_idx);
+
+            let out_id = next_id;
+            nodes.push(NodeGene {
+                id: out_id,
+                node_type: NodeType::Block(blk),
+                layer: LayerType::Output,
+                decay: 0.0,
+                threshold: 0.0,
+                refractory_period: 0,
+            });
+            next_id += 1;
+
+            let proc_id = next_id;
+            nodes.push(NodeGene {
+                id: proc_id,
+                node_type: NodeType::Block(blk),
+                layer: LayerType::Processing,
+                decay: 0.0,
+                threshold: 0.0,
+                refractory_period: 0,
+            });
+            next_id += 1;
+
+            // 配对反向 Proc → 独占 Out（block 内部信号入口）
+            connections.push(ConnectionGene {
+                in_node: proc_id,
+                out_node: out_id,
+                weight: rng.gen_range(-0.1..0.1),
+                enabled: true,
+            });
+            // 独占 Out → output
+            connections.push(ConnectionGene {
+                in_node: out_id,
+                out_node: output_id,
+                weight: rng.gen_range(-0.1..0.1),
+                enabled: true,
+            });
         }
 
-        // 6. 运动区 Block → Output（按 block 归属连接）
-        for i in 0..Self::OUTPUT_SIZE {
-            let output_id = output_start + i;
-            let output_blk = block::motor_block_for_output(i);
-            // 找到对应的运动区 Block 节点
-            let motor_id = motor_node_ids
-                .iter()
-                .find(|(blk, _)| *blk == output_blk)
-                .map(|(_, id)| *id)
-                .unwrap();
-            let connect_count = rng.gen_range(min_connections..=max_connections);
-            for _ in 0..connect_count {
-                connections.push(ConnectionGene {
-                    in_node: motor_id,
-                    out_node: output_id,
-                    weight: rng.gen_range(-1.0..1.0),
-                    enabled: true,
-                });
-            }
-        }
-
+        // 5. 初始化 block_probs（默认 5 方向概率 + 空 target_pref）
         let mut block_probs = HashMap::new();
         for blk in -26..=26 {
             block_probs.insert(blk, ConnProbsGene::default());
@@ -370,6 +451,16 @@ impl Genome {
             next_node_id: next_id,
             sorted_conns_cache: Vec::new(),
         };
+
+        // 6. 撒 n × ratio 条随机额外边，遵守 ConnProbs/target_pref/硬约束/C1≤10
+        let n = Self::INPUT_SIZE + Self::OUTPUT_SIZE;
+        let extra_count = ((n as f64) * initial_connection_ratio.max(0.0)).round() as usize;
+        let dummy_conf = Config::default();
+        for _ in 0..extra_count {
+            // Some(10) 启用 C1 软上限；演化期调用走 None 路径
+            genome.mutate_add_connection(&dummy_conf, Some(10));
+        }
+
         genome.rebuild_sorted_cache();
         genome
     }
@@ -418,52 +509,18 @@ impl Genome {
         // 结构变异调制因子：幼年活跃(2x)，成年后衰减
         let structure_factor = 2.0 * (-p).exp();
 
-        // ====== 临时梳理-4：连接数>7的节点只允许权重削弱，不允许增强 ======
-        let conn_threshold: usize = 7;
-        let mut node_conn_counts: FxHashMap<usize, usize> = FxHashMap::default();
-        for conn in &self.connections {
-            *node_conn_counts.entry(conn.in_node).or_default() += 1;
-            *node_conn_counts.entry(conn.out_node).or_default() += 1;
-        }
-        // ====== 临时梳理-4 结束 ======
-
         // 权重变异（不受发育期影响）；无性繁殖时 rate 按 asexual_mutation_scale 缩放
         for conn in &mut child.connections {
             if rng.gen::<f64>() < weight_rate {
-                let in_over =
-                    node_conn_counts.get(&conn.in_node).copied().unwrap_or(0) > conn_threshold;
-                let out_over =
-                    node_conn_counts.get(&conn.out_node).copied().unwrap_or(0) > conn_threshold;
-                let restricted = in_over || out_over;
-
                 if rng.gen::<f64>() < 0.9 {
                     // 微调
-                    let delta_range = if restricted {
-                        (-0.5..0.0) // 受限：仅允许削弱
-                    } else {
-                        (-0.5..0.5) // 正常：正负均可
-                    };
-                    conn.weight += rng.gen_range(delta_range);
+                    conn.weight += rng.gen_range(-0.5..0.5);
                     conn.weight = conn.weight.clamp(-2.0, 2.0);
                 } else {
                     // 重置
-                    let reset_range = if restricted {
-                        (-1.0..0.0) // 受限：仅负权重
-                    } else {
-                        (-1.0..1.0)
-                    };
-                    conn.weight = rng.gen_range(reset_range);
+                    conn.weight = rng.gen_range(-1.0..1.0);
                 }
             }
-            // ====== 临时梳理-4：受限连接弱到一定程度 → disabled ======
-            let in_over =
-                node_conn_counts.get(&conn.in_node).copied().unwrap_or(0) > conn_threshold;
-            let out_over =
-                node_conn_counts.get(&conn.out_node).copied().unwrap_or(0) > conn_threshold;
-            if (in_over || out_over) && conn.enabled && conn.weight.abs() < 0.05 {
-                conn.enabled = false;
-            }
-            // ====== 临时梳理-4 结束 ======
         }
 
         // 以下 7 类"创新型"变异仅在有性繁殖时发生
@@ -471,7 +528,7 @@ impl Genome {
             // 添加连接变异（受发育期调制）
             if rng.gen::<f64>() < base_rate * structure_factor {
                 ADD_CONN_TRIGGERS.fetch_add(1, Ordering::Relaxed);
-                child.mutate_add_connection(conf);
+                child.mutate_add_connection(conf, None);
             }
 
             // 添加节点变异（受发育期调制）
@@ -551,18 +608,6 @@ impl Genome {
             // 生理基因变异（使用 base_rate）
             child.mutate_physio_gene(base_rate);
         }
-
-        // ====== 临时修复：Input/Output 连接合规性（修复已完成，暂停） ======
-        // 注：mutate_add_node 的 Input/Output 约束 + toggle 守卫已永久防止复发
-        // 若有历史遗留再次出现，取消此行注释：
-        // if rng.gen::<f64>() < base_rate * 0.5 { child.repair_io_connections(); }
-        // ====== 临时修复结束 ======
-
-        // ====== 临时梳理-2：渐进惩罚跨 block 违规连接（Proc→外界 / 外界→Out） ======
-        if is_sexual && rng.gen::<f64>() < base_rate * 0.3 {
-            child.rectify_cross_block_io();
-        }
-        // ====== 临时梳理-2 结束 ======
 
         // Input/Output 孤点修复：若全部启用线已断，强制重连到指定 block 中最少线的节点
         child.repair_orphan_io();
@@ -792,114 +837,12 @@ impl Genome {
         }
     }
 
-    // ====== 临时梳理-2：渐进惩罚跨 block 违规连接 ======
-    /// 扫描全脑跨 block 连接，对违规连接（Proc→外界 / 外界→Out）渐进惩罚：
-    ///   |weight| > 0.1 → weight *= 0.5（削弱）
-    ///   |weight| ≤ 0.1 → enabled = false（退役）
-    /// 每次随机挑最多 2 条违规连接处理
-    fn rectify_cross_block_io(&mut self) {
-        use super::block;
-        let mut rng = rand::thread_rng();
-
-        // 统计每个 block 是否有 Out / Proc 节点
-        let blk_has: FxHashMap<i8, (bool, bool)> = {
-            let mut m: FxHashMap<i8, (bool, bool)> = FxHashMap::default();
-            for node in &self.nodes {
-                if let NodeType::Block(_) = node.node_type {
-                    let entry = m.entry(Self::node_block(node)).or_insert((false, false));
-                    if node.layer == LayerType::Output {
-                        entry.0 = true;
-                    } else {
-                        entry.1 = true;
-                    }
-                }
-            }
-            m
-        };
-
-        // 收集所有跨 block 违规连接（含索引）
-        let mut violations: Vec<usize> = Vec::new();
-        for (i, conn) in self.connections.iter().enumerate() {
-            if !conn.enabled {
-                continue;
-            }
-            let in_blk = self
-                .nodes
-                .iter()
-                .find(|n| n.id == conn.in_node)
-                .map(|n| Self::node_block(n))
-                .unwrap_or(0);
-            let out_blk = self
-                .nodes
-                .iter()
-                .find(|n| n.id == conn.out_node)
-                .map(|n| Self::node_block(n))
-                .unwrap_or(0);
-            // 仅跨 block 连接
-            if in_blk == out_blk {
-                continue;
-            }
-            // 忽略 Input/Output 保护区
-            let in_node = self.nodes.iter().find(|n| n.id == conn.in_node);
-            let out_node = self.nodes.iter().find(|n| n.id == conn.out_node);
-            let in_is_input = in_node.map_or(false, |n| matches!(n.node_type, NodeType::Input));
-            let out_is_output = out_node.map_or(false, |n| matches!(n.node_type, NodeType::Output));
-            if in_is_input || out_is_output {
-                continue;
-            }
-
-            let in_layer_ok = in_node.map_or(true, |n| {
-                if n.layer == LayerType::Processing {
-                    // Proc 当发射器：检查该 block 是否有 Out
-                    !blk_has.get(&in_blk).map_or(false, |(has_out, _)| *has_out)
-                } else {
-                    // Out 当发射器：合规
-                    true
-                }
-            });
-            let out_layer_ok = out_node.map_or(true, |n| {
-                if n.layer == LayerType::Output {
-                    // Out 当接收器：检查该 block 是否有 Proc
-                    !blk_has
-                        .get(&out_blk)
-                        .map_or(false, |(_, has_proc)| *has_proc)
-                } else {
-                    true
-                }
-            });
-            // 两边都违规只算一条，优先算发射端违规
-            if !in_layer_ok || (!in_layer_ok && !out_layer_ok) || !out_layer_ok {
-                // 但确保 block 自身已配齐类型（有 Out/Proc 才判断违规）
-                let in_has = blk_has.get(&in_blk).map_or((false, false), |v| *v);
-                let out_has = blk_has.get(&out_blk).map_or((false, false), |v| *v);
-                let in_violation = !in_layer_ok && in_has.0;
-                let out_violation = !out_layer_ok && out_has.1;
-                if in_violation || out_violation {
-                    violations.push(i);
-                }
-            }
-        }
-
-        if violations.is_empty() {
-            return;
-        }
-
-        // 随机挑最多 2 条处理
-        let count = 2.min(violations.len());
-        for _ in 0..count {
-            let idx = violations[rng.gen_range(0..violations.len())];
-            let conn = &mut self.connections[idx];
-            if conn.weight.abs() > 0.1 {
-                conn.weight *= 0.5;
-            } else {
-                conn.enabled = false;
-            }
-        }
-    }
-    // ====== 临时梳理-2 结束 ======
-
     /// 添加连接变异（分区分层感知，加权概率采样）
-    fn mutate_add_connection(&mut self, _conf: &Config) {
+    ///
+    /// `max_per_node`：可选 C1 软上限——若任一端点的活跃连接数已达该值则跳过 push。
+    /// - 演化中调用传 `None`，无任何上限
+    /// - 初始化（random_minimal）调用传 `Some(10)`，避免初始拓扑过度集中
+    fn mutate_add_connection(&mut self, _conf: &Config, max_per_node: Option<usize>) {
         use super::block;
         let mut rng = rand::thread_rng();
 
@@ -925,30 +868,16 @@ impl Genome {
         let chosen_blk = blk_keys[rng.gen_range(0..blk_keys.len())];
         let candidates = &from_by_blk[&chosen_blk];
 
-        // ====== 临时梳理-1：若 block 有 Out，源极偏 Out（~95%）；Proc 不充当跨块发射器 ======
-        // 临时完工后删除本段，恢复原有 Proc60%/Out40% 逻辑
-        let blk_has_out_temp = self.nodes.iter().any(|n| {
-            matches!(n.node_type, NodeType::Block(_))
-                && Self::node_block(n) == chosen_blk
-                && n.layer == LayerType::Output
-        });
-        let temp_out_boost = if blk_has_out_temp { 20.0_f32 } else { 1.0_f32 };
+        // 源节点 layer 加权：Processing 60% / Output 40%
         let mut weights: Vec<f32> = Vec::with_capacity(candidates.len());
         for &ci in candidates {
             let layer = self.nodes[ci].layer;
-            let base = if layer == LayerType::Processing {
+            weights.push(if layer == LayerType::Processing {
                 0.6
             } else {
                 0.4
-            };
-            let w = if layer == LayerType::Output {
-                base * temp_out_boost
-            } else {
-                base
-            };
-            weights.push(w);
+            });
         }
-        // ====== 临时梳理-1 结束 ======
 
         let total: f32 = weights.iter().sum();
         let from_idx = if total <= 0.0 {
@@ -989,7 +918,8 @@ impl Genome {
                 .connections
                 .iter()
                 .any(|c| c.in_node == from_id && c.out_node == to_id);
-            if !exists {
+            if !exists && passes_c1_cap(&self.connections, from_id, to_id, max_per_node) {
+                debug_assert_valid_io_edge(&self.nodes, from_id, to_id);
                 self.connections.push(ConnectionGene {
                     in_node: from_id,
                     out_node: to_id,
@@ -1026,9 +956,10 @@ impl Genome {
                 .copied()
                 .filter(|&i| {
                     let to_node = &self.nodes[i];
-                    // 硬约束：Output 只从运动区接收
+                    // 硬约束：Output 只从其指定运动区接收
                     if matches!(to_node.node_type, NodeType::Output) {
-                        return block::is_motor(from_blk);
+                        let out_idx = to_node.id.saturating_sub(Self::INPUT_SIZE);
+                        return from_blk == block::motor_block_for_output(out_idx);
                     }
                     Self::matches_conn_target(from_blk, to_node, target_type)
                 })
@@ -1038,44 +969,29 @@ impl Genome {
                 continue; // 该类别无候选，重新采样
             }
 
-            // ====== 临时梳理-1：跨 block 目标若其 block 有 Proc，目标必须是 Proc ======
-            let matching: Vec<usize> = matching
-                .into_iter()
-                .filter(|&i| {
-                    let to_blk = Self::node_block(&self.nodes[i]);
-                    if to_blk == from_blk {
-                        return true; // 同 block 不限制
-                    }
-                    let to_layer = self.nodes[i].layer;
-                    if to_layer == LayerType::Output {
-                        // 目标 block 有 Proc 吗？
-                        let blk_has_proc = self.nodes.iter().any(|n| {
-                            matches!(n.node_type, NodeType::Block(_))
-                                && Self::node_block(n) == to_blk
-                                && n.layer == LayerType::Processing
-                        });
-                        // 有 Proc 但目标是 Out → 拒绝
-                        !blk_has_proc
-                    } else {
-                        true // 目标是 Proc，总是合规
-                    }
-                })
-                .collect();
-            if matching.is_empty() {
-                continue;
-            }
-            // ====== 临时梳理-1 结束 ======
-
-            // 按源 block 的 target_pref 做加权采样：缺省 1.0=中性
+            // 按源 block 的 target_pref × C3 软偏好做加权采样
+            // - target_pref：缺省 1.0=中性
+            // - C3：跨 block 时 Proc 目标 ×3（仿生：跨区信号优先进入"前端处理"层）
             let from_pref = self.conn_probs.get(&from_blk);
             let to_idx = {
                 let weights: Vec<f32> = matching
                     .iter()
                     .map(|&i| {
-                        let to_blk = Self::node_block(&self.nodes[i]);
-                        from_pref
+                        let to_node = &self.nodes[i];
+                        let to_blk = Self::node_block(to_node);
+                        let pref = from_pref
                             .and_then(|p| p.target_pref.get(&to_blk).copied())
-                            .unwrap_or(1.0)
+                            .unwrap_or(1.0);
+                        // C3 软偏好：跨 block 的 Block 目标节点，Proc ×3
+                        let c3 = if to_blk != from_blk
+                            && matches!(to_node.node_type, NodeType::Block(_))
+                            && to_node.layer == LayerType::Processing
+                        {
+                            3.0
+                        } else {
+                            1.0
+                        };
+                        pref * c3
                     })
                     .collect();
                 let total: f32 = weights.iter().sum();
@@ -1101,7 +1017,8 @@ impl Genome {
                 .iter()
                 .any(|c| c.in_node == from_id && c.out_node == to_id);
 
-            if !exists {
+            if !exists && passes_c1_cap(&self.connections, from_id, to_id, max_per_node) {
+                debug_assert_valid_io_edge(&self.nodes, from_id, to_id);
                 self.connections.push(ConnectionGene {
                     in_node: from_id,
                     out_node: to_id,
@@ -1258,8 +1175,10 @@ impl Genome {
             new_block
         };
 
-        // ====== 临时梳理-3：补全 block 缺失的节点类型 ======
-        // 统计 new_block 内 Proc/Out 节点数
+        // === C2 永久软约束：每个 block 必须同时拥有 Proc + Out 节点 ===
+        // 若 new_block 当前只缺一种类型，本次 add_node 高概率补齐该类型。
+        // 仿生意义：感官区缺投射层无法对外发声，运动区缺处理层无法被驱动；
+        // C2 保证 block 内部信号能从 Proc → Out 这条链路传递。
         let blk_proc_n = self
             .nodes
             .iter()
@@ -1279,14 +1198,14 @@ impl Genome {
             })
             .count();
         let blk_type_hint: Option<LayerType> = if blk_proc_n == 0 && blk_out_n > 0 {
-            // 只有 Out，缺 Proc → 强制补 Proc（概率 90%）
+            // 只有 Out，缺 Proc → 90% 概率补 Proc
             if rng.gen::<f64>() < 0.9 {
                 Some(LayerType::Processing)
             } else {
                 None
             }
         } else if blk_out_n == 0 && blk_proc_n > 0 {
-            // 只有 Proc，缺 Out → 强制补 Out（概率 90%）
+            // 只有 Proc，缺 Out → 90% 概率补 Out
             if rng.gen::<f64>() < 0.9 {
                 Some(LayerType::Output)
             } else {
@@ -1295,7 +1214,6 @@ impl Genome {
         } else {
             None
         };
-        // ====== 临时梳理-3 结束 ======
 
         // 确定 layer：方向推导 > 补全 > 随机
         let new_layer = if let Some(forced) = blk_type_hint {
@@ -1350,179 +1268,6 @@ impl Genome {
             enabled: true,
         });
     }
-
-    // ====== 临时修复：Input/Output 连接合规性 ======
-    /// 每次调用同时做三件事：
-    ///   1. Input/Output 若已无一条指向指定 block 的启用连接 → 恢复一条 disabled
-    ///   2. Input→非指定 block / 非指定 block→Output 的违规连接 → 删除
-    ///   3. 删除单线孤点（Block 节点总连接 ≤1）
-    /// 调用点见 mutate() 末尾注释，需要时取消注释即可恢复
-    #[allow(dead_code)]
-    fn repair_io_connections(&mut self) {
-        use super::block;
-        let input_size = Self::INPUT_SIZE;
-        let output_start = input_size;
-
-        // —— 1. 恢复：Input/Output 必须至少有一条指向指定 block 的启用连接 ——
-        for node in &self.nodes {
-            match node.node_type {
-                NodeType::Input => {
-                    let designated = block::sensory_block_for_input(node.id);
-                    let designated_nodes: Vec<usize> = self
-                        .nodes
-                        .iter()
-                        .enumerate()
-                        .filter(
-                            |(_, n)| matches!(n.node_type, NodeType::Block(b) if b == designated),
-                        )
-                        .map(|(i, _)| i)
-                        .collect();
-                    if designated_nodes.is_empty() {
-                        continue;
-                    }
-                    let has_enabled = self.connections.iter().any(|c| {
-                        c.enabled
-                            && c.in_node == node.id
-                            && designated_nodes
-                                .iter()
-                                .any(|&di| self.nodes[di].id == c.out_node)
-                    });
-                    if !has_enabled {
-                        // 找一条指向指定 block 的 disabled 连接恢复
-                        if let Some(conn) = self.connections.iter_mut().find(|c| {
-                            !c.enabled
-                                && c.in_node == node.id
-                                && designated_nodes
-                                    .iter()
-                                    .any(|&di| self.nodes[di].id == c.out_node)
-                        }) {
-                            conn.enabled = true;
-                        }
-                    }
-                }
-                NodeType::Output => {
-                    let out_idx = node.id.saturating_sub(output_start);
-                    let designated = block::motor_block_for_output(out_idx);
-                    let designated_nodes: Vec<usize> = self
-                        .nodes
-                        .iter()
-                        .enumerate()
-                        .filter(
-                            |(_, n)| matches!(n.node_type, NodeType::Block(b) if b == designated),
-                        )
-                        .map(|(i, _)| i)
-                        .collect();
-                    if designated_nodes.is_empty() {
-                        continue;
-                    }
-                    let has_enabled = self.connections.iter().any(|c| {
-                        c.enabled
-                            && c.out_node == node.id
-                            && designated_nodes
-                                .iter()
-                                .any(|&di| self.nodes[di].id == c.in_node)
-                    });
-                    if !has_enabled {
-                        if let Some(conn) = self.connections.iter_mut().find(|c| {
-                            !c.enabled
-                                && c.out_node == node.id
-                                && designated_nodes
-                                    .iter()
-                                    .any(|&di| self.nodes[di].id == c.in_node)
-                        }) {
-                            conn.enabled = true;
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // —— 2. 删除：Input→非指定 block / 非指定 block→Output 的违规连接 ——
-        // 收集要删除的索引，从后往前删避免索引漂移
-        // 守卫：至少保留一条正确的启用连接，避免孤儿 Input/Output
-        let mut to_remove: Vec<usize> = Vec::new();
-        for (i, conn) in self.connections.iter().enumerate() {
-            // Input → 非指定感官区
-            if conn.in_node < input_size {
-                let designated = block::sensory_block_for_input(conn.in_node);
-                let out_node = self.nodes.iter().find(|n| n.id == conn.out_node);
-                let out_blk = out_node.map(|n| Self::node_block(n)).unwrap_or(0);
-                if out_blk != designated {
-                    let same_in_correct = self
-                        .connections
-                        .iter()
-                        .enumerate()
-                        .filter(|(j, c)| {
-                            *j != i && c.enabled && c.in_node == conn.in_node && {
-                                let out_n = self.nodes.iter().find(|n| n.id == c.out_node);
-                                out_n.map_or(false, |n| Self::node_block(n) == designated)
-                            }
-                        })
-                        .count();
-                    if same_in_correct > 0 {
-                        to_remove.push(i);
-                    }
-                    continue;
-                }
-            }
-            // 非指定运动区 → Output
-            if conn.out_node >= output_start && conn.out_node < output_start + Self::OUTPUT_SIZE {
-                let out_idx = conn.out_node.saturating_sub(output_start);
-                let designated = block::motor_block_for_output(out_idx);
-                let in_node = self.nodes.iter().find(|n| n.id == conn.in_node);
-                let in_blk = in_node.map(|n| Self::node_block(n)).unwrap_or(0);
-                if in_blk != designated {
-                    // 保留至少一条正确的启用连接
-                    let same_out_correct = self
-                        .connections
-                        .iter()
-                        .enumerate()
-                        .filter(|(j, c)| {
-                            *j != i && c.enabled && c.out_node == conn.out_node && {
-                                let in_n = self.nodes.iter().find(|n| n.id == c.in_node);
-                                in_n.map_or(false, |n| Self::node_block(n) == designated)
-                            }
-                        })
-                        .count();
-                    if same_out_correct > 0 {
-                        to_remove.push(i);
-                    }
-                }
-            }
-        }
-        // 从后往前删
-        to_remove.sort_unstable();
-        for &idx in to_remove.iter().rev() {
-            self.connections.remove(idx);
-        }
-
-        // —— 3. 删除单线孤点：Block 节点仅有一条连接（进或出）→ 无回路，纯代谢累赘 ——
-        // disabled 线也算正常连接，只清理真正孤立（总连接数=1）的节点
-        let mut orphan_node_ids: Vec<usize> = Vec::new();
-        for node in &self.nodes {
-            if !matches!(node.node_type, NodeType::Block(_)) {
-                continue;
-            }
-            let total_conns = self
-                .connections
-                .iter()
-                .filter(|c| c.in_node == node.id || c.out_node == node.id)
-                .count();
-            if total_conns <= 1 {
-                orphan_node_ids.push(node.id);
-            }
-        }
-        if !orphan_node_ids.is_empty() {
-            // 删除这些节点的全部连接
-            self.connections.retain(|c| {
-                !orphan_node_ids.contains(&c.in_node) && !orphan_node_ids.contains(&c.out_node)
-            });
-            // 删除节点本身
-            self.nodes.retain(|n| !orphan_node_ids.contains(&n.id));
-        }
-    }
-    // ====== 临时修复结束 ======
 
     /// 删除无效 Block 节点：出边全部 disabled 或入边全部 disabled
     /// Input/Output 节点不受影响，它们由 toggle 守卫 + 硬约束保护
