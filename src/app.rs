@@ -628,14 +628,6 @@ impl CellWorldApp {
             ui.collapsing("进化", |ui| {
                 changed |= config_drag_f64(
                     ui,
-                    "初始连接倍率",
-                    "新生物随机额外边数 = (INPUT+OUTPUT) × 此值，遵守 C1≤10",
-                    &mut c.initial_connection_ratio,
-                    0.05,
-                    0.0..=2.0,
-                );
-                changed |= config_drag_f64(
-                    ui,
                     "种族相似阈值",
                     "基因相似度>=此值视为同族",
                     &mut c.species_similarity_threshold,

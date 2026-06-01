@@ -43,6 +43,7 @@ cell-world 的核心理念是让群体行为（集群、尾随、捕猎、哺育
 - **Output 接收硬约束写松（架构缺陷修复，v2.4.1，2026-06）**：`mutate_add_connection` 内 `is_motor(from_blk)` 只判 `|b|≥25`，对 b25 / b-25 / b-26 一视同仁——意味着 b25 的运动节点会获得到 output[3..5]（繁殖）/ output[7]（光嘴）的连接通路，违反"每个 output 只接收其专属 motor 块"的架构语义（与 Input 侧的 `from_blk == sensory_block_for_input(input_id)` 严格对称要求不一致）。**修复**：把 `is_motor(from_blk)` 改为 `from_blk == motor_block_for_output(out_idx)`，并在三处 `connections.push` 前加 `debug_assert_valid_io_edge`（release 零开销），下次再写漏立即崩。属于"修复明显架构缺陷"——演化原本可以发现"借道错误 motor 块"的捷径，等于让硬约束失去意义。
 - **临时脚手架长期未清理积累 4 套违章拼贴（架构清债，v2.4.1，2026-06）**：演化阶段为修缮已演化基因引入的 4 套临时逻辑（临时-1：mutate_add_connection 内 ×20 Out boost + 跨 block Proc-only 过滤；临时-2：每代渐进惩罚跨 block 违规连接；临时-3：add_node 强制补齐 block 缺失 layer 类型；临时-4：节点连接数>7 时权重单向削弱 + Hebbian 限增），累计修补了 `genome.rs` / `spiking.rs` / `gpu.rs` 三处的演化路径。这些脚手架原意是不重启数据时硬扳已演化群体的不良拓扑，但**长期共存导致演化压力被搬到补丁内**：补丁实际在替演化做工作（决定 block 哪种 layer 应主导、决定何时退役连接、决定权重单调方向）。**清理（v2.4.1 演化重启）**：全部删除，仅保留两条"真正中性的软约束"作为永久规则——C2（add_node 90% 概率补齐 block 缺失 layer，保留 10% 容许偏差）+ C3（add_connection 跨 block 时 Proc 目标权重 ×3，软偏置不是硬过滤）。判据：保留下来的两条是"演化探索时的均匀采样基底"，而被删的四套是"演化时的方向性裁剪"。
 - **初始拓扑两轮设计 + 必要边权重错配（v2.4.1，2026-06）**：第一轮设计 84 节点（3n），每 block 预制 Proc+Out 双层，路径深度 5 跳；同时把必要 IO 边权重也设为 `[-0.1, 0.1]`（误从 mutate 的"中性插入"语义复制）→ 5 跳 × 小权重数学上无法让 `|out[1]| × max_speed > 0.05` 速度阈值，**初代全部不会动 → 不能吃 → 饿死 → 演化无法启动**。Hebbian 又依赖移动产生奖励信号，形成死锁。**修正**：① 收回 56 节点（2n），sensory block 只放 Proc / motor block 只放 Out，故意打破 C2 让演化在 mutate_add_node 阶段自然补齐；② 必要 IO 边权重恢复 `[-1.0, 1.0]`（演化基线强信号），让 3 跳路径 0.5³≈0.125 直接超过运动阈值；③ 额外随机边维持 `[-0.1, 0.1]`（中性插入语义）。教训：**初始拓扑设计要先验算"信号从 input 走到 output 的衰减积"够不够穿过最近的行为阈值**——这是基本算术，但我第一轮当成了"涌现问题"，差点用 D 选项（输出端 sigmoid 放大）掩盖根因。涌现是关于演化能在什么基底上自我组织，不是关于把死锁的物理基底硬拽过阈值。
+- **预制 cross 边替代随机额外边（v2.4.1 第三轮，2026-06）**：56 节点修完路径深度后还遗漏一个问题——sensory 区和 motor 区**没有任何预制 cross 边**，只能靠 `mutate_add_connection(Some(10))` 随机撒 `n × ratio` 条额外边。算 P(单条额外边连通 output[1]) ≈ 1.2%，ratio=0.2 只有 7% 能动，ratio=2 也只有 49%。**老版本（v2.4.1 之前）虽然只有 36 节点，但预制了 5 sensory × 3 motor = 15 条 cross 边**，这是它"开局就能演化"的关键，不是"少层数"。**修正**：删 `initial_connection_ratio` 配置，改为预制 C 方案——每 motor Out × 每 sensory block 选 1 随机 Proc 连边，8×5=40 条 cross，加上 28 条 I/O 必要边，初始 **68 条全预制**。每个 input 到每个 output 都有 3 跳通路。教训：**初始拓扑"能让演化启动"的判据不是"路径深度够浅"，而是"input → output 是否有物理路径"**。空区间靠随机撒边补齐是低效赌博，应当用确定性骨架。另一个深层教训（已写入分析但未在代码中触发）：**全直读 brain 上 Hebbian 实质不学习相关性**——所有节点 fired 永真，trace 一致饱和，权重只能整体抬升不能选择性放大。真正的相关性学习要等演化把 threshold>0 的脉冲节点引入活跃路径。C 方案让"沙箱不通"问题彻底解决，剩下的"学不到相关性"问题只能靠演化解决，不是初始化能解决的。
 
 ### 如何正确推动涌现
 
@@ -210,19 +211,21 @@ cargo clippy          # 代码检查
   - **不再是基因组内可演化基因**（`MutationGene` 已删除）
   - 原因：自适应变异率在稳定环境下必然塌到下界，拖累演化
   - 想调节探索强度直接改 config
-- **初始大脑拓扑（v2.4.1 重构，2n 56 节点）**: `Genome::random_minimal(initial_connection_ratio)` 生成最小骨架
-  - 20 Input + 8 Output = 28 个固定 I/O 节点
-  - 每 input 在其指定感官 block 中独占 1 个 Proc 节点（**无 Out 配对**）
-  - 每 output 在其指定运动 block 中独占 1 个 Out 节点（**无 Proc 配对**）
-  - 合计 28 + 20 + 8 = **56 节点（2n，n=输入+输出总数）**
-  - 5 个感官 block (-1/+1/-3/+3/-2) 初始只有 Proc，3 个运动 block (+25/-25/-26) 初始只有 Out——**故意打破 C2** 给演化留扩张空间，C2 在 `mutate_add_node` 触发时再 90% 概率补齐
-  - 必要连接（共 28 条，3 跳最短可达 output）：input→独占 Proc、独占 Out→output
-  - **必要边权重 `[-1.0, 1.0]`**（演化基线强信号）；额外随机边走 `mutate_add_connection(Some(10))` 用 `[-0.1, 0.1]`（中性插入）
-  - 3 跳路径：`input → 独占 Proc → [cross 边] → 独占 Out → output`，3 个 `[-1,1]` 权重乘积均值 ~0.125，speed = 0.125 × max_speed = 2.5（>0.05 阈值），初代生命大概率能动
-  - 额外随机边：`n × initial_connection_ratio`（n=28，默认 ratio=0.2 → ~6 条），遵守 ConnProbs/target_pref/硬约束 + C1 ≤10
-  - 配置项：`initial_connection_ratio: f64`（替代旧 `initial_connections_min/max`）
+- **初始大脑拓扑（v2.4.1，56 节点 + 68 边预制骨架）**: `Genome::random_minimal()` 生成固定结构骨架（无配置参数）
+  - 节点（56 = 2n，n=输入+输出总数）：
+    - 20 Input + 8 Output = 28 固定 I/O
+    - 每 input 在其指定感官 block 独占 1 个 Proc（无 Out 配对）→ 20
+    - 每 output 在其指定运动 block 独占 1 个 Out（无 Proc 配对）→ 8
+  - 必要边（68 条，全部权重 `[-1.0, 1.0]`）：
+    - input_i → 独占 Proc_i（20 条，I/O 硬约束）
+    - 独占 Out_j → output_j（8 条，I/O 硬约束）
+    - **C 方案 cross 边**：每 motor Out × 每 sensory block 选 1 随机 Proc 连边 → 8 × 5 = **40 条**
+  - 3 跳路径 `input → 独占 Proc → motor Out → output` 在 t=0 就连通，0.5³ × max_speed=2.5 远超 0.05 阈值，初代 100% 能动
+  - C1 ≤10 自检：motor Out 接 5 cross + 1 out = 6；单 Proc block（-3/+3）出 8 + 入 1 = 9 临界；双 Proc block（-2）出 ~4 + 入 1 = 5；8 Proc block（-1/+1）出 ~1 + 入 1 = 2
+  - 5 个感官 block 初始只有 Proc，3 个运动 block 初始只有 Out——**故意打破 C2** 给演化留扩张空间，C2 在 `mutate_add_node` 触发时再 90% 概率补齐
+  - **设计意图**：68 边骨架替代了之前"撒 ratio×n 条随机边"的方案。原 ratio 方案下 P(创造能动) 仅 7%（ratio=0.2）；C 方案下每个 input 到每个 output 都有 3 跳路径，**100% 能动 + 后续演化压力转移到补脉冲拓扑/联合区**，而不是浪费在"凑齐 cross 边"上
 - **三条永久软约束（v2.4.1确立）**: 取代旧的临时-1/2/3/4 拼贴，方向中性
-  - **C1 单节点活跃连接 ≤10**：仅作用于初始化（`random_minimal` + 其内部撒边），演化中 `mutate_add_connection(None)` 无任何上限。实现：`passes_c1_cap()` 工具函数 + `mutate_add_connection(_, max_per_node: Option<usize>)` 参数化
+  - **C1 单节点活跃连接 ≤10**：`passes_c1_cap()` 工具函数 + `mutate_add_connection(_, max_per_node: Option<usize>)` 参数化。**当前 dormant**（v2.4.1 第三轮预制 68 边骨架后，random_minimal 不再调用 `Some(10)` 路径；机制保留供未来重新引入随机初始边时复用）
   - **C2 block 内 Proc+Out 同时存在**：在 `mutate_add_node` 中 90% 概率把新节点补成 block 缺失的 layer，保留 10% 允许偏差作为演化变异通道
   - **C3 跨 block 连接软偏好 Proc 目标**：`mutate_add_connection` 加权采样阶段，跨 block 的 Block 目标 Proc 候选 ×3 倍权重，仿生意义：跨区信号优先进入"前端处理"层
   - 与硬约束的区别：硬约束（Input→指定 block，Output 由指定 block 接收）由 `debug_assert_valid_io_edge` 守门，违规直接 panic；C1/C2/C3 是软偏置/概率倾向，留有演化空间

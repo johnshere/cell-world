@@ -316,27 +316,29 @@ impl Genome {
     /// [7] 发光强度 tanh→(v+1)/2 映射到 0~1, 量化一位小数     block -26（光嘴/语言生成）
     pub const OUTPUT_SIZE: usize = 8;
 
-    /// 创建最小基因组（v2.4.1 56 节点拓扑 = 2n）：
+    /// 创建最小基因组（v2.4.1 56 节点 + 68 边预制骨架）：
     ///
+    /// **节点（56 = 2n）**：
     /// - 20 Input + 8 Output = 28 个固定 I/O 节点
-    /// - 每 input 在其指定感官 block 中独占 1 个 Proc 节点（无反向 Out 补齐）
-    /// - 每 output 在其指定运动 block 中独占 1 个 Out 节点（无反向 Proc 补齐）
-    /// - 合计 28 (I/O) + 20 (input Proc) + 8 (output Out) = **56 节点（2n）**
+    /// - 每 input 在其指定感官 block 中独占 1 个 Proc 节点（无 Out 配对）
+    /// - 每 output 在其指定运动 block 中独占 1 个 Out 节点（无 Proc 配对）
+    /// - 合计 28 + 20 + 8 = **56 节点**
     ///
-    /// 必要连接（仅两类，3 跳最短可达 output）：
-    /// - input_i → 其独占 Proc_i（input 硬约束 + Proc layer 硬约束）
-    /// - 独占 Out_j → output_j（output 硬约束 + Out layer 硬约束）
+    /// **必要连接（68 条，全部权重 `[-1.0, 1.0]`）**：
+    /// 1. input_i → 其独占 Proc_i（20 条，I/O 硬约束）
+    /// 2. 独占 Out_j → output_j（8 条，I/O 硬约束）
+    /// 3. **C 方案 cross 边**：对每个 motor Out，从每个 sensory block 内随机选 1 个 Proc，
+    ///    连一条 Proc → motor Out 的跨 block 边。8 motor Out × 5 sensory block = **40 条**
     ///
-    /// 必要边权重用 `[-1.0, 1.0]`（演化基线信号强度），让 "input→Proc → [cross 边] → Out→output"
-    /// 3 跳路径在初始时就有非零 speed 信号驱动。
+    /// 3 跳路径 `input → 独占 Proc → motor Out → output` 在 t=0 就连通，
+    /// 0.5³ × max_speed ≈ 2.5 远超 0.05 阈值，初代 100% 能动。
     ///
-    /// 然后撒 `n × initial_connection_ratio` 条随机跨/同 block 连接（小权重 `[-0.1, 0.1]`，
-    /// 复用 `mutate_add_connection(_, Some(10))`），遵守：
-    /// - ConnProbs/target_pref/硬约束/C1≤10
+    /// **C1 ≤10 自检**：每 motor Out 接 5 cross + 1 out = 6；单 Proc block（-3/+3）出 8 + 入 1 = 9 临界；
+    /// 双 Proc block（-2）出 ~4 + 入 1 = 5；8 Proc block（-1/+1）出 ~1 + 入 1 = 2。
     ///
-    /// C2（block 内 Proc+Out 共存）由 `mutate_add_node` 在演化中自然补齐，不在初始预制——
-    /// 初始 sensory 只有 Proc / motor 只有 Out 是有意为之，给演化留扩张空间。
-    pub fn random_minimal(initial_connection_ratio: f64) -> Self {
+    /// **C2（block 内 Proc+Out 共存）由演化补齐**：sensory 只有 Proc / motor 只有 Out，
+    /// 故意打破 C2 给演化留扩张空间，C2 只在 `mutate_add_node` 触发时 90% 概率补齐缺失类型。
+    pub fn random_minimal() -> Self {
         use super::block;
         let mut rng = rand::thread_rng();
         let mut nodes = Vec::new();
@@ -371,6 +373,8 @@ impl Genome {
         }
 
         // 3. 每个 input：独占 Proc（在其指定 sensory block，无 Out 配对）
+        // 同时按 block 分组记录 Proc id，供步骤 5 的 C 方案使用
+        let mut sensory_proc_by_block: FxHashMap<i8, Vec<usize>> = FxHashMap::default();
         for input_id in 0..Self::INPUT_SIZE {
             let blk = block::sensory_block_for_input(input_id);
 
@@ -384,6 +388,7 @@ impl Genome {
                 refractory_period: 0,
             });
             next_id += 1;
+            sensory_proc_by_block.entry(blk).or_default().push(proc_id);
 
             // input → 独占 Proc（必要边大权重）
             connections.push(ConnectionGene {
@@ -395,6 +400,8 @@ impl Genome {
         }
 
         // 4. 每个 output：独占 Out（在其指定 motor block，无 Proc 配对）
+        // 记录每个 output 对应的独占 Out id，供步骤 5 使用
+        let mut output_dedicated_out: Vec<usize> = Vec::with_capacity(Self::OUTPUT_SIZE);
         for output_idx in 0..Self::OUTPUT_SIZE {
             let output_id = output_start + output_idx;
             let blk = block::motor_block_for_output(output_idx);
@@ -409,6 +416,7 @@ impl Genome {
                 refractory_period: 0,
             });
             next_id += 1;
+            output_dedicated_out.push(out_id);
 
             // 独占 Out → output（必要边大权重）
             connections.push(ConnectionGene {
@@ -419,7 +427,24 @@ impl Genome {
             });
         }
 
-        // 5. 初始化 block_probs（默认 5 方向概率 + 空 target_pref）
+        // 5. C 方案 cross 边：每 motor Out × 每 sensory block 选 1 随机 Proc 连边
+        // 8 motor Out × 5 sensory block = 40 条，input 到任意 output 的 3 跳路径在 t=0 就连通
+        for &motor_out_id in &output_dedicated_out {
+            for procs in sensory_proc_by_block.values() {
+                if procs.is_empty() {
+                    continue;
+                }
+                let proc_id = procs[rng.gen_range(0..procs.len())];
+                connections.push(ConnectionGene {
+                    in_node: proc_id,
+                    out_node: motor_out_id,
+                    weight: rng.gen_range(-1.0..1.0),
+                    enabled: true,
+                });
+            }
+        }
+
+        // 6. 初始化 block_probs（默认 5 方向概率 + 空 target_pref）
         let mut block_probs = HashMap::new();
         for blk in -26..=26 {
             block_probs.insert(blk, ConnProbsGene::default());
@@ -435,16 +460,6 @@ impl Genome {
             next_node_id: next_id,
             sorted_conns_cache: Vec::new(),
         };
-
-        // 6. 撒 n × ratio 条随机额外边，遵守 ConnProbs/target_pref/硬约束/C1≤10
-        let n = Self::INPUT_SIZE + Self::OUTPUT_SIZE;
-        let extra_count = ((n as f64) * initial_connection_ratio.max(0.0)).round() as usize;
-        let dummy_conf = Config::default();
-        for _ in 0..extra_count {
-            // Some(10) 启用 C1 软上限；演化期调用走 None 路径
-            genome.mutate_add_connection(&dummy_conf, Some(10));
-        }
-
         genome.rebuild_sorted_cache();
         genome
     }

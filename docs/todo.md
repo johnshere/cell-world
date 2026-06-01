@@ -13,18 +13,21 @@
 - ✅ Input 侧硬约束沿用现有 `from_blk == sensory_block_for_input(input_id)`，断言一并覆盖
 - 不需要清理历史违规（重新演化）
 
-4、初始生命神经网络重构 — ✅ **已完成（二次修订为 2n 56 节点）**
-- ✅ `random_minimal(initial_connection_ratio: f64)` 56 节点拓扑（2n）：
+4、初始生命神经网络重构 — ✅ **已完成（三次修订为 56 节点 + 68 边预制骨架）**
+- ✅ `random_minimal()`（无参数）56 节点拓扑（2n）：
   - 20 Input + 8 Output + 20 input 独占 Proc + 8 output 独占 Out = 56
   - **取消反向类型补齐**：sensory block 初始只有 Proc / motor block 初始只有 Out，C2 由演化在 mutate_add_node 阶段补齐
-- ✅ 必要 IO 边权重 `[-1.0, 1.0]`：input→独占 Proc + 独占 Out→output 共 28 条骨架边用大权重，3 跳路径 0.5³≈0.125 × max_speed=2.5 直接突破运动阈值 0.05
-- ✅ Input 不再直连 Output，必经 block 内独占节点
-- ✅ UI 面板和 `config.toml` 改为 `initial_connection_ratio`，删除 `initial_connections_min/max`
+- ✅ 68 条预制必要边（全权重 `[-1.0, 1.0]`，演化基线强信号）：
+  - 20 条 input → 独占 Proc（I/O 硬约束）
+  - 8 条 独占 Out → output（I/O 硬约束）
+  - 40 条 **C 方案 cross 边**：每 motor Out × 每 sensory block 选 1 随机 Proc 连边
+- ✅ 3 跳路径 `input → 独占 Proc → motor Out → output` 在 t=0 就连通，0.5³ × max_speed=2.5 直接突破运动阈值 0.05，初代 **100% 能动**
+- ✅ 删除全部连接密度配置：`initial_connections_min/max`、`initial_connection_ratio` 全清；初始拓扑由代码完全确定
 
-5、随机额外连接 — ✅ **已完成**
-- ✅ 额外边数 = `(INPUT_SIZE + OUTPUT_SIZE) × initial_connection_ratio` 四舍五入
-- ✅ 复用 `mutate_add_connection(_, Some(10))`，自动遵守 ConnProbs/target_pref + C1≤10 + 硬约束
-- ✅ 新边权重 `[-0.1, 0.1]` 小扰动（中性插入语义）
+5、随机额外连接 — ❌ **方案废弃**
+- 原方案"`n × ratio` 撒随机额外边"被 C 方案预制 40 条 cross 边替代
+- 理由：随机撒边 P(能动) 极低（ratio=0.2 → 7%，ratio=2 → 49%）；C 方案确定性预制 → 100% 能动
+- `mutate_add_connection(_, Some(10))` 函数保留，但不再被 random_minimal 调用；仅作为演化通路的预留接口
 
 ## 附加排查（版本 2.4.1 守门）
 
@@ -47,7 +50,7 @@
 
 | 约束 | 含义 | 落点 | 开关 |
 |------|------|------|------|
-| **C1** | 节点活跃连接 ≤10 | `passes_c1_cap()` + `mutate_add_connection(_, Option<usize>)` | 仅 `random_minimal` 启用 `Some(10)`，演化期 `None` 完全不限 |
+| **C1** | 节点活跃连接 ≤10 | `passes_c1_cap()` + `mutate_add_connection(_, Option<usize>)` | **当前 dormant**（C 方案预制骨架后 random_minimal 不再调用 Some）；演化期 `None` 完全不限；机制保留供未来用 |
 | **C2** | block 应有 Proc+Out 共存 | `mutate_add_node` 检测缺失类型，90% 概率补齐 | **仅在 add_node 触发时生效，初始 random_minimal 不预制** |
 | **C3** | 跨 block 连接 Proc 目标 ×3 | `mutate_add_connection` 加权采样阶段 | 永久 |
 

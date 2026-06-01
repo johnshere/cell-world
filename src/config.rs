@@ -97,11 +97,6 @@ pub struct Config {
     /// 接触判定距离
     pub contact_range: f64,
 
-    /// 初始随机额外连接倍率（n × ratio，n=INPUT_SIZE+OUTPUT_SIZE=28）
-    /// random_minimal 在固定 I/O + block 内部线之外，按此倍率撒随机跨/同 block 边，
-    /// 遵守 ConnProbs/target_pref/硬约束/C1≤10
-    #[serde(default = "default_initial_connection_ratio")]
-    pub initial_connection_ratio: f64,
     /// 种族相似度阈值（高于此值视为同一种族）
     pub species_similarity_threshold: f64,
     /// 体温逸散系数
@@ -411,9 +406,6 @@ fn default_reproduction_age_cost_rate() -> f64 {
 }
 fn default_particle_min_energy() -> f64 {
     100.0
-}
-fn default_initial_connection_ratio() -> f64 {
-    0.2
 }
 
 impl Config {

@@ -165,8 +165,8 @@ impl Creature {
     }
 
     /// 创建随机生物（第0代，无祖先）
-    pub fn random(id: u64, x: f64, y: f64, energy: f64, initial_connection_ratio: f64) -> Self {
-        let genome = Genome::random_minimal(initial_connection_ratio);
+    pub fn random(id: u64, x: f64, y: f64, energy: f64) -> Self {
+        let genome = Genome::random_minimal();
         Self::new(id, x, y, energy, genome, 0, None, None)
     }
 

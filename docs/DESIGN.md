@@ -542,7 +542,7 @@ max_speed = 20.0
 
 # 进化
 mutation_rate = 0.15                   # 全局变异率（base/block 两类共享）
-initial_connection_ratio = 0.2         # 初始随机额外边 = (INPUT+OUTPUT) × 此值，遵守 C1≤10
+# 初始拓扑由代码完全确定（56 节点 + 68 边预制骨架），无连接密度配置
 species_similarity_threshold = 0.95    # 聚类阈值；交配阈值 = × 0.9
 dominant_min_age = 250.0
 
@@ -618,11 +618,11 @@ auto_spawn_interval = 45.0
 （与 v2.4 同步批处理技术里程碑同主版本号，小号区分；用户口头简称为 "v2.4"，在 todo.md 中以 "版本 2.4.1 更新" 标签管理）
 - [x] **Output 接收硬约束修复**：`mutate_add_connection` 把 `is_motor(from_blk)` 改为 `from_blk == motor_block_for_output(out_idx)`，与 Input 侧严格对称
 - [x] **debug_assert 守门**：所有写入 `connections` 的入口（`mutate_add_connection` 三处 push、未来的新入口）在 push 前调用 `debug_assert_valid_io_edge`，违规 debug 立崩 / release 零开销
-- [x] **`random_minimal` 56 节点拓扑重写（2n）**：每 input 独占 Proc（无 Out 配对）+ 每 output 独占 Out（无 Proc 配对）+ 28 个 I/O = 56 节点；5 个感官 block 初始只有 Proc / 3 个运动 block 初始只有 Out，故意打破 C2，演化由 mutate_add_node 自然补齐
-- [x] **必要 IO 边权重 `[-1.0, 1.0]`**：input→独占 Proc 与 独占 Out→output 这 28 条骨架边用大权重，让 3 跳路径在初始就有非零 speed 信号；额外随机边维持 `[-0.1, 0.1]` 中性插入
-- [x] **配置项替换**：删除 `initial_connections_min/max`，新增 `initial_connection_ratio: f64`（默认 0.2），额外随机边数 = `(INPUT_SIZE + OUTPUT_SIZE) × ratio` 四舍五入取整
+- [x] **`random_minimal` 56 节点 + 68 边预制骨架**：每 input 独占 Proc（无 Out 配对）+ 每 output 独占 Out（无 Proc 配对）+ 28 个 I/O = 56 节点；5 个感官 block 初始只有 Proc / 3 个运动 block 初始只有 Out，故意打破 C2，演化由 mutate_add_node 自然补齐
+- [x] **68 条预制必要边（全权重 `[-1.0, 1.0]`）**：20 条 input→Proc + 8 条 Out→output + **40 条 C 方案 cross 边**（每 motor Out × 每 sensory block 选 1 随机 Proc）。3 跳路径在 t=0 就连通，初代 100% 能动
+- [x] **配置项清理**：完全删除 `initial_connections_min/max` 和短暂存在过的 `initial_connection_ratio`；初始拓扑由代码完全确定，不再有连接密度配置
 - [x] **三条永久软约束确立**：
-  - C1 节点活跃连接 ≤10：仅作用于 `random_minimal` 初始化，演化期不限
+  - C1 节点活跃连接 ≤10：机制保留（`passes_c1_cap` + `Option<usize>` 参数化），但 v2.4.1 第三轮 68 边预制骨架后 random_minimal 不再调用 Some 路径，当前 dormant
   - C2 block 应有 Proc+Out 共存：**只在 `mutate_add_node` 触发时 90% 概率补齐缺失 layer，初始不预制**
   - C3 跨 block 目标偏向 Proc：`mutate_add_connection` 加权 ×3
 - [x] **Input/Output 硬约束加 layer 双重校验**：Input 源只能连同 block 的 Processing 层节点；Output 目标只能由同 motor block 的 Output 层节点驱动。`debug_assert_valid_io_edge` 同步校验 block + layer 两条，违规 debug 立崩

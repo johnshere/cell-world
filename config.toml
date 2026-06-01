@@ -101,8 +101,6 @@ vision_range = 100.0
 contact_range = 15.0
 
 # === 进化 ===
-# 初始随机额外连接倍率（n × ratio，n=28），在 56 节点固定 I/O 骨架之外撒随机跨/同 block 边
-initial_connection_ratio = 0.2
 # 种族相似度阈值（高于此值视为同一种族）
 species_similarity_threshold = 0.95
 
