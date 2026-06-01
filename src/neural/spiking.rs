@@ -79,8 +79,12 @@ impl SpikingNetwork {
     /// 改任意一处必须同步改另两处，否则 CPU/GPU 行为会偏离。
     pub fn from_genome(genome: &Genome) -> Self {
         // 与 src/neural/gpu.rs 和 src/neural/snn_tick.wgsl 保持一致
-        const MAX_NODES: usize = 64;
-        const MAX_CONNS: usize = 128;
+        const MAX_NODES: usize = 256;
+        const MAX_CONNS: usize = 512;
+
+        super::capacity::warn_nodes_overflow(genome.nodes.len(), MAX_NODES, "CPU-SNN");
+        let enabled_conns = genome.connections.iter().filter(|c| c.enabled).count();
+        super::capacity::warn_conns_overflow(enabled_conns, MAX_CONNS, "CPU-SNN");
 
         let mut nodes = FxHashMap::default();
         let mut input_ids = Vec::new();

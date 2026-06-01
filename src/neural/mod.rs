@@ -1,5 +1,6 @@
 pub mod block;
 pub mod bridge;
+pub mod capacity;
 pub mod genome;
 pub mod gpu;
 pub mod slot_alloc;

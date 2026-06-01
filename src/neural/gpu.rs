@@ -14,8 +14,8 @@ mod inner {
     // - Shader：src/neural/snn_tick.wgsl 内 const MAX_NODES / MAX_CONNS
     // 改任意一处必须同步改另两处，否则 CPU/GPU 行为会偏离。
     pub const MAX_CREATURES: usize = 512;
-    pub const MAX_NODES: usize = 64;
-    pub const MAX_CONNS: usize = 128;
+    pub const MAX_NODES: usize = 256;
+    pub const MAX_CONNS: usize = 512;
     pub const OUTPUTS_PER_CREATURE: usize = 8;
 
     const COUNTER_ELEMS: usize = MAX_CREATURES * OUTPUTS_PER_CREATURE;
@@ -571,6 +571,10 @@ mod inner {
             if slot >= MAX_CREATURES {
                 return;
             }
+
+            super::super::capacity::warn_nodes_overflow(genome.nodes.len(), MAX_NODES, "GPU-SNN");
+            let enabled_conns = genome.connections.iter().filter(|c| c.enabled).count();
+            super::super::capacity::warn_conns_overflow(enabled_conns, MAX_CONNS, "GPU-SNN");
 
             let node_base = slot * MAX_NODES;
             let conn_base = slot * MAX_CONNS;

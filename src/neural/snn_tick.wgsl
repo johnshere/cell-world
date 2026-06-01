@@ -12,8 +12,8 @@
 // - CPU：src/neural/spiking.rs::SpikingNetwork::from_genome 内同名常量
 // - GPU Rust 端：src/neural/gpu.rs 顶部 MAX_NODES / MAX_CONNS
 // 改任意一处必须同步改另两处，否则 CPU/GPU 行为会偏离。
-const MAX_NODES: u32 = 64u;
-const MAX_CONNS: u32 = 128u;
+const MAX_NODES: u32 = 256u;
+const MAX_CONNS: u32 = 512u;
 const MAX_CREATURES: u32 = 512u;
 
 // 节点数据（双缓冲）
