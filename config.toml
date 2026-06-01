@@ -80,7 +80,7 @@ heat_floor = 0.03
 
 # === 代谢 ===
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
-age_metabolism_factor = 0.025
+age_metabolism_factor = 0.05
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗系数（面板值×0.00001×半径³ = 实际消耗）
@@ -155,7 +155,7 @@ meteorite_energy_amplitude = 0.0
 meteorite_kill_radius = 0.0
 min_landing_damage_ratio = 0.0
 stop_on_extinction = false
-auto_spawn_interval = 99.0
+auto_spawn_interval = 0.5
 
 # === 地形 ===
 # 地形坡度移动消耗系数（上坡额外开销倍率，0=禁用）
