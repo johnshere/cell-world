@@ -243,57 +243,56 @@ fn passes_c1_cap(
     from_n < limit && to_n < limit
 }
 
-/// debug 断言：新增连接必须满足 Input/Output 双重硬约束（block + layer）
+/// 公共校验：连接是否满足 Input/Output 双重硬约束（block + layer）
 /// - Input → 仅可连其指定感官 block 的 Processing 层节点
 /// - Output → 仅可由其指定运动 block 的 Output 层节点接收
-/// 仅在 debug 构建中生效，release 零开销
+/// - 非 I/O 端点直接放行
+/// release 与 debug 均生效
 #[inline]
-fn debug_assert_valid_io_edge(nodes: &[NodeGene], from_id: usize, to_id: usize) {
-    if !cfg!(debug_assertions) {
-        return;
-    }
+fn validate_io_edge(nodes: &[NodeGene], from_id: usize, to_id: usize) -> bool {
     use super::block;
     let from_node = nodes.iter().find(|n| n.id == from_id);
     let to_node = nodes.iter().find(|n| n.id == to_id);
-    if let (Some(fnode), Some(tnode)) = (from_node, to_node) {
-        // Input 源：目标必须是指定 block + Processing layer
-        if matches!(fnode.node_type, NodeType::Input) {
-            let designated = block::sensory_block_for_input(from_id);
-            let to_blk = Genome::node_block(tnode);
-            debug_assert_eq!(
-                to_blk, designated,
-                "Input id={} 必须连到指定 block {}, 实际连到 {}",
-                from_id, designated, to_blk
-            );
-            debug_assert_eq!(
-                tnode.layer,
-                LayerType::Processing,
-                "Input id={} 必须连到 Processing 层节点, 实际目标节点 id={} 是 {:?}",
-                from_id,
-                to_id,
-                tnode.layer
-            );
+    let (Some(fnode), Some(tnode)) = (from_node, to_node) else {
+        return false;
+    };
+    // Input 源：目标必须是指定 block + Processing layer
+    if matches!(fnode.node_type, NodeType::Input) {
+        let designated = block::sensory_block_for_input(from_id);
+        if Genome::node_block(tnode) != designated {
+            return false;
         }
-        // Output 目标：源必须是指定 motor block + Output layer
-        if matches!(tnode.node_type, NodeType::Output) {
-            let out_idx = to_id.saturating_sub(Genome::INPUT_SIZE);
-            let designated = block::motor_block_for_output(out_idx);
-            let from_blk = Genome::node_block(fnode);
-            debug_assert_eq!(
-                from_blk, designated,
-                "Output id={} 必须由指定 block {} 接收, 实际由 {} 发起",
-                to_id, designated, from_blk
-            );
-            debug_assert_eq!(
-                fnode.layer,
-                LayerType::Output,
-                "Output id={} 必须由 Output 层节点驱动, 实际源节点 id={} 是 {:?}",
-                to_id,
-                from_id,
-                fnode.layer
-            );
+        if tnode.layer != LayerType::Processing {
+            return false;
         }
     }
+    // Output 目标：源必须是指定 motor block + Output layer
+    if matches!(tnode.node_type, NodeType::Output) {
+        let out_idx = to_id.saturating_sub(Genome::INPUT_SIZE);
+        let designated = block::motor_block_for_output(out_idx);
+        if Genome::node_block(fnode) != designated {
+            return false;
+        }
+        if fnode.layer != LayerType::Output {
+            return false;
+        }
+    }
+    true
+}
+
+/// 反向校验：已有边是否涉及 I/O 端点且违反硬约束（用于清理历史违规边）
+/// - 非 I/O 边永远返回 false（不需要清理）
+/// - I/O 边反向取 `!validate_io_edge` 结果
+#[inline]
+fn is_io_edge_invalid(nodes: &[NodeGene], from_id: usize, to_id: usize) -> bool {
+    let from_node = nodes.iter().find(|n| n.id == from_id);
+    let to_node = nodes.iter().find(|n| n.id == to_id);
+    let (Some(fnode), Some(tnode)) = (from_node, to_node) else {
+        return false;
+    };
+    let involves_io =
+        matches!(fnode.node_type, NodeType::Input) || matches!(tnode.node_type, NodeType::Output);
+    involves_io && !validate_io_edge(nodes, from_id, to_id)
 }
 
 impl Genome {
@@ -554,21 +553,39 @@ impl Genome {
                         && child
                             .connections
                             .iter()
-                            .filter(|c| c.enabled && c.in_node == conn.in_node)
+                            .enumerate()
+                            .filter(|(i, c)| {
+                                *i != idx
+                                    && c.enabled
+                                    && c.in_node == conn.in_node
+                                    && validate_io_edge(&child.nodes, c.in_node, c.out_node)
+                            })
                             .count()
-                            == 1)
+                            == 0)
                         || (out_is_output
                             && child
                                 .connections
                                 .iter()
-                                .filter(|c| c.enabled && c.out_node == conn.out_node)
+                                .enumerate()
+                                .filter(|(i, c)| {
+                                    *i != idx
+                                        && c.enabled
+                                        && c.out_node == conn.out_node
+                                        && validate_io_edge(&child.nodes, c.in_node, c.out_node)
+                                })
                                 .count()
-                                == 1);
+                                == 0);
                     if !would_orphan {
                         child.connections[idx].enabled = false;
                     }
                 } else {
-                    child.connections[idx].enabled = true;
+                    // 启用前校验 I/O 硬约束，无效连接直接删除
+                    let conn = &child.connections[idx];
+                    if validate_io_edge(&child.nodes, conn.in_node, conn.out_node) {
+                        child.connections[idx].enabled = true;
+                    } else {
+                        child.connections.remove(idx);
+                    }
                 }
             }
 
@@ -589,13 +606,8 @@ impl Genome {
                     node.refractory_period =
                         (node.refractory_period as i8 + delta).clamp(0, 5) as u8;
                 }
-                // Layer 变异：使用 base_rate
-                if rng.gen::<f64>() < base_rate {
-                    node.layer = match node.layer {
-                        LayerType::Processing => LayerType::Output,
-                        LayerType::Output => LayerType::Processing,
-                    };
-                }
+                // Layer 翻转已删除（v2.6）：翻转会打碎 Input→Proc / Out→Output 硬约束，
+                // 且 C2 在 mutate_add_node 中已提供足够的 layer 探索通道。
             }
 
             // block_probs变异（使用 block_rate）
@@ -608,11 +620,8 @@ impl Genome {
             child.mutate_physio_gene(base_rate);
         }
 
-        // Input/Output 孤点修复：若全部启用线已断，强制重连到指定 block 中最少线的节点
-        child.repair_orphan_io();
-
-        // 删除无有效输出的 Block 节点（所有出边均已 disabled 或从无出边）
-        child.prune_dead_output_nodes();
+        // I/O 硬约束全局修复：删违规边 → 清死节点 → 补孤点
+        child.repair_invalid_io_edges();
 
         child.rebuild_sorted_cache();
         child
@@ -919,8 +928,10 @@ impl Genome {
                 .connections
                 .iter()
                 .any(|c| c.in_node == from_id && c.out_node == to_id);
-            if !exists && passes_c1_cap(&self.connections, from_id, to_id, max_per_node) {
-                debug_assert_valid_io_edge(&self.nodes, from_id, to_id);
+            if !exists
+                && passes_c1_cap(&self.connections, from_id, to_id, max_per_node)
+                && validate_io_edge(&self.nodes, from_id, to_id)
+            {
                 self.connections.push(ConnectionGene {
                     in_node: from_id,
                     out_node: to_id,
@@ -1019,8 +1030,10 @@ impl Genome {
                 .iter()
                 .any(|c| c.in_node == from_id && c.out_node == to_id);
 
-            if !exists && passes_c1_cap(&self.connections, from_id, to_id, max_per_node) {
-                debug_assert_valid_io_edge(&self.nodes, from_id, to_id);
+            if !exists
+                && passes_c1_cap(&self.connections, from_id, to_id, max_per_node)
+                && validate_io_edge(&self.nodes, from_id, to_id)
+            {
                 self.connections.push(ConnectionGene {
                     in_node: from_id,
                     out_node: to_id,
@@ -1115,11 +1128,14 @@ impl Genome {
         let (new_block, new_layer_weight) = if in_is_input {
             (
                 block::sensory_block_for_input(old_conn.in_node),
-                None, // Input→感官：layer 随机
+                Some(false), // Input→感官：layer 必须 Processing（硬约束）
             )
         } else if out_is_output {
             let out_idx = old_conn.out_node.saturating_sub(Self::INPUT_SIZE);
-            (block::motor_block_for_output(out_idx), None)
+            (
+                block::motor_block_for_output(out_idx),
+                Some(true), // 感官→Output：layer 必须 Output（硬约束）
+            )
         } else if let Some(dir) = direction {
             match dir {
                 ConnTarget::SameBlockProcessing => {
@@ -1181,40 +1197,47 @@ impl Genome {
         // 若 new_block 当前只缺一种类型，本次 add_node 高概率补齐该类型。
         // 仿生意义：感官区缺投射层无法对外发声，运动区缺处理层无法被驱动；
         // C2 保证 block 内部信号能从 Proc → Out 这条链路传递。
-        let blk_proc_n = self
-            .nodes
-            .iter()
-            .filter(|n| {
-                matches!(n.node_type, NodeType::Block(_))
-                    && Self::node_block(n) == new_block
-                    && n.layer == LayerType::Processing
-            })
-            .count();
-        let blk_out_n = self
-            .nodes
-            .iter()
-            .filter(|n| {
-                matches!(n.node_type, NodeType::Block(_))
-                    && Self::node_block(n) == new_block
-                    && n.layer == LayerType::Output
-            })
-            .count();
-        let blk_type_hint: Option<LayerType> = if blk_proc_n == 0 && blk_out_n > 0 {
-            // 只有 Out，缺 Proc → 90% 概率补 Proc
-            if rng.gen::<f64>() < 0.9 {
-                Some(LayerType::Processing)
-            } else {
-                None
-            }
-        } else if blk_out_n == 0 && blk_proc_n > 0 {
-            // 只有 Proc，缺 Out → 90% 概率补 Out
-            if rng.gen::<f64>() < 0.9 {
-                Some(LayerType::Output)
-            } else {
-                None
-            }
+        //
+        // 注意：Input/Output 边界不受 C2 影响——Input 只能连 Proc，Output 只能由 Out 驱动。
+        // 此时 new_layer_weight 已强制为正确方向，C2 不参与。
+        let blk_type_hint: Option<LayerType> = if in_is_input || out_is_output {
+            None // I/O 边界：layer 由硬约束 new_layer_weight 决定，C2 不插手
         } else {
-            None
+            let blk_proc_n = self
+                .nodes
+                .iter()
+                .filter(|n| {
+                    matches!(n.node_type, NodeType::Block(_))
+                        && Self::node_block(n) == new_block
+                        && n.layer == LayerType::Processing
+                })
+                .count();
+            let blk_out_n = self
+                .nodes
+                .iter()
+                .filter(|n| {
+                    matches!(n.node_type, NodeType::Block(_))
+                        && Self::node_block(n) == new_block
+                        && n.layer == LayerType::Output
+                })
+                .count();
+            if blk_proc_n == 0 && blk_out_n > 0 {
+                // 只有 Out，缺 Proc → 90% 概率补 Proc
+                if rng.gen::<f64>() < 0.9 {
+                    Some(LayerType::Processing)
+                } else {
+                    None
+                }
+            } else if blk_out_n == 0 && blk_proc_n > 0 {
+                // 只有 Proc，缺 Out → 90% 概率补 Out
+                if rng.gen::<f64>() < 0.9 {
+                    Some(LayerType::Output)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
         };
 
         // 确定 layer：方向推导 > 补全 > 随机
@@ -1255,20 +1278,50 @@ impl Genome {
             refractory_period: 0,
         });
 
-        // 创建两个新连接
-        self.connections.push(ConnectionGene {
-            in_node: old_conn.in_node,
-            out_node: new_node_id,
-            weight: 1.0,
-            enabled: true,
-        });
+        // 创建两个新连接；I/O 硬约束守门
+        if validate_io_edge(&self.nodes, old_conn.in_node, new_node_id) {
+            self.connections.push(ConnectionGene {
+                in_node: old_conn.in_node,
+                out_node: new_node_id,
+                weight: 1.0,
+                enabled: true,
+            });
+        }
 
-        self.connections.push(ConnectionGene {
-            in_node: new_node_id,
-            out_node: old_conn.out_node,
-            weight: old_conn.weight,
-            enabled: true,
-        });
+        if validate_io_edge(&self.nodes, new_node_id, old_conn.out_node) {
+            self.connections.push(ConnectionGene {
+                in_node: new_node_id,
+                out_node: old_conn.out_node,
+                weight: old_conn.weight,
+                enabled: true,
+            });
+        }
+    }
+
+    /// I/O 硬约束全局修复（orchestrator）：
+    /// Phase 1 → 删除所有违规 I/O 边（block/layer 不符）
+    /// Phase 2 → 清理死 Block 节点
+    /// Phase 3 → 修复 I/O 孤点（无有效启用线则补）
+    fn repair_invalid_io_edges(&mut self) {
+        // Phase 1: 删除违规 I/O 边
+        let mut invalid_indices: Vec<usize> = self
+            .connections
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.enabled && is_io_edge_invalid(&self.nodes, c.in_node, c.out_node))
+            .map(|(i, _)| i)
+            .collect();
+        // 逆序删除避免索引偏移
+        invalid_indices.sort_unstable_by(|a, b| b.cmp(a));
+        for i in invalid_indices {
+            self.connections.remove(i);
+        }
+
+        // Phase 2: 清理死 Block 节点
+        self.prune_dead_output_nodes();
+
+        // Phase 3: 修复 I/O 孤点
+        self.repair_orphan_io();
     }
 
     /// 删除无效 Block 节点：出边全部 disabled 或入边全部 disabled
@@ -1305,52 +1358,74 @@ impl Genome {
         self.nodes.retain(|n| !dead_ids.contains(&n.id));
     }
 
-    /// Input/Output 孤点修复：若全部启用线已断，强制生成新连接到指定 block
-    /// 目标：指定 block 中当前连接数（含 disabled）最少的节点
+    /// Input/Output 孤点修复：若全部启用线已断，强制重连到指定 block + 正确 layer 的节点
+    /// Input 只能连 Processing，Output 只能由 Output 驱动（硬约束）
     fn repair_orphan_io(&mut self) {
         use super::block;
         let mut rng = rand::thread_rng();
 
-        for node in &self.nodes {
+        // 收集指定 block 中匹配 layer 的节点索引；若无匹配则 fallback 到任意 layer
+        fn collect_candidates(
+            nodes: &[NodeGene],
+            blk: i8,
+            preferred_layer: LayerType,
+        ) -> Vec<usize> {
+            let mut v: Vec<usize> = nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, n)| {
+                    matches!(n.node_type, NodeType::Block(b) if b == blk)
+                        && n.layer == preferred_layer
+                })
+                .map(|(i, _)| i)
+                .collect();
+            if v.is_empty() {
+                v = nodes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, n)| matches!(n.node_type, NodeType::Block(b) if b == blk))
+                    .map(|(i, _)| i)
+                    .collect();
+            }
+            v
+        }
+
+        for ni in 0..self.nodes.len() {
+            let node = &self.nodes[ni];
             match node.node_type {
                 NodeType::Input => {
                     let designated = block::sensory_block_for_input(node.id);
                     let has_enabled = self.connections.iter().any(|c| {
                         c.enabled
                             && c.in_node == node.id
-                            && self
-                                .nodes
-                                .iter()
-                                .any(|n| n.id == c.out_node && Self::node_block(n) == designated)
+                            && self.nodes.iter().any(|n| {
+                                n.id == c.out_node
+                                    && Self::node_block(n) == designated
+                                    && n.layer == LayerType::Processing
+                            })
                     });
                     if has_enabled {
                         continue;
                     }
-                    // 找到指定 block 中总连接数最少的节点
-                    let designated_nodes: Vec<usize> = self
-                        .nodes
+                    let candidates =
+                        collect_candidates(&self.nodes, designated, LayerType::Processing);
+                    let best_idx = candidates
                         .iter()
-                        .enumerate()
-                        .filter(
-                            |(_, n)| matches!(n.node_type, NodeType::Block(b) if b == designated),
-                        )
-                        .map(|(i, _)| i)
-                        .collect();
-                    // 按总连接数（含 disabled）排序，取最少
-                    let best = designated_nodes.iter().min_by_key(|&&i| {
-                        let id = self.nodes[i].id;
-                        self.connections
-                            .iter()
-                            .filter(|c| c.in_node == id || c.out_node == id)
-                            .count()
-                    });
-                    if let Some(&best_idx) = best {
+                        .min_by_key(|&&i| {
+                            let id = self.nodes[i].id;
+                            self.connections
+                                .iter()
+                                .filter(|c| c.in_node == id || c.out_node == id)
+                                .count()
+                        })
+                        .copied();
+                    if let Some(best_idx) = best_idx {
                         let to_id = self.nodes[best_idx].id;
                         let exists = self
                             .connections
                             .iter()
                             .any(|c| c.in_node == node.id && c.out_node == to_id);
-                        if !exists {
+                        if !exists && validate_io_edge(&self.nodes, node.id, to_id) {
                             self.connections.push(ConnectionGene {
                                 in_node: node.id,
                                 out_node: to_id,
@@ -1366,37 +1441,33 @@ impl Genome {
                     let has_enabled = self.connections.iter().any(|c| {
                         c.enabled
                             && c.out_node == node.id
-                            && self
-                                .nodes
-                                .iter()
-                                .any(|n| n.id == c.in_node && Self::node_block(n) == designated)
+                            && self.nodes.iter().any(|n| {
+                                n.id == c.in_node
+                                    && Self::node_block(n) == designated
+                                    && n.layer == LayerType::Output
+                            })
                     });
                     if has_enabled {
                         continue;
                     }
-                    let designated_nodes: Vec<usize> = self
-                        .nodes
+                    let candidates = collect_candidates(&self.nodes, designated, LayerType::Output);
+                    let best_idx = candidates
                         .iter()
-                        .enumerate()
-                        .filter(
-                            |(_, n)| matches!(n.node_type, NodeType::Block(b) if b == designated),
-                        )
-                        .map(|(i, _)| i)
-                        .collect();
-                    let best = designated_nodes.iter().min_by_key(|&&i| {
-                        let id = self.nodes[i].id;
-                        self.connections
-                            .iter()
-                            .filter(|c| c.in_node == id || c.out_node == id)
-                            .count()
-                    });
-                    if let Some(&best_idx) = best {
+                        .min_by_key(|&&i| {
+                            let id = self.nodes[i].id;
+                            self.connections
+                                .iter()
+                                .filter(|c| c.in_node == id || c.out_node == id)
+                                .count()
+                        })
+                        .copied();
+                    if let Some(best_idx) = best_idx {
                         let from_id = self.nodes[best_idx].id;
                         let exists = self
                             .connections
                             .iter()
                             .any(|c| c.in_node == from_id && c.out_node == node.id);
-                        if !exists {
+                        if !exists && validate_io_edge(&self.nodes, from_id, node.id) {
                             self.connections.push(ConnectionGene {
                                 in_node: from_id,
                                 out_node: node.id,
