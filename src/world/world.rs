@@ -1831,6 +1831,13 @@ impl World {
                 .map(|c| c.clan_hash)
                 .collect();
             self.clan_genomes.retain(|k, _| alive_clans.contains(k));
+
+            // 把三个 SpatialGrid 的 HashMap buckets 缩回当前 load
+            // 避免历史峰值（曾经的种群高峰 / 粒子高峰 / 痕迹高峰）让 buckets 单调膨胀，
+            // 影响后续每帧 cells.get(&key) 的 cache locality
+            self.creature_grid.shrink_to_fit();
+            self.energy_grid.shrink_to_fit();
+            self.trail_grid.shrink_to_fit();
         }
     }
 

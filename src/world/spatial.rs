@@ -25,6 +25,13 @@ impl SpatialGrid {
         self.cells.clear();
     }
 
+    /// 把内部 HashMap buckets 缩到当前 load 附近（hashbrown 原生 shrink_to_fit）。
+    /// 仅压缩容量，不改任何 (key → value) 映射，查询/插入行为字节级一致。
+    /// 用于周期性回收"历史峰值 grow 后保留的 buckets"，避免长跑后 cache locality 退化。
+    pub fn shrink_to_fit(&mut self) {
+        self.cells.shrink_to_fit();
+    }
+
     /// 获取坐标对应的网格单元
     fn cell_key(&self, x: f64, y: f64) -> (i32, i32) {
         (
