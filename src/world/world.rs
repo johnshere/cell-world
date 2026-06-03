@@ -1302,9 +1302,16 @@ impl World {
                     if trail_energy > 0.001 {
                         let creator_id = self.creatures[creature_idx].id;
                         let clan_hash = self.creatures[creature_idx].clan_hash;
+                        let mut rng = rand::thread_rng();
+                        let heading = self.creatures[creature_idx].heading;
+                        let perp_x = -heading.sin();
+                        let perp_y = heading.cos();
+                        let offset = rng.gen_range(-creature_radius..creature_radius);
+                        let tx = cx + perp_x * offset;
+                        let ty = cy + perp_y * offset;
                         self.trail_points.push(TrailPoint::new(
-                            cx,
-                            cy,
+                            tx,
+                            ty,
                             trail_energy,
                             clan_hash,
                             creator_id,
@@ -2694,7 +2701,7 @@ fn compute_perception_pure(
 
         // 因子2: 最优距离（高斯钟形）
         let target_radius = (other.energy * 1.28).cbrt();
-        let optimal_dist = 2.5 * (body_radius + target_radius);
+        let optimal_dist = 3.0 * (body_radius + target_radius);
         let dist_ratio = (dist - optimal_dist) / optimal_dist;
         let distance_factor = (-dist_ratio * dist_ratio).exp();
 

@@ -924,10 +924,10 @@ impl Genome {
             }
             let to_idx = targets[rng.gen_range(0..targets.len())];
             let to_id = self.nodes[to_idx].id;
-            let exists = self
-                .connections
-                .iter()
-                .any(|c| c.in_node == from_id && c.out_node == to_id);
+            let exists = self.connections.iter().any(|c| {
+                (c.in_node == from_id && c.out_node == to_id)
+                    || (c.in_node == to_id && c.out_node == from_id)
+            });
             if !exists
                 && passes_c1_cap(&self.connections, from_id, to_id, max_per_node)
                 && validate_io_edge(&self.nodes, from_id, to_id)
@@ -1025,10 +1025,10 @@ impl Genome {
             };
             let to_id = self.nodes[to_idx].id;
 
-            let exists = self
-                .connections
-                .iter()
-                .any(|c| c.in_node == from_id && c.out_node == to_id);
+            let exists = self.connections.iter().any(|c| {
+                (c.in_node == from_id && c.out_node == to_id)
+                    || (c.in_node == to_id && c.out_node == from_id)
+            });
 
             if !exists
                 && passes_c1_cap(&self.connections, from_id, to_id, max_per_node)

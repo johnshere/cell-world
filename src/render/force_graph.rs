@@ -597,8 +597,11 @@ pub fn render_force_graph_window(
             draw_nodes(genome, state, &painter, to_screen);
             draw_io_labels(genome, state, &painter, to_screen);
             draw_block_labels(genome, state, &painter, to_screen);
-            draw_hover_tooltip(genome, state, &response, rect, &painter, to_screen);
-            draw_block_hover(genome, &response, &block_bboxes, &painter);
+            let hover_consumed =
+                draw_hover_tooltip(genome, state, &response, rect, &painter, to_screen);
+            if !hover_consumed {
+                draw_block_hover(genome, &response, &block_bboxes, &painter);
+            }
             draw_legend(&painter, rect);
         });
 
@@ -881,7 +884,7 @@ fn draw_connections(
             let a = to_screen(*pa);
             let b = to_screen(*pb);
             painter.line_segment([a, b], egui::Stroke::new(0.5, disabled_color));
-            draw_arrowhead(painter, a, b, 3.0, 5.0, disabled_color);
+            draw_arrowhead(painter, a, b, 0.8, 2.5, disabled_color);
         }
     }
 
@@ -904,7 +907,9 @@ fn draw_connections(
                 egui::Color32::from_rgba_premultiplied(255, 120, 100, (alpha * 255.0) as u8)
             };
             painter.line_segment([a, b], egui::Stroke::new(width, color));
-            draw_arrowhead(painter, a, b, width.max(1.5), 5.0, color);
+            let base_w = width.max(0.4);
+            let arrow_len = base_w * 2.5;
+            draw_arrowhead(painter, a, b, base_w, arrow_len, color);
         }
     }
 }
@@ -929,7 +934,7 @@ fn draw_arrowhead(
     let inset = 7.0;
     let tip = b - dir_n * inset;
     let base = tip - dir_n * arrow_len;
-    let half_w = (line_width * 0.8).max(1.8);
+    let half_w = line_width * 0.7;
     let p1 = tip;
     let p2 = base + perp * half_w;
     let p3 = base - perp * half_w;
@@ -1075,14 +1080,15 @@ fn draw_hover_tooltip(
     _rect: egui::Rect,
     painter: &egui::Painter,
     to_screen: impl Fn(egui::Pos2) -> egui::Pos2,
-) {
+) -> bool {
     let hover_pos = match response.hover_pos() {
         Some(p) => p,
-        None => return,
+        None => return false,
     };
 
     let threshold = 12.0_f32;
 
+    // 节点 hover
     for node in &genome.nodes {
         if let Some(p) = state.positions.get(&node.id) {
             let sp = to_screen(*p);
@@ -1102,10 +1108,70 @@ fn draw_hover_tooltip(
                     egui::FontId::proportional(11.0),
                     egui::Color32::WHITE,
                 );
-                break;
+                return true;
             }
         }
     }
+
+    // 连线 hover（仅启用连接）
+    let conn_threshold = 4.0_f32;
+    for conn in &genome.connections {
+        if !conn.enabled {
+            continue;
+        }
+        if let (Some(pa), Some(pb)) = (
+            state.positions.get(&conn.in_node),
+            state.positions.get(&conn.out_node),
+        ) {
+            let a = to_screen(*pa);
+            let b = to_screen(*pb);
+            let dist = point_to_segment_dist(hover_pos, a, b);
+            if dist < conn_threshold {
+                // 高亮该连线
+                let width = (conn.weight.abs() as f32 * 1.5).clamp(0.4, 2.5);
+                let hl = width + 3.0;
+                let hl_color = if conn.weight > 0.0 {
+                    egui::Color32::from_rgba_premultiplied(100, 200, 255, 255)
+                } else {
+                    egui::Color32::from_rgba_premultiplied(255, 120, 100, 255)
+                };
+                painter.line_segment([a, b], egui::Stroke::new(hl, hl_color));
+
+                let tip = format!(
+                    "{} → {}\nweight:{:.3}  enabled",
+                    conn.in_node, conn.out_node, conn.weight
+                );
+                let tip_pos = hover_pos + egui::vec2(14.0, -8.0);
+                let font = egui::FontId::proportional(11.0);
+                let galley = painter.layout_no_wrap(tip, font.clone(), egui::Color32::WHITE);
+                let pad = egui::vec2(6.0, 3.0);
+                let tip_size = galley.size() + pad * 2.0;
+                let tip_rect = egui::Rect::from_min_size(tip_pos, tip_size);
+                painter.rect_filled(tip_rect, 4.0, egui::Color32::from_black_alpha(210));
+                painter.rect_stroke(
+                    tip_rect,
+                    4.0,
+                    egui::Stroke::new(1.0, egui::Color32::from_gray(100)),
+                );
+                painter.galley(tip_pos + pad, galley, egui::Color32::WHITE);
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// 点到线段的最短距离（屏幕坐标）
+fn point_to_segment_dist(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
+    let ab = b - a;
+    let len_sq = ab.length_sq();
+    if len_sq < 0.01 {
+        return (p - a).length();
+    }
+    let t = ((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / len_sq;
+    let t = t.clamp(0.0, 1.0);
+    let proj = a + ab * t;
+    (p - proj).length()
 }
 
 // ---------------------------------------------------------------------------
