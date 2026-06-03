@@ -24,8 +24,8 @@ pub struct PerfStats {
     pub avg_compute_ns: f64,
 }
 
-/// 繁殖滑动窗口大小
-const MAX_RECENT_REPRO: usize = 10_000;
+/// 繁殖统计时间窗口（秒，墙钟时间）
+const REPRO_WINDOW_SECS: u64 = 60;
 
 /// 世界
 pub struct World {
@@ -67,8 +67,8 @@ pub struct World {
     // 行为触发次数统计（5事件：移动/吸收/咬/无性繁殖/有性繁殖）
     pub action_counts: [usize; 5],
 
-    // 近1万次繁殖滑动窗口（true=有性, false=无性），用于面板统计
-    recent_repro_events: VecDeque<bool>,
+    // 近1分钟繁殖滑动窗口（(墙钟时间, true=有性, false=无性)），用于面板统计
+    recent_repro_events: VecDeque<(Instant, bool)>,
 
     // 奖励触发次数统计（3通道：能量/痕迹/集体）
     pub reward_counts: [usize; 3],
@@ -1561,9 +1561,16 @@ impl World {
         } else {
             self.action_counts[3] += 1;
         }
-        // 滑动窗口：追踪最近1万次繁殖
-        self.recent_repro_events.push_back(is_sexual);
-        if self.recent_repro_events.len() > MAX_RECENT_REPRO {
+        // 滑动窗口：追踪最近1分钟繁殖（墙钟时间）
+        let now = Instant::now();
+        self.recent_repro_events.push_back((now, is_sexual));
+        // 清理超过时间窗口的旧事件
+        let cutoff = now - std::time::Duration::from_secs(REPRO_WINDOW_SECS);
+        while self
+            .recent_repro_events
+            .front()
+            .map_or(false, |(t, _)| *t < cutoff)
+        {
             self.recent_repro_events.pop_front();
         }
 
@@ -2001,9 +2008,19 @@ impl World {
             avg_energy,
             action_counts: {
                 let mut acts = self.action_counts;
-                // 繁殖统计替换为近1万次滑动窗口计数
-                let sexual = self.recent_repro_events.iter().filter(|&&s| s).count();
-                let asexual = self.recent_repro_events.len() - sexual;
+                // 繁殖统计替换为近1分钟滑动窗口计数
+                let now = Instant::now();
+                let cutoff = now - std::time::Duration::from_secs(REPRO_WINDOW_SECS);
+                let sexual = self
+                    .recent_repro_events
+                    .iter()
+                    .filter(|&&(t, s)| t >= cutoff && s)
+                    .count();
+                let asexual = self
+                    .recent_repro_events
+                    .iter()
+                    .filter(|&&(t, s)| t >= cutoff && !s)
+                    .count();
                 acts[3] = asexual;
                 acts[4] = sexual;
                 acts

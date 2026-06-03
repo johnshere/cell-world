@@ -397,7 +397,7 @@ impl StatsPanel {
         };
         ui.horizontal_wrapped(|ui| {
             ui.label(format!(
-                "行为: 移动:{}│吸收:{}│咬:{}│近1万次繁殖(无性{}/有性{})",
+                "行为: 移动:{}│吸收:{}│咬:{}│无性:{}│有性:{}",
                 format_count(acts[0]),
                 format_count(acts[1]),
                 format_count(acts[2]),
