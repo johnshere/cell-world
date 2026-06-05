@@ -1917,8 +1917,9 @@ impl eframe::App for CellWorldApp {
             }
         }
 
-        // 基因库自动投放：按配置间隔为勾选的模板各投放1个生物
-        if !self.panel.auto_spawn_templates.is_empty()
+        // 基因库自动投放：按配置间隔为勾选的模板各投放1个生物（暂停时跳过）
+        if !self.paused
+            && !self.panel.auto_spawn_templates.is_empty()
             && self.panel.last_auto_spawn.elapsed() >= std::time::Duration::from_secs(3)
         {
             self.panel.last_auto_spawn = std::time::Instant::now();

@@ -482,7 +482,7 @@ pub fn render_force_graph_window(
     state: &mut ForceGraphState,
     label: &str,
 ) -> bool {
-    let fixed_w = 1860.0;
+    let fixed_w = 1674.0;
     let mut close = false;
 
     egui::Window::new(format!("脑拓扑: {}", label))
@@ -870,7 +870,8 @@ fn draw_connections(
     painter: &egui::Painter,
     to_screen: impl Fn(egui::Pos2) -> egui::Pos2,
 ) {
-    let disabled_color = egui::Color32::from_rgba_premultiplied(80, 80, 80, 30);
+    let disabled_color = egui::Color32::from_rgba_premultiplied(80, 80, 80, 15);
+    const NON_HOVER_ARROW_SCALE: f32 = 1.3;
 
     // 先画禁用连接（最底层，极淡灰）
     for conn in &genome.connections {
@@ -884,7 +885,14 @@ fn draw_connections(
             let a = to_screen(*pa);
             let b = to_screen(*pb);
             painter.line_segment([a, b], egui::Stroke::new(0.5, disabled_color));
-            draw_arrowhead(painter, a, b, 0.8, 2.5, disabled_color);
+            draw_arrowhead(
+                painter,
+                a,
+                b,
+                0.8 * NON_HOVER_ARROW_SCALE,
+                2.5 * NON_HOVER_ARROW_SCALE,
+                disabled_color,
+            );
         }
     }
 
@@ -907,9 +915,11 @@ fn draw_connections(
                 egui::Color32::from_rgba_premultiplied(255, 120, 100, (alpha * 255.0) as u8)
             };
             painter.line_segment([a, b], egui::Stroke::new(width, color));
-            let base_w = width.max(0.4);
-            let arrow_len = base_w * 2.5;
-            draw_arrowhead(painter, a, b, base_w, arrow_len, color);
+            // 方案A：箭头基底 = 线宽 + pad(0.65)，max/min 比例 3x，细线箭头不会过小
+            let arrow_base = width.max(0.4) + 0.65;
+            let scaled_base = arrow_base * NON_HOVER_ARROW_SCALE;
+            let arrow_len = arrow_base * 2.5 * NON_HOVER_ARROW_SCALE;
+            draw_arrowhead(painter, a, b, scaled_base, arrow_len, color);
         }
     }
 }

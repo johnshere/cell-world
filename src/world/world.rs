@@ -913,9 +913,11 @@ impl World {
                 let creature = &creatures_ref[i];
 
                 // 周围能量
+                let self_r = (creature.energy.max(0.0) * 1.28).cbrt();
                 let nearby_energy = compute_nearby_energy_pure(
                     creature.x,
                     creature.y,
+                    self_r,
                     config,
                     energy_grid_ref,
                     creature_grid_ref,
@@ -2332,6 +2334,7 @@ struct PerceptionResult {
 fn compute_nearby_energy_pure(
     x: f64,
     y: f64,
+    self_radius: f64,
     config: &Config,
     energy_grid: &SpatialGrid,
     creature_grid: &SpatialGrid,
@@ -2362,7 +2365,7 @@ fn compute_nearby_energy_pure(
             }
         }
     }
-    // 生物
+    // 生物（距离<半径和→硬编码线性衰减到0；距离≥半径和→原公式）
     creature_grid.query_circle_into(x, y, range, creature_buf, |i| {
         (creatures[i].x, creatures[i].y)
     });
@@ -2373,7 +2376,15 @@ fn compute_nearby_energy_pure(
             let dy = c.y - y;
             let dist_sq = dx * dx + dy * dy;
             if dist_sq > DIST_MIN_SQ {
-                total += c.energy / dist_sq;
+                let other_r = (c.energy * 1.28).cbrt();
+                let contact = self_radius + other_r;
+                let contact_sq = contact * contact;
+                if dist_sq >= contact_sq {
+                    total += c.energy / dist_sq;
+                } else {
+                    let dist = dist_sq.sqrt();
+                    total += c.energy * (dist / contact) / contact_sq;
+                }
             }
         }
     }

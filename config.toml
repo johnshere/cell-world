@@ -1,7 +1,7 @@
 # 初始模拟速度
 initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 55
+min_creatures = 45
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 999
 # 初始能量
@@ -21,7 +21,7 @@ volcano_radius = 2500.0
 # 火山粒子半径分布倾角（负值让外围更密，默认-0.3）
 volcano_spread_bias = -0.75
 # 每次喷发粒子数
-volcano_count = 76
+volcano_count = 50
 # 火山粒子能量
 volcano_particle_energy = 200.0
 
@@ -70,7 +70,7 @@ eye_scan_speed = 280.0
 # 嘴巴冷却时间（秒）
 mouth_cooldown = 0.5
 # 咬合能量转移率
-bite_transfer_rate = 0.5
+bite_transfer_rate = 0.65
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
@@ -80,16 +80,16 @@ heat_floor = 0.03
 
 # === 代谢 ===
 # 年龄代谢倍率（age × 此值 = 额外倍率，年龄越大消耗越高）
-age_metabolism_factor = 0.075
+age_metabolism_factor = 0.08
 # 代谢指数（代谢 ∝ energy^此值，越大则大体型惩罚越重，1=线性）
 metabolism_exponent = 2.0
 # 移动消耗系数（面板值×0.00001×半径³ = 实际消耗）
-move_cost = 6.5
+move_cost = 7.0
 # 跟随省力折扣（前方有同向生物时移动消耗最大减少比例）
 follow_cost_discount = 0.99
 # === 体温 ===
 # 体温逸散系数
-heat_dissipation_coefficient = 0.035
+heat_dissipation_coefficient = 0.04
 # 喂食效率（固定比例）
 feed_efficiency = 0.85
 
@@ -134,11 +134,11 @@ neural_backend = "auto"
 neural_tick_rate = 600.0
 # 变异率（全局常量，不再是基因组内可演化基因）
 # base/block 两类变异共享此触发概率
-mutation_rate = 0.2
+mutation_rate = 0.1
 # 无性繁殖权重变异率缩放系数（仅作用于权重微调）
 # 无性繁殖中其余 7 类创新变异（add_connection/add_node/Layer/Block/block_probs/learning/physio/enable切换）完全禁用
 # 默认 0.4 ≈ 近似克隆；1.0=无差异化，0.0=完全克隆
-asexual_mutation_scale = 0.2
+asexual_mutation_scale = 0.1
 base_metabolism = 0.025
 max_speed = 20.0
 meteorite_interval = 0.0
@@ -179,7 +179,7 @@ follow_optimal_angle = 0.5235987755982988
 follow_angle_width = 0.4363323129985824
 follow_max_level = 1.0
 follow_update_interval = 0.25
-particle_min_energy = 160.0
+particle_min_energy = 150.0
 
 # === 力导图 ===
 # 力导图水平锚定强度（forceX strength，左右半球横向拉扯力）
