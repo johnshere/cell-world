@@ -243,6 +243,25 @@ fn passes_c1_cap(
     from_n < limit && to_n < limit
 }
 
+/// Input/Output 节点 ID 判定：id ∈ [0, INPUT_SIZE + OUTPUT_SIZE)
+#[inline]
+fn is_io_node(node_id: usize) -> bool {
+    node_id < Genome::INPUT_SIZE + Genome::OUTPUT_SIZE
+}
+
+/// 统计每个节点（仅启用连接）的连接数
+fn conn_counts_per_node(connections: &[ConnectionGene]) -> HashMap<usize, usize> {
+    let mut counts: HashMap<usize, usize> = HashMap::new();
+    for c in connections {
+        if !c.enabled {
+            continue;
+        }
+        *counts.entry(c.in_node).or_default() += 1;
+        *counts.entry(c.out_node).or_default() += 1;
+    }
+    counts
+}
+
 /// 公共校验：连接是否满足 Input/Output 双重硬约束（block + layer）
 /// - Input → 仅可连其指定感官 block 的 Processing 层节点
 /// - Output → 仅可由其指定运动 block 的 Output 层节点接收
@@ -508,15 +527,36 @@ impl Genome {
         let structure_factor = 2.0 * (-p).exp();
 
         // 权重变异（不受发育期影响）；无性繁殖时 rate 按 asexual_mutation_scale 缩放
+        // 约束：连接数 >5 的非 I/O 节点，其连线只能削弱（推向 0），不能增强或重置
+        let conn_counts = conn_counts_per_node(&child.connections);
         for conn in &mut child.connections {
             if rng.gen::<f64>() < weight_rate {
+                let in_overloaded = !is_io_node(conn.in_node)
+                    && conn_counts.get(&conn.in_node).copied().unwrap_or(0) > 5;
+                let out_overloaded = !is_io_node(conn.out_node)
+                    && conn_counts.get(&conn.out_node).copied().unwrap_or(0) > 5;
+                let restricted = in_overloaded || out_overloaded;
+
                 if rng.gen::<f64>() < 0.9 {
                     // 微调
-                    conn.weight += rng.gen_range(-0.5..0.5);
+                    if restricted {
+                        // 只能削弱：推向 0
+                        let decay = rng.gen_range(0.0..0.5);
+                        if conn.weight > 0.0 {
+                            conn.weight = (conn.weight - decay).max(0.0);
+                        } else if conn.weight < 0.0 {
+                            conn.weight = (conn.weight + decay).min(0.0);
+                        }
+                        // weight == 0：已无法削弱，跳过
+                    } else {
+                        conn.weight += rng.gen_range(-0.5..0.5);
+                    }
                     conn.weight = conn.weight.clamp(-2.0, 2.0);
                 } else {
-                    // 重置
-                    conn.weight = rng.gen_range(-1.0..1.0);
+                    // 重置：受限连接跳过（重置可能增强）
+                    if !restricted {
+                        conn.weight = rng.gen_range(-1.0..1.0);
+                    }
                 }
             }
         }
@@ -932,12 +972,17 @@ impl Genome {
                 && passes_c1_cap(&self.connections, from_id, to_id, max_per_node)
                 && validate_io_edge(&self.nodes, from_id, to_id)
             {
-                self.connections.push(ConnectionGene {
-                    in_node: from_id,
-                    out_node: to_id,
-                    weight: rng.gen_range(-0.1..0.1),
-                    enabled: true,
-                });
+                // 连接数 >5 的非 I/O 节点不允许新增连接
+                let cc = conn_counts_per_node(&self.connections);
+                let to_over = !is_io_node(to_id) && cc.get(&to_id).copied().unwrap_or(0) >= 5;
+                if !to_over {
+                    self.connections.push(ConnectionGene {
+                        in_node: from_id,
+                        out_node: to_id,
+                        weight: rng.gen_range(-0.1..0.1),
+                        enabled: true,
+                    });
+                }
             }
             return;
         }
@@ -955,6 +1000,13 @@ impl Genome {
             .collect();
 
         if all_targets.is_empty() {
+            return;
+        }
+
+        // 连接数 >5 的非 I/O 源节点不允许新增连接
+        let cc = conn_counts_per_node(&self.connections);
+        let from_overloaded = !is_io_node(from_id) && cc.get(&from_id).copied().unwrap_or(0) >= 5;
+        if from_overloaded {
             return;
         }
 
@@ -1034,13 +1086,17 @@ impl Genome {
                 && passes_c1_cap(&self.connections, from_id, to_id, max_per_node)
                 && validate_io_edge(&self.nodes, from_id, to_id)
             {
-                self.connections.push(ConnectionGene {
-                    in_node: from_id,
-                    out_node: to_id,
-                    weight: rng.gen_range(-0.1..0.1),
-                    enabled: true,
-                });
-                return;
+                // 连接数 >5 的非 I/O 目标节点不允许新增连接
+                let to_overloaded = !is_io_node(to_id) && cc.get(&to_id).copied().unwrap_or(0) >= 5;
+                if !to_overloaded {
+                    self.connections.push(ConnectionGene {
+                        in_node: from_id,
+                        out_node: to_id,
+                        weight: rng.gen_range(-0.1..0.1),
+                        enabled: true,
+                    });
+                    return;
+                }
             }
         }
     }

@@ -934,7 +934,7 @@ fn draw_arrowhead(
     let inset = 7.0;
     let tip = b - dir_n * inset;
     let base = tip - dir_n * arrow_len;
-    let half_w = line_width * 0.7;
+    let half_w = line_width * 1.5;
     let p1 = tip;
     let p2 = base + perp * half_w;
     let p3 = base - perp * half_w;
@@ -1136,6 +1136,9 @@ fn draw_hover_tooltip(
                     egui::Color32::from_rgba_premultiplied(255, 120, 100, 255)
                 };
                 painter.line_segment([a, b], egui::Stroke::new(hl, hl_color));
+                let base_w = hl.max(0.4);
+                let arrow_len = base_w * 2.5;
+                draw_arrowhead(painter, a, b, base_w, arrow_len, hl_color);
 
                 let tip = format!(
                     "{} → {}\nweight:{:.3}  enabled",

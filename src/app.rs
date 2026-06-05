@@ -977,7 +977,12 @@ impl CellWorldApp {
 impl CellWorldApp {
     fn render_energy_trend(&mut self, ui: &mut egui::Ui) {
         ui.separator();
-        ui.strong("能量趋势");
+        ui.horizontal(|ui| {
+            ui.strong("能量趋势");
+            if ui.small_button("🗑 重置").clicked() {
+                self.panel.energy_history.clear();
+            }
+        });
         let history = &self.panel.energy_history;
         let chart_width_f32 = ui.available_width().min(480.0);
         let chart_height_f32 = 100.0_f32;

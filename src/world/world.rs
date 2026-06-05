@@ -1306,7 +1306,7 @@ impl World {
                         let heading = self.creatures[creature_idx].heading;
                         let perp_x = -heading.sin();
                         let perp_y = heading.cos();
-                        let offset = rng.gen_range(-creature_radius..creature_radius);
+                        let offset = rng.gen_range(-2.0 * creature_radius..2.0 * creature_radius);
                         let tx = cx + perp_x * offset;
                         let ty = cy + perp_y * offset;
                         self.trail_points.push(TrailPoint::new(
