@@ -9,7 +9,9 @@
 //! - alpha 留底（alpha_min）→ 系统永不冻结，支持手动拖动后重排
 
 use crate::neural::block::{motor_block_for_output, sensory_block_for_input};
-use crate::neural::genome::{ConnProbsGene, Genome, LayerType, NodeGene, NodeType};
+use crate::neural::genome::{
+    is_connection_deletable, ConnProbsGene, ConnectionGene, Genome, LayerType, NodeGene, NodeType,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
 
@@ -117,6 +119,16 @@ pub struct ForceGraphState {
     pub cohesion_k: f64,
     /// 整体密度缩放（1.0=默认）
     pub density: f64,
+    /// 当前选中的节点 ID（单击选中）
+    pub selected_node: Option<usize>,
+    /// 当前选中的边 (in_node, out_node)，与 selected_node 互斥
+    pub selected_edge: Option<(usize, usize)>,
+    /// 拆线对话框待处理的边 (in_node, out_node)，None=对话框关闭
+    pub split_pending: Option<(usize, usize)>,
+    /// 拆线对话框中用户选择的 target block
+    pub split_block: i8,
+    /// 拆线对话框中用户选择的 layer
+    pub split_layer: LayerType,
 }
 
 impl ForceGraphState {
@@ -142,6 +154,11 @@ impl ForceGraphState {
             auto_zoom_done: false,
             cohesion_k: 0.003,
             density: 1.0,
+            selected_node: None,
+            selected_edge: None,
+            split_pending: None,
+            split_block: 1,
+            split_layer: LayerType::Processing,
         }
     }
 
@@ -161,6 +178,11 @@ impl ForceGraphState {
         self.auto_zoom_t = 0.0;
         self.initial_scale = 1.0;
         self.auto_zoom_done = false;
+        self.selected_node = None;
+        self.selected_edge = None;
+        self.split_pending = None;
+        self.split_block = 1;
+        self.split_layer = LayerType::Processing;
     }
 
     /// 计算 block 编号 b 对应的目标坐标
@@ -292,6 +314,9 @@ impl ForceGraphState {
         self.auto_zoom_t = 0.0;
         self.initial_scale = self.scale;
         self.auto_zoom_done = false;
+        self.selected_node = None;
+        self.selected_edge = None;
+        self.split_pending = None;
     }
 
     /// 力模拟步进：斥力 + 边吸引 + block 锚定 + 质心凝聚力（恒定强度），alpha 只乘位置更新
@@ -473,6 +498,22 @@ impl ForceGraphState {
 }
 
 // ---------------------------------------------------------------------------
+// ForceGraphAction：渲染函数返回的操作
+// ---------------------------------------------------------------------------
+
+/// 力导图弹框的用户操作结果
+pub struct ForceGraphAction {
+    /// 是否关闭弹框
+    pub close: bool,
+    /// 要删除的节点 ID
+    pub delete_node: Option<usize>,
+    /// 要删除的边 (in_node, out_node)
+    pub delete_edge: Option<(usize, usize)>,
+    /// 要拆线的边 (in_node, out_node, target_block, target_layer)
+    pub split_edge: Option<(usize, usize, i8, LayerType)>,
+}
+
+// ---------------------------------------------------------------------------
 // 渲染
 // ---------------------------------------------------------------------------
 
@@ -481,9 +522,14 @@ pub fn render_force_graph_window(
     genome: &Genome,
     state: &mut ForceGraphState,
     label: &str,
-) -> bool {
+) -> ForceGraphAction {
     let fixed_w = 1674.0;
-    let mut close = false;
+    let mut action = ForceGraphAction {
+        close: false,
+        delete_node: None,
+        delete_edge: None,
+        split_edge: None,
+    };
 
     egui::Window::new(format!("脑拓扑: {}", label))
         .resizable(true)
@@ -497,6 +543,7 @@ pub fn render_force_graph_window(
                 ui.add_space(4.0);
                 ui.label(egui::RichText::new(format!("脑拓扑: {}", label)).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // X 关闭按钮（最右）
                     if ui
                         .add(
                             egui::Button::new(
@@ -510,11 +557,159 @@ pub fn render_force_graph_window(
                         )
                         .clicked()
                     {
-                        close = true;
+                        action.close = true;
+                    }
+                    // 删除按钮（X 左侧，仅选中时显示）
+                    let has_selection =
+                        state.selected_node.is_some() || state.selected_edge.is_some();
+                    if has_selection {
+                        let can_delete = match (state.selected_node, state.selected_edge) {
+                            (Some(id), None) => genome
+                                .nodes
+                                .iter()
+                                .find(|n| n.id == id)
+                                .map_or(false, |n| is_node_deletable(n)),
+                            (None, Some((in_id, out_id))) => genome
+                                .connections
+                                .iter()
+                                .find(|c| c.in_node == in_id && c.out_node == out_id)
+                                .map_or(false, |c| is_edge_deletable(c, &genome.nodes)),
+                            _ => false,
+                        };
+                        let del_btn = egui::Button::new(
+                            egui::RichText::new(if can_delete { "🗑 删除" } else { "🗑" }).size(12.0),
+                        )
+                        .small();
+                        let del_btn = if can_delete {
+                            del_btn.fill(egui::Color32::from_rgb(160, 35, 35))
+                        } else {
+                            del_btn.fill(egui::Color32::from_gray(70))
+                        };
+                        let del_resp = if can_delete {
+                            ui.add(del_btn).on_hover_text("删除选中的节点或连接")
+                        } else {
+                            ui.add_enabled(false, del_btn)
+                                .on_hover_text("此节点/边为硬约束，不可删除")
+                        };
+                        if del_resp.clicked() && can_delete {
+                            if let Some(id) = state.selected_node {
+                                action.delete_node = Some(id);
+                            } else if let Some(edge) = state.selected_edge {
+                                action.delete_edge = Some(edge);
+                            }
+                        }
+                        // 拆线按钮：仅选中边时显示
+                        if let Some((sel_in, sel_out)) = state.selected_edge {
+                            let can_split = genome
+                                .connections
+                                .iter()
+                                .any(|c| c.in_node == sel_in && c.out_node == sel_out && c.enabled);
+                            let split_btn = egui::Button::new(
+                                egui::RichText::new(if can_split { "✂ 拆线" } else { "✂" })
+                                    .size(12.0),
+                            )
+                            .small();
+                            let split_btn = if can_split {
+                                split_btn.fill(egui::Color32::from_rgb(50, 120, 180))
+                            } else {
+                                split_btn.fill(egui::Color32::from_gray(70))
+                            };
+                            let split_resp = if can_split {
+                                ui.add(split_btn).on_hover_text("在此边上插入新节点")
+                            } else {
+                                ui.add_enabled(false, split_btn)
+                                    .on_hover_text("此边已禁用，无法拆线")
+                            };
+                            if split_resp.clicked() && can_split {
+                                let def_blk = genome
+                                    .nodes
+                                    .iter()
+                                    .find(|n| n.id == sel_out)
+                                    .map(|n| node_block(n))
+                                    .unwrap_or(1);
+                                state.split_pending = Some((sel_in, sel_out));
+                                state.split_block = def_blk;
+                                state.split_layer = LayerType::Processing;
+                            }
+                        }
                     }
                 });
             });
             ui.separator();
+
+            // —— 拆线对话框 ——
+            if let Some((sp_in, sp_out)) = state.split_pending {
+                let in_blk = genome
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == sp_in)
+                    .map(|n| node_block(n));
+                let out_blk = genome
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == sp_out)
+                    .map(|n| node_block(n));
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("拆线 {}→{}", sp_in, sp_out)).strong());
+                    ui.separator();
+                    ui.label("目标 block:");
+                    ui.add(
+                        egui::DragValue::new(&mut state.split_block)
+                            .range(-31..=31)
+                            .speed(1),
+                    );
+                    // 快捷预设按钮
+                    if let Some(blk) = in_blk {
+                        if ui
+                            .small_button(&format!("B{}", blk))
+                            .on_hover_text("源节点 block")
+                            .clicked()
+                        {
+                            state.split_block = blk;
+                        }
+                    }
+                    if let Some(blk) = out_blk {
+                        if ui
+                            .small_button(&format!("B{}", blk))
+                            .on_hover_text("目标节点 block")
+                            .clicked()
+                        {
+                            state.split_block = blk;
+                        }
+                    }
+                    if let (Some(a), Some(b)) = (in_blk, out_blk) {
+                        let mid = a + (b - a) / 2;
+                        if mid != a && mid != b {
+                            if ui
+                                .small_button(&format!("B{}", mid))
+                                .on_hover_text("中间 block")
+                                .clicked()
+                            {
+                                state.split_block = mid;
+                            }
+                        }
+                    }
+                    ui.separator();
+                    ui.label("层:");
+                    ui.selectable_value(&mut state.split_layer, LayerType::Processing, "Proc");
+                    ui.selectable_value(&mut state.split_layer, LayerType::Output, "Out");
+                    ui.separator();
+                    if ui
+                        .button("确认拆线")
+                        .on_hover_text("插入新节点，等价于原连线")
+                        .clicked()
+                    {
+                        action.split_edge =
+                            Some((sp_in, sp_out, state.split_block, state.split_layer));
+                        state.split_pending = None;
+                        state.selected_edge = None;
+                    }
+                    if ui.button("取消").clicked() {
+                        state.split_pending = None;
+                    }
+                });
+                ui.separator();
+            }
 
             let available = ui.available_size();
             let canvas_w = available.x.max(400.0);
@@ -535,7 +730,7 @@ pub fn render_force_graph_window(
             }
 
             // 处理交互（拖动节点 / 平移画布 / 缩放 / 右键 pinned）
-            handle_interaction(state, &response, rect);
+            handle_interaction(state, genome, &response, rect);
 
             // 每帧步进：alpha 留底，永不停止
             let iters = (10.0_f64 * (36.0 / state.positions.len().max(1) as f64).sqrt())
@@ -605,14 +800,19 @@ pub fn render_force_graph_window(
             draw_legend(&painter, rect);
         });
 
-    close
+    action
 }
 
 // ---------------------------------------------------------------------------
 // 交互
 // ---------------------------------------------------------------------------
 
-fn handle_interaction(state: &mut ForceGraphState, response: &egui::Response, rect: egui::Rect) {
+fn handle_interaction(
+    state: &mut ForceGraphState,
+    genome: &Genome,
+    response: &egui::Response,
+    rect: egui::Rect,
+) {
     let cc = rect.center();
     let canvas_center = cc + state.offset;
     let scale = state.scale;
@@ -623,6 +823,23 @@ fn handle_interaction(state: &mut ForceGraphState, response: &egui::Response, re
             (sp.y - canvas_center.y) / scale,
         )
     };
+
+    // === 左键单击选中（无拖拽）：节点 > 边 > 空白取消 ===
+    if response.clicked_by(egui::PointerButton::Primary) {
+        if let Some(sp) = response.interact_pointer_pos() {
+            if let Some(id) = pick_node(state, sp, to_screen) {
+                state.selected_node = Some(id);
+                state.selected_edge = None;
+            } else if let Some(edge) = pick_edge(state, genome, sp, to_screen) {
+                state.selected_node = None;
+                state.selected_edge = Some(edge);
+            } else {
+                // 点击空白：取消选中
+                state.selected_node = None;
+                state.selected_edge = None;
+            }
+        }
+    }
 
     // === 右键节点：切换 pinned（locked 节点不响应：始终硬钉死）===
     if response.clicked_by(egui::PointerButton::Secondary) {
@@ -718,6 +935,47 @@ fn pick_node(
         }
     }
     best.map(|(id, _)| id)
+}
+
+/// 点到线段距离的连线选中（屏幕坐标），返回 (in_node, out_node)
+fn pick_edge(
+    state: &ForceGraphState,
+    genome: &Genome,
+    screen_pos: egui::Pos2,
+    to_screen: impl Fn(egui::Pos2) -> egui::Pos2,
+) -> Option<(usize, usize)> {
+    let threshold = 5.0_f32;
+    let mut best: Option<((usize, usize), f32)> = None;
+    for conn in &genome.connections {
+        if let (Some(pa), Some(pb)) = (
+            state.positions.get(&conn.in_node),
+            state.positions.get(&conn.out_node),
+        ) {
+            let a = to_screen(*pa);
+            let b = to_screen(*pb);
+            let dist = point_to_segment_dist(screen_pos, a, b);
+            if dist < threshold {
+                match best {
+                    None => best = Some(((conn.in_node, conn.out_node), dist)),
+                    Some((_, bd)) if dist < bd => {
+                        best = Some(((conn.in_node, conn.out_node), dist));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    best.map(|(ids, _)| ids)
+}
+
+/// 判断节点是否可从基因组删除（Input/Output 为硬约束不可删）
+fn is_node_deletable(node: &NodeGene) -> bool {
+    !matches!(node.node_type, NodeType::Input | NodeType::Output)
+}
+
+/// 判断边是否可从基因组删除（涉及 I/O 且通过硬约束校验的边不可删）
+fn is_edge_deletable(conn: &ConnectionGene, nodes: &[NodeGene]) -> bool {
+    is_connection_deletable(nodes, conn.in_node, conn.out_node)
 }
 
 // ---------------------------------------------------------------------------
@@ -922,6 +1180,26 @@ fn draw_connections(
             draw_arrowhead(painter, a, b, scaled_base, arrow_len, color);
         }
     }
+
+    // selected 边高亮：金色加粗描边覆盖在最上层
+    if let Some((sel_in, sel_out)) = state.selected_edge {
+        for conn in &genome.connections {
+            if conn.in_node == sel_in && conn.out_node == sel_out {
+                if let (Some(pa), Some(pb)) = (
+                    state.positions.get(&conn.in_node),
+                    state.positions.get(&conn.out_node),
+                ) {
+                    let a = to_screen(*pa);
+                    let b = to_screen(*pb);
+                    let hl_width = 4.5;
+                    let hl_color = egui::Color32::from_rgb(255, 200, 50);
+                    painter.line_segment([a, b], egui::Stroke::new(hl_width, hl_color));
+                    draw_arrowhead(painter, a, b, hl_width, hl_width * 2.0, hl_color);
+                }
+                break;
+            }
+        }
+    }
 }
 
 /// 在连线 out_node 端绘制小三角箭头，指示信号流向
@@ -992,6 +1270,21 @@ fn draw_nodes(
                     sp,
                     r + 3.0,
                     egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 220, 80)),
+                );
+            }
+
+            // selected 节点：金色发光外圈
+            if state.selected_node == Some(node.id) {
+                painter.circle_stroke(
+                    sp,
+                    r + 5.0,
+                    egui::Stroke::new(2.5, egui::Color32::from_rgb(255, 200, 50)),
+                );
+                // 半透明填充增强选中感
+                painter.circle_filled(
+                    sp,
+                    r + 3.0,
+                    egui::Color32::from_rgba_premultiplied(255, 200, 50, 40),
                 );
             }
         }
@@ -1287,7 +1580,7 @@ fn draw_legend(painter: &egui::Painter, rect: egui::Rect) {
     painter.text(
         egui::pos2(rect.right() - 6.0, y),
         egui::Align2::RIGHT_CENTER,
-        "左键拖节点 / 空白拖画布 / 滚轮缩放 / 右键节点切换钉住",
+        "左键单击选中 / 拖节点 / 空白拖画布 / 滚轮缩放 / 右键节点切换钉住",
         egui::FontId::proportional(9.0),
         egui::Color32::from_gray(140),
     );

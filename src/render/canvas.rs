@@ -466,7 +466,7 @@ impl WorldCanvas {
                 let world_y = (mouse_in_canvas.y - self.offset.y) / self.scale;
 
                 // 缩放
-                let zoom_factor = if scroll_delta > 0.0 { 1.1 } else { 0.9 };
+                let zoom_factor = if scroll_delta > 0.0 { 1.05 } else { 0.95 };
                 let new_scale = (self.scale * zoom_factor).clamp(0.1, 10.0);
 
                 // 调整偏移，使鼠标位置对应的世界坐标不变

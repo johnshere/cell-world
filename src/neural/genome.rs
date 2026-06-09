@@ -268,7 +268,7 @@ fn conn_counts_per_node(connections: &[ConnectionGene]) -> HashMap<usize, usize>
 /// - 非 I/O 端点直接放行
 /// release 与 debug 均生效
 #[inline]
-fn validate_io_edge(nodes: &[NodeGene], from_id: usize, to_id: usize) -> bool {
+pub(crate) fn validate_io_edge(nodes: &[NodeGene], from_id: usize, to_id: usize) -> bool {
     use super::block;
     let from_node = nodes.iter().find(|n| n.id == from_id);
     let to_node = nodes.iter().find(|n| n.id == to_id);
@@ -297,6 +297,26 @@ fn validate_io_edge(nodes: &[NodeGene], from_id: usize, to_id: usize) -> bool {
         }
     }
     true
+}
+
+/// 力导图视角：判断连接是否可从基因组中删除
+/// - 涉及 Input/Output 且通过硬约束校验的连接不可删除（28 条必要 I/O 边）
+/// - 非 I/O 边和非合规 I/O 边均可删除
+/// - 孤儿边（端点不在 nodes 中）可删除
+#[inline]
+pub(crate) fn is_connection_deletable(nodes: &[NodeGene], from_id: usize, to_id: usize) -> bool {
+    let from_node = nodes.iter().find(|n| n.id == from_id);
+    let to_node = nodes.iter().find(|n| n.id == to_id);
+    let (Some(fnode), Some(tnode)) = (from_node, to_node) else {
+        return true; // orphan edge
+    };
+    let involves_io =
+        matches!(fnode.node_type, NodeType::Input) || matches!(tnode.node_type, NodeType::Output);
+    if involves_io {
+        !validate_io_edge(nodes, from_id, to_id) // deletable only if invalid
+    } else {
+        true // non-I/O edges always deletable
+    }
 }
 
 /// 反向校验：已有边是否涉及 I/O 端点且违反硬约束（用于清理历史违规边）
@@ -1355,6 +1375,65 @@ impl Genome {
     }
 
     /// I/O 硬约束全局修复（orchestrator）：
+    /// 力导图手动拆线：在指定连接上插入新节点（用户自选 block 和 layer）
+    /// - 旧连接 A→B 被禁用
+    /// - 创建新节点 X（直读 pass-through：decay=0, threshold=0, refractory=0），block 和 layer 由调用方指定
+    /// - 创建 A→X（weight=1.0）和 X→B（weight=旧连接的 weight），通过 I/O 硬约束校验
+    /// - 若连接不存在或已禁用，返回 false 不做任何修改
+    pub fn split_connection_with_block(
+        &mut self,
+        in_node: usize,
+        out_node: usize,
+        block: i8,
+        layer: LayerType,
+    ) -> bool {
+        let idx = match self
+            .connections
+            .iter()
+            .position(|c| c.in_node == in_node && c.out_node == out_node)
+        {
+            Some(i) => i,
+            None => return false,
+        };
+        if !self.connections[idx].enabled {
+            return false;
+        }
+
+        let old = self.connections[idx].clone();
+        self.connections[idx].enabled = false;
+
+        let new_id = self.next_node_id;
+        self.next_node_id += 1;
+        self.nodes.push(NodeGene {
+            id: new_id,
+            node_type: NodeType::Block(block),
+            layer,
+            decay: 0.0,
+            threshold: 0.0,
+            refractory_period: 0,
+        });
+
+        // A → X, weight=1.0
+        if validate_io_edge(&self.nodes, old.in_node, new_id) {
+            self.connections.push(ConnectionGene {
+                in_node: old.in_node,
+                out_node: new_id,
+                weight: 1.0,
+                enabled: true,
+            });
+        }
+        // X → B, weight=旧权重
+        if validate_io_edge(&self.nodes, new_id, old.out_node) {
+            self.connections.push(ConnectionGene {
+                in_node: new_id,
+                out_node: old.out_node,
+                weight: old.weight,
+                enabled: true,
+            });
+        }
+        true
+    }
+
     /// Phase 1 → 删除所有违规 I/O 边（block/layer 不符）
     /// Phase 2 → 清理死 Block 节点
     /// Phase 3 → 修复 I/O 孤点（无有效启用线则补）

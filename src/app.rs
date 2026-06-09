@@ -71,6 +71,8 @@ pub struct CellWorldApp {
     snapshot_capture_rx: Option<mpsc::Receiver<WorldSnapshot>>,
     // 优势种秒级同步节拍（auto_save_dominant + 推送 store 列表给 sim）
     last_dominant_sync: std::time::Instant,
+    /// 上次同步到 sim 线程的 auto_spawn_templates 集合哈希
+    last_auto_spawn_hash: u64,
 }
 
 impl CellWorldApp {
@@ -166,6 +168,7 @@ impl CellWorldApp {
             snapshot_capture_rx: None,
             // 初始倒推 1.1s，保证启动后第一帧立即触发首次同步
             last_dominant_sync: now - std::time::Duration::from_millis(1100),
+            last_auto_spawn_hash: 0,
         }
     }
 }
@@ -1917,20 +1920,33 @@ impl eframe::App for CellWorldApp {
             }
         }
 
-        // 基因库自动投放：按配置间隔为勾选的模板各投放1个生物（暂停时跳过）
-        if !self.paused
-            && !self.panel.auto_spawn_templates.is_empty()
-            && self.panel.last_auto_spawn.elapsed() >= std::time::Duration::from_secs(3)
+        // 检测面板 auto_spawn_templates 勾选变化，同步模板基因组到 sim 线程
         {
-            self.panel.last_auto_spawn = std::time::Instant::now();
-            for name in self.panel.auto_spawn_templates.iter() {
-                if let Some(template) = self.store.get(name) {
-                    self.sim.send(SimCommand::SpawnFromTemplate(
-                        template.genome.clone(),
-                        template.initial_energy,
-                        template.generation.unwrap_or(0),
-                    ));
-                }
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            let mut items: Vec<&String> = self.panel.auto_spawn_templates.iter().collect();
+            items.sort();
+            for item in items {
+                item.hash(&mut hasher);
+            }
+            let current_hash = hasher.finish();
+            if current_hash != self.last_auto_spawn_hash {
+                self.last_auto_spawn_hash = current_hash;
+                let templates: Vec<(crate::neural::Genome, f64, usize)> = self
+                    .panel
+                    .auto_spawn_templates
+                    .iter()
+                    .filter_map(|name| self.store.get(name))
+                    .map(|t| {
+                        (
+                            t.genome.clone(),
+                            t.initial_energy,
+                            t.generation.unwrap_or(0),
+                        )
+                    })
+                    .collect();
+                self.sim
+                    .send(SimCommand::UpdateAutoSpawnTemplates(templates));
             }
         }
 
@@ -1978,6 +1994,15 @@ impl eframe::App for CellWorldApp {
         if let Some(name) = panel_action.delete_template {
             self.store.delete(&name);
             self.panel.reset_template_selection();
+        }
+
+        // 处理更新模板基因组（力导图删除节点/边后的回写）
+        if let Some((name, new_genome)) = panel_action.update_template_genome {
+            if let Some(template) = self.store.templates().iter().find(|t| t.name == name) {
+                let mut updated = template.clone();
+                updated.genome = new_genome;
+                let _ = self.store.save(updated);
+            }
         }
 
         // 保存种族代表基因（从快照中查找）

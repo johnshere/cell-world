@@ -112,6 +112,8 @@ pub struct World {
 
     /// 优势种库
     pub dominant_species: Vec<DominantCandidate>,
+    /// 面板勾选的自动投放模板（genome, initial_energy, generation）
+    pub auto_spawn_templates: Vec<(Genome, f64, usize)>,
 
     /// 当前优势种检测结果缓存（每秒由 sim_thread 刷新一次，stats() 直接读取）
     pub dominant_candidate_cache: Option<DominantCandidate>,
@@ -175,6 +177,7 @@ impl World {
             clan_genomes: FxHashMap::default(),
             dominant_species: Vec::new(),
             dominant_candidate_cache: None,
+            auto_spawn_templates: Vec::new(),
             auto_spawn_timer: 0.0,
             terrain: TerrainMap::default(),
         };
@@ -381,6 +384,7 @@ impl World {
             clan_genomes,
             dominant_species,
             dominant_candidate_cache: None,
+            auto_spawn_templates: Vec::new(),
             auto_spawn_timer: 0.0,
             terrain: TerrainMap::default(),
         }
@@ -434,18 +438,16 @@ impl World {
                 if alive_count >= config.min_creatures {
                     break;
                 }
-                if !self.dominant_species.is_empty() && rng.gen_bool(0.5) {
-                    let idx = rng.gen_range(0..self.dominant_species.len());
-                    let candidate = self.dominant_species[idx].clone();
-                    // 继承优势种的代数：与手动投放保持一致（手动投放传 template.generation，
-                    // 而 auto_save_dominant 把 template.generation 设为 max_generation）
-                    self.spawn_from_template(
-                        config,
-                        &candidate.genome,
-                        config.initial_energy,
-                        candidate.max_generation,
-                    );
+                if !self.auto_spawn_templates.is_empty() {
+                    // 面板有勾选模板 → 随机选一个投放
+                    let idx = rng.gen_range(0..self.auto_spawn_templates.len());
+                    let (genome, energy, generation) = {
+                        let (g, e, gen) = &self.auto_spawn_templates[idx];
+                        (g.clone(), *e, *gen)
+                    };
+                    self.spawn_from_template(config, &genome, energy, generation);
                 } else {
+                    // 无勾选模板 → 投放随机初始生命
                     self.spawn_creature(config);
                 }
             }

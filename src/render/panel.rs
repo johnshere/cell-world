@@ -25,6 +25,8 @@ pub struct PanelAction {
     pub save_clan: Option<u64>,
     /// 重置世界（清空所有生物/粒子/痕迹，从头演化）
     pub reset_world: bool,
+    /// 更新基因库中模板的基因组（模板名, 新基因组）
+    pub update_template_genome: Option<(String, crate::neural::Genome)>,
 }
 
 /// 统计面板
@@ -56,8 +58,6 @@ pub struct StatsPanel {
     pub force_graph_state: super::force_graph::ForceGraphState,
     /// 基因库自动投放的模板名集合
     pub auto_spawn_templates: rustc_hash::FxHashSet<String>,
-    /// 上次自动投放时间
-    pub last_auto_spawn: Instant,
 }
 
 /// 目标偏好查看窗口的数据来源
@@ -139,7 +139,6 @@ impl StatsPanel {
             force_graph_genome: None,
             force_graph_state: super::force_graph::ForceGraphState::new(),
             auto_spawn_templates: FxHashSet::default(),
-            last_auto_spawn: Instant::now(),
         }
     }
 
@@ -315,7 +314,10 @@ impl StatsPanel {
         self.render_target_pref_window(ui);
 
         // 力导图弹框（独立显示）
-        self.render_force_graph_window(ui, config);
+        let force_graph_action = self.render_force_graph_window(ui, config);
+        if force_graph_action.update_template_genome.is_some() {
+            action.update_template_genome = force_graph_action.update_template_genome;
+        }
 
         ui.separator();
 
@@ -871,9 +873,10 @@ impl StatsPanel {
 
     /// 渲染力导图弹框（分组力导图可视化）
     /// `config` 用于读取力导图锚定强度配置（每次打开弹框时读取）
-    pub fn render_force_graph_window(&mut self, ui: &mut Ui, config: &Config) {
+    pub fn render_force_graph_window(&mut self, ui: &mut Ui, config: &Config) -> PanelAction {
+        let mut panel_action = PanelAction::default();
         if self.force_graph_view.is_none() {
-            return;
+            return panel_action;
         }
         // 每次打开弹框从 config 读取力导图配置（允许运行时调节）
         self.force_graph_state.h_anchor = config.force_graph_h_anchor;
@@ -893,17 +896,47 @@ impl StatsPanel {
 
         let genome = match genome.as_ref() {
             Some(g) => g,
-            None => return,
+            None => return panel_action,
         };
 
-        let close =
+        let fg_action =
             force_graph::render_force_graph_window(ui, genome, &mut self.force_graph_state, &label);
 
-        if close {
+        // 处理删除/拆线操作：修改基因组并写回
+        if fg_action.delete_node.is_some()
+            || fg_action.delete_edge.is_some()
+            || fg_action.split_edge.is_some()
+        {
+            if let Some(ref mut cur_genome) = self.force_graph_genome {
+                let mut g = cur_genome.clone();
+                if let Some(node_id) = fg_action.delete_node {
+                    g.nodes.retain(|n| n.id != node_id);
+                    g.connections
+                        .retain(|c| c.in_node != node_id && c.out_node != node_id);
+                }
+                if let Some((in_id, out_id)) = fg_action.delete_edge {
+                    g.connections
+                        .retain(|c| c.in_node != in_id || c.out_node != out_id);
+                }
+                if let Some((in_id, out_id, blk, layer)) = fg_action.split_edge {
+                    g.split_connection_with_block(in_id, out_id, blk, layer);
+                }
+                g.ensure_sorted_cache();
+                *cur_genome = g.clone();
+                // 只对基因库模板来源发起 store 更新
+                if let Some(TargetPrefSource::Template(ref name)) = source {
+                    panel_action.update_template_genome = Some((name.clone(), g));
+                }
+            }
+        }
+
+        if fg_action.close {
             self.force_graph_view = None;
             self.force_graph_genome = None;
             self.force_graph_state.reset();
         }
+
+        panel_action
     }
 
     pub fn render_selection(

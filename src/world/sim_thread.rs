@@ -83,6 +83,8 @@ pub enum SimCommand {
     ResetWorld,
     /// 主线程每秒一次推送 store 中的优势种全列表到 sim 线程
     UpdateDominantSpecies(Vec<DominantCandidate>),
+    /// 主线程推送面板勾选的自动投放模板到 sim 线程
+    UpdateAutoSpawnTemplates(Vec<(Genome, f64, usize)>),
     Shutdown,
 }
 
@@ -249,6 +251,9 @@ fn sim_loop(
                     }
                     SimCommand::UpdateDominantSpecies(list) => {
                         world.dominant_species = list;
+                    }
+                    SimCommand::UpdateAutoSpawnTemplates(templates) => {
+                        world.auto_spawn_templates = templates;
                     }
                     SimCommand::Shutdown => return,
                 },

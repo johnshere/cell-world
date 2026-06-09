@@ -1,7 +1,7 @@
 # 初始模拟速度
 initial_speed = 10.0
 # 最小生物数量（低于此值自动补充）
-min_creatures = 45
+min_creatures = 50
 # 最大生物数量（超过时禁止繁殖，0=不限制）
 max_creatures = 999
 # 初始能量
@@ -19,11 +19,11 @@ volcano_interval = 25.0
 # 火山喷射半径
 volcano_radius = 2500.0
 # 火山粒子半径分布倾角（负值让外围更密，默认-0.3）
-volcano_spread_bias = -0.75
+volcano_spread_bias = -1.0
 # 每次喷发粒子数
-volcano_count = 50
+volcano_count = 45
 # 火山粒子能量
-volcano_particle_energy = 200.0
+volcano_particle_energy = 150.0
 
 # === 正弦周期 ===
 # 火山间隔正弦周期（秒）
@@ -40,23 +40,23 @@ volcano_decay_rate = 0.001
 
 # === 落地杀伤 ===
 # 火山落地杀伤半径
-volcano_kill_radius = 10.0
+volcano_kill_radius = 20.0
 # 落地杀伤系数
-landing_damage_multiplier = 0.0
+landing_damage_multiplier = 0.3
 
 # === 熔岩流 ===
 # 每次火山喷发附带的熔岩流粒子数
-lava_count = 0
+lava_count = 5
 # 熔岩粒子死亡时分裂第二个子粒子的概率
-lava_spread_probability = 0.1
+lava_spread_probability = 0.2
 # 最大链式代数
-lava_max_chain_depth = 1
+lava_max_chain_depth = 10
 # 每个粒子贡献的等效液面高度
 lava_level_per_particle = 5.0
 # 熔岩粒子周期性杀伤基础间隔（秒，火山口处）
-lava_kill_base_interval = 0.7
+lava_kill_base_interval = 0.5
 # 距离对杀伤周期的放大系数
-lava_kill_distance_scale = 4.5
+lava_kill_distance_scale = 2.0
 # 熔岩粒子独立衰减率（/秒）
 lava_decay_rate = 0.005
 # 溢流最大区块跳跃数
@@ -70,7 +70,7 @@ eye_scan_speed = 280.0
 # 嘴巴冷却时间（秒）
 mouth_cooldown = 0.5
 # 咬合能量转移率
-bite_transfer_rate = 0.65
+bite_transfer_rate = 0.85
 
 # === 散热 ===
 # 能量分母（nearby_energy 归一化）
@@ -134,11 +134,11 @@ neural_backend = "auto"
 neural_tick_rate = 600.0
 # 变异率（全局常量，不再是基因组内可演化基因）
 # base/block 两类变异共享此触发概率
-mutation_rate = 0.1
+mutation_rate = 0.3
 # 无性繁殖权重变异率缩放系数（仅作用于权重微调）
 # 无性繁殖中其余 7 类创新变异（add_connection/add_node/Layer/Block/block_probs/learning/physio/enable切换）完全禁用
 # 默认 0.4 ≈ 近似克隆；1.0=无差异化，0.0=完全克隆
-asexual_mutation_scale = 0.1
+asexual_mutation_scale = 0.3
 base_metabolism = 0.025
 max_speed = 20.0
 meteorite_interval = 0.0
@@ -179,7 +179,7 @@ follow_optimal_angle = 0.5235987755982988
 follow_angle_width = 0.4363323129985824
 follow_max_level = 1.0
 follow_update_interval = 0.25
-particle_min_energy = 150.0
+particle_min_energy = 85.0
 
 # === 力导图 ===
 # 力导图水平锚定强度（forceX strength，左右半球横向拉扯力）
